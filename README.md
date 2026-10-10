@@ -2,7 +2,7 @@
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
 
-- Design and requirements: `openspec/changes/macos-texture-vertical-slice/`
+- Design and requirements: `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/`
 - Measurements: `benchmarks.md`
 - Limitations, licenses and what iOS can reuse: `limitations.md`
 

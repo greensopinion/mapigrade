@@ -1,6 +1,6 @@
 # Limitations and findings of the macOS vertical slice
 
-Measured results are in `benchmarks.md`. The design and its amendments are in `openspec/changes/macos-texture-vertical-slice/design.md`.
+Measured results are in `benchmarks.md`. The design and its amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md`.
 
 ## App bundle size
 
