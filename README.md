@@ -13,7 +13,7 @@ packages/flutter_map_maplibre_texture/   Flutter plugin (macOS only)
   lib/src/texture/                       Dart API: MapTextureController, MapTextureView, @Native bindings
   lib/src/layer/                         flutter_map layer (later change; empty)
   src/core/                              C++ core: map thread, commands, buffer state, C ABI (no Apple dependencies)
-  macos/flutter_map_maplibre_texture/    Swift package: Metal render target, FlutterTexture, plugin class
+  darwin/flutter_map_maplibre_texture/   Swift package: Metal render target, FlutterTexture, plugin class
   test/                                  Dart unit tests; test/native/ C++ unit tests for the core
 example/                                 macOS example app, integration tests, benchmark, color check
 scripts/build_maplibre_ffi.sh            builds the pinned MapLibre Native FFI
@@ -159,7 +159,7 @@ The window shows a map of San Francisco.
 
 ## Packaging
 
-`packages/flutter_map_maplibre_texture/macos/flutter_map_maplibre_texture/Package.swift` declares `MapLibreNativeC.xcframework` as a binary target (through a symlink into `third_party/`), so Xcode links the framework into the app, embeds it in `Contents/Frameworks/` and signs it. The plugin's C++ core (`src/core/`, also a symlink) and the Metal bridge are compiled into the app executable, which exports the `map_texture_*` functions that Dart binds with `@Native`.
+`packages/flutter_map_maplibre_texture/darwin/flutter_map_maplibre_texture/Package.swift` declares `MapLibreNativeC.xcframework` as a binary target (through a symlink into `third_party/`), so Xcode links the framework into the app, embeds it in `Contents/Frameworks/` and signs it. The plugin's C++ core (`src/core/`, also a symlink) and the Metal bridge are compiled into the app executable, which exports the `map_texture_*` functions that Dart binds with `@Native`.
 
 The example app is arm64 only (`ARCHS = arm64` in `example/macos/Runner/Configs/AppInfo.xcconfig`), because the FFI preset is arm64 only.
 

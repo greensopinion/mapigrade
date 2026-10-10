@@ -9,7 +9,7 @@
 //
 // The core in this directory has no platform dependencies. Each platform
 // implements RenderTarget and the two factory functions at the end of this
-// file (macOS: macos/.../MapTextureMetal.mm).
+// file (macOS and iOS: darwin/.../MapTextureMetal.mm).
 #pragma once
 
 #include <cstdint>

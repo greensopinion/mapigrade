@@ -22,3 +22,4 @@ flutter:
     platforms:
       macos:
         pluginClass: FlutterMapMaplibreTexturePlugin
+        sharedDarwinSource: true
