@@ -1,6 +1,6 @@
 ## Why
 
-Maintaining a vector map renderer in Dart has a high cost. The CPU version draws with the Flutter canvas. The GPU version adds a dependency on `flutter_gpu`, which may take years to reach GA or may never reach it. We want to find out whether MapLibre Native, called through MapLibre Native FFI, can render the base map on the GPU into a Flutter `Texture` widget, with no platform view and no CPU pixel readback. If it can, Flutter can draw `flutter_map` overlays on top of it. This change is the first vertical slice, on macOS, because the Metal bridge built for macOS also applies to iOS, and macOS has the shortest build-and-run loop. Background and the full staged plan: `docs/maplibre-native-ffi-flutter-texture-poc.md`.
+Maintaining a vector map renderer in Dart has a high cost. The CPU version draws with the Flutter canvas. The GPU version adds a dependency on `flutter_gpu`, which may take years to reach GA or may never reach it. We want to find out whether MapLibre Native, called through MapLibre Native FFI, can render the base map on the GPU into a Flutter `Texture` widget, with no platform view and no CPU pixel readback. If it can, Flutter can draw `flutter_map` overlays on top of it. This change is the first vertical slice, on macOS, because the Metal bridge built for macOS also applies to iOS, and macOS has the shortest build-and-run loop. Background and the full staged plan: `docs/maplibre-native-ffi-flutter-texture-concept.md`.
 
 ## What Changes
 

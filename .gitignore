@@ -1,0 +1,6 @@
+# MapLibre Native FFI checkout and build output (scripts/build_maplibre_ffi.sh)
+/third_party/
+
+.DS_Store
+.dart_tool/
+build/

@@ -1,6 +1,6 @@
 ## Context
 
-This repository contains only the exploration brief (`docs/maplibre-native-ffi-flutter-texture-poc.md`). It has no code yet. See proposal.md for motivation and scope; specs/map-texture/spec.md for requirements.
+The concept, decisions and staged plan are in `docs/maplibre-native-ffi-flutter-texture-concept.md`. See proposal.md for motivation and scope; specs/map-texture/spec.md for requirements.
 
 Facts that constrain the design, checked in MapLibre Native FFI at commit `dd97d20f8fab6990cd87c13f091ce00e662707bd` (headers under `include/maplibre_native_c/`):
 
@@ -65,6 +65,20 @@ There are three buffers so that MapLibre never writes to the buffer Flutter disp
 
 *Fallback (D3b):* if `set_target` with an unchanged size is expensive, for example if it causes a `MLN_RENDER_RESULT_SIZE_PENDING` cycle on every frame, the session keeps one borrowed `MTLTexture` and each frame is copied into the free pixel buffer with an `MTLBlitCommandEncoder`. That is one GPU copy per frame, which the spec permits. Task 3.3 measures `set_target` before the rest of the bridge is built on it.
 
+*Decision (task 3.3, 2026-10-09): D3b.* Measured with the MapLibre demo style at 800x600 logical pixels, pixel ratio 2 (1600x1200 physical), debug build, Apple M2 Max:
+
+| | D3 (`set_target` to a free buffer each frame) | D3b (one render texture, blit to a free buffer) |
+| --- | --- | --- |
+| `set_target` duration | 7.0 µs average, 893 µs maximum (over 6,948 calls) | called only on resize |
+| `MLN_RENDER_RESULT_SIZE_PENDING` after a same-size `set_target` | 0 of 6,948 | not applicable |
+| `needs_repaint` | true after 6,980 of 7,005 frames | true during load, then rendering stops |
+| frames rendered with a static camera | about 880 per second, continuously | 348 during style and tile load, then 0 |
+| `MLN_RUNTIME_EVENT_MAP_IDLE` | about 3 per second | once |
+| `render_update` | 1.13 ms average | 1.03 ms average |
+| copy plus `waitUntilCompleted` | none | 331 µs average |
+
+`set_target` itself is cheap and never caused `SIZE_PENDING`, but with D3 the renderer reported `needs_repaint` after every frame and the map published a new render update after every frame, so the map never stopped rendering. Removing our `mln_map_request_repaint()` call on `needs_repaint` didn't change that. With the session rendering into one texture and no `set_target` calls, rendering stopped after the initial load. D3 therefore violates the "Rendering on demand" requirement, so we chose D3b. The buffer roles (latest, presented, free) and D4 are unchanged; the free buffer is now the copy destination instead of the render target.
+
 *Alternative:* a session-owned texture with `acquire_frame`/`release_frame` plus a blit. It has the same copy as D3b and adds acquire/release states that block `render_update` while acquired. We rejected it in favor of D3b.
 
 *Alternative:* the Metal surface target (`CAMetalLayer`). Flutter's texture registry doesn't accept a layer, and using a layer means a platform view. We rejected it.
@@ -72,6 +86,10 @@ There are three buffers so that MapLibre never writes to the buffer Flutter disp
 ### D4. Frame handoff to Flutter
 
 The bridge implements `FlutterTexture`. `copyPixelBuffer` runs on Flutter's raster thread. It reads the **latest** index atomically, marks that buffer as **presented**, and returns it with +1 retain, which Flutter releases. After publishing a frame, the map thread calls `textureFrameAvailable:` on the texture registry. If that method requires the platform thread, the call is dispatched to the main queue. Task 3.4 checks the macOS embedder's threading contract.
+
+*Result (task 3.4, Flutter 3.47.5):* `textureFrameAvailable:` requires the platform thread, so the bridge dispatches it to the main queue with `dispatch_async`. `FlutterTexture.h` states the platform-thread requirement for `registerTexture:` and `unregisterTexture:` only, but the implementation in the engine source (`engine/src/flutter` in the Flutter repository) calls `-[FlutterEngine markTextureFrameAvailable:]` → `FlutterEngineMarkExternalTextureFrameAvailable` → `EmbedderEngine::MarkTextureFrameAvailable` → `Shell::OnPlatformViewMarkTextureFrameAvailable`, which begins with `FML_DCHECK(task_runners_.GetPlatformTaskRunner()->RunsTasksOnCurrentThread())` (`shell/common/shell.cc:1320`). The prebuilt engines compile DCHECKs out, so a call from the map thread does not fail visibly; it would be an unsynchronized call into the shell. We did not run the test with thread assertions enabled, because that needs a locally built debug engine. We accepted the engine source as the evidence for this task (2026-10-09).
+
+*Amendment (2026-10-09, found by the rapid-camera integration test):* the map thread also waits until Flutter has taken the **latest** frame before it renders the next one, and `copyPixelBuffer` signals the wake source when it takes a frame. Without this, during camera changes the demo style kept `needs_repaint` true and the map thread rendered 3,607 frames in 3 s while Flutter displayed 361. With it, it rendered 361 for 360 displayed. This also coalesces camera updates to the display rate.
 
 A buffer is free when it is neither **latest** nor **presented**. If no buffer is free (Flutter hasn't sampled since the last two frames), the map thread skips rendering and retries on the next wake. It doesn't overwrite a buffer Flutter may sample.
 

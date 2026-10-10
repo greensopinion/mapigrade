@@ -1,0 +1,24 @@
+name: flutter_map_maplibre_texture
+description: "Displays a MapLibre Native map in a Flutter Texture widget, rendered on the GPU through MapLibre Native FFI."
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+  flutter: '>=3.47.0'
+
+dependencies:
+  ffi: ^2.1.4
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      macos:
+        pluginClass: FlutterMapMaplibreTexturePlugin
