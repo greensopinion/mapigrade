@@ -36,7 +36,7 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   MapTextureController? _controller;
   final _subscriptions = <StreamSubscription<Object>>[];
   late final Ticker _panTicker = createTicker(_onPanTick);
@@ -50,6 +50,23 @@ class _MapScreenState extends State<MapScreen>
   int _framesInLastSecond = 0;
   int _mapFps = 0;
   Timer? _fpsTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  // The plugin handles memory warnings natively; this prints the map's stats
+  // afterwards, so the reduction shows in the log.
+  @override
+  void didHaveMemoryPressure() {
+    Timer(const Duration(milliseconds: 500), () {
+      final controller = _controller;
+      if (controller == null || controller.isDisposed) return;
+      debugPrint('memory pressure: ${controller.stats()}');
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -79,6 +96,7 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _panTicker.dispose();
     _fpsTimer?.cancel();
     for (final s in _subscriptions) {
@@ -184,7 +202,13 @@ class _MapScreenState extends State<MapScreen>
     return Scaffold(
       body: Stack(children: [
         Positioned.fill(child: MapTextureView(controller: _controller!)),
-        Positioned(top: 12, left: 12, child: _buildPanel(context)),
+        // SafeArea keeps the panel clear of the iPhone status bar and
+        // Dynamic Island; on macOS the insets are zero.
+        Positioned(
+          top: 12,
+          left: 12,
+          child: SafeArea(child: _buildPanel(context)),
+        ),
       ]),
     );
   }

@@ -20,6 +20,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      ios:
+        pluginClass: FlutterMapMaplibreTexturePlugin
+        sharedDarwinSource: true
       macos:
         pluginClass: FlutterMapMaplibreTexturePlugin
         sharedDarwinSource: true

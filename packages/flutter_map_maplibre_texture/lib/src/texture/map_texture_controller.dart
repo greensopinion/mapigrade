@@ -85,7 +85,9 @@ class MapTextureStats {
         copyMax = Duration(microseconds: s.copyMaxNs ~/ 1000),
         presentedFrames = s.presentedFrames,
         renderUpdateAvailableEvents = s.renderUpdateAvailableEvents,
-        needsRepaintFrames = s.needsRepaintFrames;
+        needsRepaintFrames = s.needsRepaintFrames,
+        pausedRenders = s.pausedRenders,
+        memoryReductions = s.memoryReductions;
 
   final int renderedFrames;
 
@@ -113,6 +115,14 @@ class MapTextureStats {
   /// Rendered frames after which the renderer reported `needs_repaint`.
   final int needsRepaintFrames;
 
+  /// Renders deferred because rendering was paused, for example while an iOS
+  /// app is in the background.
+  final int pausedRenders;
+
+  /// Times the renderer was asked to release cached resources, for example
+  /// after an iOS memory warning.
+  final int memoryReductions;
+
   @override
   String toString() =>
       'MapTextureStats(rendered: $renderedFrames, presented: $presentedFrames, '
@@ -121,7 +131,8 @@ class MapTextureStats {
       'avg ${_avg(renderUpdateTotal, renderUpdateCount)} max $renderUpdateMax, '
       'copy: $copyCount avg ${_avg(copyTotal, copyCount)} max $copyMax, '
       'update_available: '
-      '$renderUpdateAvailableEvents, needs_repaint: $needsRepaintFrames)';
+      '$renderUpdateAvailableEvents, needs_repaint: $needsRepaintFrames, '
+      'paused: $pausedRenders, memory_reductions: $memoryReductions)';
 
   static String _avg(Duration total, int count) => count == 0
       ? '-'

@@ -66,6 +66,10 @@ final class MapTextureStatsStruct extends Struct {
   external int renderUpdateAvailableEvents;
   @Int64()
   external int needsRepaintFrames;
+  @Int64()
+  external int pausedRenders;
+  @Int64()
+  external int memoryReductions;
 }
 
 typedef MapTextureEventCallback = Void Function(
@@ -110,3 +114,9 @@ external void mapTextureEventFree(Pointer<MapTextureEventStruct> event);
 
 @Native<Int32 Function()>(symbol: 'map_texture_process_thread_count')
 external int mapTextureProcessThreadCount();
+
+@Native<Void Function(Int32)>(symbol: 'map_texture_set_paused_for_testing')
+external void mapTextureSetPausedForTesting(int paused);
+
+@Native<Void Function()>(symbol: 'map_texture_reduce_memory_use_for_testing')
+external void mapTextureReduceMemoryUseForTesting();

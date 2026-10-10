@@ -8,7 +8,8 @@ import PackageDescription
 let package = Package(
     name: "flutter_map_maplibre_texture",
     platforms: [
-        .macOS("14.3")
+        .macOS("14.3"),
+        .iOS("15.5"),
     ],
     products: [
         .library(name: "flutter-map-maplibre-texture", targets: ["flutter_map_maplibre_texture"])

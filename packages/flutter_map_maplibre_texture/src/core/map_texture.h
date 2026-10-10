@@ -16,6 +16,7 @@
 #include "command_queue.h"
 #include "map_texture_api.h"
 #include "mln.h"
+#include "render_gate.h"
 #include "render_target.h"
 
 namespace map_texture {
@@ -36,6 +37,14 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void LoadStyleJson(std::string json);
   void SetCamera(const Camera& camera);
   void Resize(const Viewport& viewport);
+  // Asks the renderer to release cached resources it can rebuild (design
+  // D14).
+  void ReduceMemoryUse();
+
+  // Any thread except the map thread. While paused, the map thread submits no
+  // GPU work; pausing returns after a render in progress has ended (design
+  // D13). Resuming renders a pending frame with the latest camera.
+  void SetPaused(bool paused);
 
   // Stops the map thread after it has destroyed the session, map and
   // runtime, then unregisters the texture. After this returns no events are
@@ -75,6 +84,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::unique_ptr<RenderTarget> target_;
   CommandQueue commands_;
   BufferState buffers_;
+  RenderGate gate_;
 
   std::thread thread_;
   std::mutex init_mutex_;
@@ -105,5 +115,15 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::mutex stats_mutex_;
   map_texture_stats stats_{};
 };
+
+// Pauses or resumes every live map, and maps created while paused start
+// paused. The platform calls this when the application can't use the GPU, for
+// example while an iOS app is in the background. Defined in
+// map_texture_api.cpp.
+void SetAllPaused(bool paused);
+
+// Queues ReduceMemoryUse() for every live map, for example after an iOS
+// memory warning. Defined in map_texture_api.cpp.
+void ReduceAllMemoryUse();
 
 }  // namespace map_texture

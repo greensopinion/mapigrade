@@ -21,6 +21,9 @@ std::unordered_map<int64_t, std::shared_ptr<MapTexture>>& Registry() {
   return *registry;
 }
 int64_t next_handle = 1;
+// Whether rendering is paused for the whole process; guarded by
+// registry_mutex.
+bool all_paused = false;
 
 std::shared_ptr<MapTexture> Find(int64_t handle) {
   std::lock_guard lock(registry_mutex);
@@ -29,6 +32,21 @@ std::shared_ptr<MapTexture> Find(int64_t handle) {
 }
 
 }  // namespace
+
+namespace map_texture {
+
+void SetAllPaused(bool paused) {
+  std::lock_guard lock(registry_mutex);
+  all_paused = paused;
+  for (auto& [handle, texture] : Registry()) texture->SetPaused(paused);
+}
+
+void ReduceAllMemoryUse() {
+  std::lock_guard lock(registry_mutex);
+  for (auto& [handle, texture] : Registry()) texture->ReduceMemoryUse();
+}
+
+}  // namespace map_texture
 
 extern "C" {
 
@@ -43,6 +61,9 @@ int64_t map_texture_create(double pixel_ratio,
   auto texture = MapTexture::Create(handle, pixel_ratio, callback);
   if (!texture) return MAP_TEXTURE_ERROR_CREATE_FAILED;
   std::lock_guard lock(registry_mutex);
+  // The map can't have rendered yet: its render session is attached by the
+  // first resize, which needs the handle returned here.
+  if (all_paused) texture->SetPaused(true);
   Registry()[handle] = std::move(texture);
   return handle;
 }
@@ -107,6 +128,14 @@ int32_t map_texture_dispose(int64_t handle) {
   }
   texture->Dispose();
   return MAP_TEXTURE_OK;
+}
+
+void map_texture_set_paused_for_testing(int32_t paused) {
+  map_texture::SetAllPaused(paused != 0);
+}
+
+void map_texture_reduce_memory_use_for_testing(void) {
+  map_texture::ReduceAllMemoryUse();
 }
 
 void map_texture_event_free(map_texture_event* event) {

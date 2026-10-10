@@ -1,4 +1,6 @@
-// Unit tests for CommandQueue and BufferState.
+// Unit tests for CommandQueue, BufferState and RenderGate.
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -8,12 +10,14 @@
 
 #include "buffer_state.h"
 #include "command_queue.h"
+#include "render_gate.h"
 
 using map_texture::BufferState;
 using map_texture::Camera;
 using map_texture::Command;
 using map_texture::CommandQueue;
 using map_texture::FrameInfo;
+using map_texture::RenderGate;
 using map_texture::Viewport;
 
 namespace {
@@ -212,6 +216,60 @@ void ResetFreesAllBuffers() {
   CHECK(state.AcquireFree(0) == 0);
 }
 
+void ReduceMemoryUseKeepsOrder() {
+  CommandQueue queue;
+  queue.Push(Command::StyleUrl("a"));
+  queue.Push(Command::ReduceMemoryUse());
+  queue.Push(Command::Resize({100, 100, 2}));
+  queue.Push(Command::ReduceMemoryUse());
+  queue.Push(Command::Resize({200, 100, 2}));
+  auto commands = queue.TakeAll();
+  CHECK(commands.size() == 5);
+  CHECK(commands[0].kind == Command::Kind::kStyleUrl);
+  CHECK(commands[1].kind == Command::Kind::kReduceMemoryUse);
+  CHECK(commands[2].kind == Command::Kind::kResize);
+  CHECK(commands[3].kind == Command::Kind::kReduceMemoryUse);
+  CHECK(commands[4].viewport.logical_width == 200);
+}
+
+void GateAllowsRendersUntilPaused() {
+  RenderGate gate;
+  CHECK(!gate.paused());
+  CHECK(gate.TryBeginRender());
+  gate.EndRender();
+  gate.SetPaused(true);
+  CHECK(gate.paused());
+  CHECK(!gate.TryBeginRender());
+  gate.SetPaused(false);
+  CHECK(gate.TryBeginRender());
+  gate.EndRender();
+}
+
+void PauseWaitsForRenderInProgress() {
+  RenderGate gate;
+  CHECK(gate.TryBeginRender());
+  std::atomic<bool> paused{false};
+  std::thread pauser([&] {
+    gate.SetPaused(true);
+    paused.store(true);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  CHECK(!paused.load());
+  gate.EndRender();
+  pauser.join();
+  CHECK(paused.load());
+  CHECK(!gate.TryBeginRender());
+}
+
+void PauseWithoutRenderReturnsAtOnce() {
+  RenderGate gate;
+  auto start = std::chrono::steady_clock::now();
+  gate.SetPaused(true);
+  CHECK(std::chrono::steady_clock::now() - start <
+        std::chrono::milliseconds(50));
+  CHECK(!gate.TryBeginRender());
+}
+
 }  // namespace
 
 int main() {
@@ -234,6 +292,10 @@ int main() {
       {"TwoBuffersSkipWhenNoneIsFree", TwoBuffersSkipWhenNoneIsFree},
       {"LatestPresentedPacesRendering", LatestPresentedPacesRendering},
       {"ResetFreesAllBuffers", ResetFreesAllBuffers},
+      {"ReduceMemoryUseKeepsOrder", ReduceMemoryUseKeepsOrder},
+      {"GateAllowsRendersUntilPaused", GateAllowsRendersUntilPaused},
+      {"PauseWaitsForRenderInProgress", PauseWaitsForRenderInProgress},
+      {"PauseWithoutRenderReturnsAtOnce", PauseWithoutRenderReturnsAtOnce},
   };
   for (const auto& [name, test] : tests) {
     int before = failures;

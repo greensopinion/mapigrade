@@ -1,3 +1,4 @@
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
 MAPLIBRE_FFI_COMMIT=dd97d20f8fab6990cd87c13f091ce00e662707bd
-MAPLIBRE_FFI_PRESET=macos-arm64-metal
+# The presets that make up MapLibreNativeC.xcframework, one slice each.
+MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"

@@ -1,6 +1,6 @@
 // Commands from Dart to the map thread (design D5).
 //
-// Style loads, resizes and dispose go into an ordered queue and are never
+// Style loads, resizes, memory reduction and dispose go into an ordered queue and are never
 // dropped or reordered. Consecutive resizes are coalesced so that a window drag
 // doesn't allocate a buffer set per intermediate size (D7). Camera updates go
 // into a single slot where the latest update wins.
@@ -36,7 +36,13 @@ struct Viewport {
 };
 
 struct Command {
-  enum class Kind { kStyleUrl, kStyleJson, kResize, kDispose };
+  enum class Kind {
+    kStyleUrl,
+    kStyleJson,
+    kResize,
+    kReduceMemoryUse,
+    kDispose,
+  };
 
   Kind kind;
   // The URL for kStyleUrl, the JSON document for kStyleJson.
@@ -52,6 +58,9 @@ struct Command {
   }
   static Command Resize(Viewport viewport) {
     return {Kind::kResize, {}, viewport};
+  }
+  static Command ReduceMemoryUse() {
+    return {Kind::kReduceMemoryUse, {}, {}};
   }
   static Command Dispose() { return {Kind::kDispose, {}, {}}; }
 };

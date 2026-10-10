@@ -1,4 +1,4 @@
-// macOS render target (designs D3b and D4). MapLibre renders through a
+// macOS and iOS render target (designs D3b and D4). MapLibre renders through a
 // borrowed-texture session into one private MTLTexture. Each rendered frame is
 // copied on the GPU into one of three IOSurface-backed CVPixelBuffers, wrapped
 // as MTLTextures through CVMetalTextureCache, and Flutter samples that

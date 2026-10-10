@@ -93,6 +93,16 @@ void MapTexture::Resize(const Viewport& viewport) {
   Signal();
 }
 
+void MapTexture::ReduceMemoryUse() {
+  commands_.Push(Command::ReduceMemoryUse());
+  Signal();
+}
+
+void MapTexture::SetPaused(bool paused) {
+  gate_.SetPaused(paused);
+  if (!paused) Signal();
+}
+
 void MapTexture::Dispose() {
   {
     std::lock_guard lock(callback_mutex_);
@@ -150,7 +160,7 @@ void MapTexture::Run() {
   bool stop = false;
   while (!stop) {
     bool render_now = render_pending_ && session_ != MLN_HANDLE_NULL &&
-                      !waiting_for_buffer_.load();
+                      !waiting_for_buffer_.load() && !gate_.paused();
     mln_status status = mln_runtime_pump(
         runtime_, render_now ? 0 : kIdlePumpTimeoutMs, kPumpBudgetMs);
     if (status != MLN_STATUS_OK) ReportStatus("mln_runtime_pump", status);
@@ -243,6 +253,21 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kResize:
         ApplyResize(command.viewport);
         break;
+      case Command::Kind::kReduceMemoryUse: {
+        if (session_ == MLN_HANDLE_NULL) break;
+        // This releases cached tiles and images and submits no GPU work, so
+        // it also runs while rendering is paused.
+        mln_status status = mln_render_session_reduce_memory_use(session_);
+        if (status == MLN_STATUS_OK) {
+          std::lock_guard lock(stats_mutex_);
+          ++stats_.memory_reductions;
+        } else if (status != MLN_STATUS_INVALID_STATE) {
+          // MLN_STATUS_INVALID_STATE: no renderer exists yet, so there is
+          // nothing to release.
+          ReportStatus("mln_render_session_reduce_memory_use", status);
+        }
+        break;
+      }
       case Command::Kind::kDispose:
         *stop = true;
         return;
@@ -354,6 +379,15 @@ void MapTexture::DrainEvents() {
 
 void MapTexture::MaybeRender() {
   if (!render_pending_ || session_ == MLN_HANDLE_NULL) return;
+
+  // While paused, the render stays pending; SetPaused(false) wakes the map
+  // thread to render it (design D13).
+  if (!gate_.TryBeginRender()) {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.paused_renders;
+    return;
+  }
+  RenderGateScope gate_scope(gate_);
 
   // Present() signals the wake source once Flutter takes a frame, which
   // retries this render.

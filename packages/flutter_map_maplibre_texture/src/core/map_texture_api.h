@@ -69,6 +69,11 @@ typedef struct map_texture_stats {
   int64_t render_update_available_events;
   // Rendered frames after which the renderer reported needs_repaint.
   int64_t needs_repaint_frames;
+  // Renders deferred because rendering was paused, for example while an iOS
+  // app is in the background.
+  int64_t paused_renders;
+  // Calls to mln_render_session_reduce_memory_use() that succeeded.
+  int64_t memory_reductions;
 } map_texture_stats;
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread.
@@ -103,6 +108,13 @@ MAP_TEXTURE_EXPORT void map_texture_event_free(map_texture_event* event);
 
 // The number of threads in this process, for the lifecycle test.
 MAP_TEXTURE_EXPORT int32_t map_texture_process_thread_count(void);
+
+// For tests: pause (non-zero) or resume (zero) rendering of every map, as the
+// platform does when the application enters the background or foreground.
+MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);
+// For tests: ask every map to release cached renderer resources, as the
+// platform does after a memory warning.
+MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
 
 #ifdef __cplusplus
 }

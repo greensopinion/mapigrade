@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Clones MapLibre Native FFI at the commit in scripts/maplibre_ffi.lock, builds
-# the macos-arm64-metal preset, and installs the library and headers into
-# third_party/maplibre-native-ffi/.
+# the presets listed there (or the ones given as arguments), installs each into
+# third_party/maplibre-native-ffi/<preset>/, and combines every installed
+# preset into third_party/maplibre-native-ffi/MapLibreNativeC.xcframework.
 #
-# Requires: git, Xcode with the macOS SDK, and mise (https://mise.jdx.dev).
-# The script installs CMake, Ninja, Rust and cargo-about through mise, at the
-# versions that the FFI repository's mise.toml pins.
+#   scripts/build_maplibre_ffi.sh                     # all presets
+#   scripts/build_maplibre_ffi.sh ios-arm64-metal     # one preset; the
+#                                                     # xcframework keeps the
+#                                                     # other installed slices
+#
+# Requires: git, Xcode with the macOS and iOS SDKs, and mise
+# (https://mise.jdx.dev). The script installs CMake, Ninja, Rust and
+# cargo-about through mise, at the versions that the FFI repository's mise.toml
+# pins.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +21,20 @@ source "$repo_root/scripts/maplibre_ffi.lock"
 
 src_dir="$repo_root/third_party/maplibre-native-ffi-src"
 out_dir="$repo_root/third_party/maplibre-native-ffi"
+fw_name=MapLibreNativeC
+
+read -r -a all_presets <<< "$MAPLIBRE_FFI_PRESETS"
+if [[ $# -gt 0 ]]; then
+  presets=("$@")
+else
+  presets=("${all_presets[@]}")
+fi
+for preset in "${presets[@]}"; do
+  if [[ " ${all_presets[*]} " != *" $preset "* ]]; then
+    echo "unknown preset: $preset (expected one of: ${all_presets[*]})" >&2
+    exit 1
+  fi
+done
 
 if [[ ! -d "$src_dir/.git" ]]; then
   git clone "$MAPLIBRE_FFI_REPO" "$src_dir"
@@ -44,33 +65,20 @@ with_tools() {
 # plus the vendor submodules the build needs, and the patches the FFI carries.
 "$src_dir/.mise/bin/sync-submodules"
 
-start=$(date +%s)
-with_tools cmake -S "$src_dir" --preset "$MAPLIBRE_FFI_PRESET"
-with_tools cmake --build "$src_dir/build/$MAPLIBRE_FFI_PRESET" --target install
-end=$(date +%s)
-
-rm -rf "$out_dir"
-mkdir -p "$out_dir"
-cp -R "$src_dir/build/$MAPLIBRE_FFI_PRESET/install/." "$out_dir/"
-printf '%s %s\n' "$MAPLIBRE_FFI_COMMIT" "$MAPLIBRE_FFI_PRESET" > "$out_dir/BUILD_INFO"
-
-# Wraps the dylib in a versioned macOS framework inside an xcframework, which
-# is the form Swift Package Manager accepts as a binary target. The Flutter
-# plugin links it and Xcode embeds and signs it in the app bundle.
-fw_name=MapLibreNativeC
-fw_stage="$out_dir/framework"
-fw="$fw_stage/$fw_name.framework"
-mkdir -p "$fw/Versions/A/Headers" "$fw/Versions/A/Modules" "$fw/Versions/A/Resources"
-cp "$out_dir/lib/libmaplibre-native-c.dylib" "$fw/Versions/A/$fw_name"
-install_name_tool -id "@rpath/$fw_name.framework/Versions/A/$fw_name" "$fw/Versions/A/$fw_name"
-cp -R "$out_dir/include/maplibre_native_c.h" "$out_dir/include/maplibre_native_c" "$fw/Versions/A/Headers/"
-cat > "$fw/Versions/A/Modules/module.modulemap" <<EOF
-framework module $fw_name {
-  umbrella header "maplibre_native_c.h"
-  export *
-}
-EOF
-cat > "$fw/Versions/A/Resources/Info.plist" <<EOF
+# Writes the framework Info.plist for a preset to $1.
+write_info_plist() {
+  local plist=$1 preset=$2 platform_keys
+  case "$preset" in
+    macos-*)
+      platform_keys="<key>LSMinimumSystemVersion</key><string>14.3</string>" ;;
+    ios-simulator-*)
+      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
+  <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>" ;;
+    ios-*)
+      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
+  <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>" ;;
+  esac
+  cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -81,16 +89,77 @@ cat > "$fw/Versions/A/Resources/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>FMWK</string>
   <key>CFBundleShortVersionString</key><string>0.0.0</string>
   <key>CFBundleVersion</key><string>${MAPLIBRE_FFI_COMMIT:0:12}</string>
-  <key>LSMinimumSystemVersion</key><string>14.3</string>
+  $platform_keys
 </dict>
 </plist>
-EOF
-ln -s A "$fw/Versions/Current"
-for item in "$fw_name" Headers Modules Resources; do
-  ln -s "Versions/Current/$item" "$fw/$item"
-done
-xcodebuild -create-xcframework -framework "$fw" -output "$out_dir/$fw_name.xcframework" >/dev/null
-rm -rf "$fw_stage"
+PLIST
+}
 
-echo "Built $MAPLIBRE_FFI_PRESET at $MAPLIBRE_FFI_COMMIT in $((end - start)) s"
-find "$out_dir/lib" -name 'libmaplibre-native-c*.dylib' -type f -exec ls -l {} \;
+# Wraps the dylib of an installed preset in a framework under $2: the versioned
+# layout on macOS, the flat layout on iOS. Swift Package Manager accepts the
+# frameworks as a binary target once they are combined into an xcframework, and
+# Xcode embeds and signs the framework in the app bundle.
+make_framework() {
+  local preset=$1 stage=$2 install="$out_dir/$1"
+  local fw="$stage/$preset/$fw_name.framework" contents
+  if [[ "$preset" == macos-* ]]; then
+    contents="$fw/Versions/A"
+  else
+    contents="$fw"
+  fi
+  mkdir -p "$contents/Headers" "$contents/Modules"
+  cp "$install/lib/libmaplibre-native-c.dylib" "$contents/$fw_name"
+  if [[ "$preset" == macos-* ]]; then
+    install_name_tool -id "@rpath/$fw_name.framework/Versions/A/$fw_name" "$contents/$fw_name"
+  else
+    install_name_tool -id "@rpath/$fw_name.framework/$fw_name" "$contents/$fw_name"
+  fi
+  cp -R "$install/include/maplibre_native_c.h" "$install/include/maplibre_native_c" "$contents/Headers/"
+  cat > "$contents/Modules/module.modulemap" <<MODULEMAP
+framework module $fw_name {
+  umbrella header "maplibre_native_c.h"
+  export *
+}
+MODULEMAP
+  if [[ "$preset" == macos-* ]]; then
+    mkdir -p "$contents/Resources"
+    write_info_plist "$contents/Resources/Info.plist" "$preset"
+    ln -s A "$fw/Versions/Current"
+    for item in "$fw_name" Headers Modules Resources; do
+      ln -s "Versions/Current/$item" "$fw/$item"
+    done
+  else
+    write_info_plist "$contents/Info.plist" "$preset"
+  fi
+  echo "$fw"
+}
+
+for preset in "${presets[@]}"; do
+  start=$(date +%s)
+  with_tools cmake -S "$src_dir" --preset "$preset"
+  with_tools cmake --build "$src_dir/build/$preset" --target install
+  end=$(date +%s)
+
+  rm -rf "${out_dir:?}/$preset"
+  mkdir -p "$out_dir/$preset"
+  cp -R "$src_dir/build/$preset/install/." "$out_dir/$preset/"
+  printf '%s %s\n' "$MAPLIBRE_FFI_COMMIT" "$preset" > "$out_dir/$preset/BUILD_INFO"
+  echo "Built $preset at $MAPLIBRE_FFI_COMMIT in $((end - start)) s"
+  ls -l "$out_dir/$preset/lib/libmaplibre-native-c.dylib"
+done
+
+# Combines every installed preset of the pinned commit into the xcframework.
+stage="$out_dir/framework-stage"
+rm -rf "$stage"
+fw_args=()
+for preset in "${all_presets[@]}"; do
+  if [[ "$(cat "$out_dir/$preset/BUILD_INFO" 2>/dev/null)" == "$MAPLIBRE_FFI_COMMIT $preset" ]]; then
+    fw_args+=(-framework "$(make_framework "$preset" "$stage")")
+  else
+    echo "Not in the xcframework (not built at the pinned commit): $preset" >&2
+  fi
+done
+rm -rf "$out_dir/$fw_name.xcframework"
+xcodebuild -create-xcframework "${fw_args[@]}" -output "$out_dir/$fw_name.xcframework" >/dev/null
+rm -rf "$stage"
+echo "Created $out_dir/$fw_name.xcframework with $(( ${#fw_args[@]} / 2 )) slices"
