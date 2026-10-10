@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Displays a MapLibre Native map as a Flutter `Texture` widget that composes with other Flutter widgets, and lets Dart code control the map's style, camera, viewport and lifecycle. The capability is specified for macOS only.
+Displays a MapLibre Native map as a Flutter `Texture` widget that composes with other Flutter widgets, and lets Dart code control the map's style, camera, viewport and lifecycle. The capability is specified for macOS and iOS.
 
 ## Requirements
 

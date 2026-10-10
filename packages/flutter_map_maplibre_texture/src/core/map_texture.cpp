@@ -22,6 +22,10 @@ constexpr int64_t kIdlePumpTimeoutMs = 250;
 // Drain budget per pump, so that style parsing and tile work don't hold up a
 // pending frame for long.
 constexpr int64_t kPumpBudgetMs = 8;
+// Delay after the last resize before Flutter is told once more that a frame
+// is available. Longer than the default maximum texture age (1 s) of a
+// CVMetalTextureCache; see MaybeNotifyAfterResize().
+constexpr int64_t kResizeSettledNs = 1'100'000'000;
 
 int64_t NowNs() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -145,7 +149,8 @@ map_texture_stats MapTexture::stats() {
 // Map thread.
 
 void MapTexture::Run() {
-  bool ok = Init();
+  bool ok = false;
+  RunInPlatformScope([&] { ok = Init(); });
   {
     std::lock_guard lock(init_mutex_);
     init_done_ = true;
@@ -153,24 +158,52 @@ void MapTexture::Run() {
   }
   init_cv_.notify_all();
   if (!ok) {
-    Teardown();
+    RunInPlatformScope([&] { Teardown(); });
     return;
   }
 
   bool stop = false;
   while (!stop) {
-    bool render_now = render_pending_ && session_ != MLN_HANDLE_NULL &&
-                      !waiting_for_buffer_.load() && !gate_.paused();
-    mln_status status = mln_runtime_pump(
-        runtime_, render_now ? 0 : kIdlePumpTimeoutMs, kPumpBudgetMs);
-    if (status != MLN_STATUS_OK) ReportStatus("mln_runtime_pump", status);
-    ApplyCommands(&stop);
-    if (stop) break;
-    ApplyCamera();
-    DrainEvents();
-    MaybeRender();
+    RunInPlatformScope([&] { stop = RunOnce(); });
   }
-  Teardown();
+  RunInPlatformScope([&] { Teardown(); });
+}
+
+bool MapTexture::RunOnce() {
+  bool render_now = render_pending_ && session_ != MLN_HANDLE_NULL &&
+                    !waiting_for_buffer_.load() && !gate_.paused();
+  int64_t timeout_ms = render_now ? 0 : kIdlePumpTimeoutMs;
+  if (notify_after_resize_at_ns_ != 0) {
+    int64_t until_ms = (notify_after_resize_at_ns_ - NowNs()) / 1'000'000;
+    timeout_ms = std::clamp<int64_t>(until_ms, 0, timeout_ms);
+  }
+  mln_status status = mln_runtime_pump(runtime_, timeout_ms, kPumpBudgetMs);
+  if (status != MLN_STATUS_OK) ReportStatus("mln_runtime_pump", status);
+  bool stop = false;
+  ApplyCommands(&stop);
+  if (stop) return true;
+  ApplyCamera();
+  DrainEvents();
+  MaybeRender();
+  MaybeNotifyAfterResize();
+  return false;
+}
+
+// Workaround for Flutter's Darwin embedders (see
+// docs/flutter-texture-cache-followup.md): Flutter wraps each pixel buffer it
+// displays through its own CVMetalTextureCache and never flushes it per frame.
+// The cache frees an entry only when it creates another texture after the
+// entry's maximum age has passed, so after a series of resizes it keeps the
+// replaced buffers alive until the next new frame, which on an idle map can be
+// much later. Telling Flutter once more that a frame is available, after the
+// maximum age, makes it create a texture and free them.
+void MapTexture::MaybeNotifyAfterResize() {
+  if (notify_after_resize_at_ns_ == 0 || NowNs() < notify_after_resize_at_ns_ ||
+      gate_.paused()) {
+    return;
+  }
+  notify_after_resize_at_ns_ = 0;
+  target_->FrameAvailable();
 }
 
 bool MapTexture::Init() {
@@ -306,6 +339,7 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     buffers_.ResetLocked();
   });
   size_ = size;
+  notify_after_resize_at_ns_ = NowNs() + kResizeSettledNs;
 
   mln_status status;
   if (session_ == MLN_HANDLE_NULL) {

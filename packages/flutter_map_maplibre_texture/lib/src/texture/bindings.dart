@@ -115,6 +115,20 @@ external void mapTextureEventFree(Pointer<MapTextureEventStruct> event);
 @Native<Int32 Function()>(symbol: 'map_texture_process_thread_count')
 external int mapTextureProcessThreadCount();
 
+@Native<Int32 Function()>(symbol: 'map_texture_thermal_state')
+external int mapTextureThermalState();
+
+@Native<Int64 Function()>(symbol: 'map_texture_memory_footprint')
+external int mapTextureMemoryFootprint();
+
+@Native<Int32 Function(Pointer<Int64>)>(
+    symbol: 'map_texture_released_buffers_alive_for_testing')
+external int mapTextureReleasedBuffersAliveForTesting(Pointer<Int64> outBytes);
+
+@Native<Int32 Function(Int32)>(
+    symbol: 'map_texture_released_buffers_for_testing')
+external int mapTextureReleasedBuffersForTesting(int reset);
+
 @Native<Void Function(Int32)>(symbol: 'map_texture_set_paused_for_testing')
 external void mapTextureSetPausedForTesting(int paused);
 

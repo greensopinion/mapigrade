@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,10 @@ import 'benchmark.dart';
 /// Prints every displayed frame with its camera:
 /// `--dart-define=LOG_FRAMES=true`.
 const logFrames = bool.fromEnvironment('LOG_FRAMES');
+
+/// Starts continuous pan at launch, for scripted device tests:
+/// `--dart-define=CONTINUOUS_PAN=true`.
+const continuousPanAtLaunch = bool.fromEnvironment('CONTINUOUS_PAN');
 
 class MapStyle {
   const MapStyle(this.name, this.url);
@@ -80,6 +85,7 @@ class _MapScreenState extends State<MapScreen>
     controller.loadStyleUrl(styles[_styleIndex].url);
     controller.setCamera(_camera);
     _controller = controller;
+    if (continuousPanAtLaunch && !benchmarkEnabled) _panTicker.start();
     if (benchmarkEnabled) {
       Benchmark(controller, onCamera: (camera) {
         _camera = camera;
@@ -126,6 +132,12 @@ class _MapScreenState extends State<MapScreen>
 
   void _onFrame(FrameCamera frame) {
     if (logFrames) debugPrint('frame displayed: $frame');
+    // On standard output, which reaches the console in release builds too
+    // (for example through devicectl --console), unlike debugPrint on iOS.
+    if (frame.physicalSize != _frame?.physicalSize) {
+      stdout.writeln('frame size: ${frame.physicalSize.width.toInt()}x'
+          '${frame.physicalSize.height.toInt()} @${frame.scaleFactor}');
+    }
     _framesInLastSecond++;
     _frame = frame;
   }

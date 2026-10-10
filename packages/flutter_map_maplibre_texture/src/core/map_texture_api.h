@@ -109,6 +109,24 @@ MAP_TEXTURE_EXPORT void map_texture_event_free(map_texture_event* event);
 // The number of threads in this process, for the lifecycle test.
 MAP_TEXTURE_EXPORT int32_t map_texture_process_thread_count(void);
 
+// The device's thermal state, for measurements: 0 nominal, 1 fair, 2 serious,
+// 3 critical (NSProcessInfoThermalState), or -1 if unknown.
+MAP_TEXTURE_EXPORT int32_t map_texture_thermal_state(void);
+
+// The process's physical memory footprint in bytes (the value Xcode's memory
+// gauge shows), for measurements, or -1 if unknown.
+MAP_TEXTURE_EXPORT int64_t map_texture_memory_footprint(void);
+
+// For tests: how many display buffers released since the last reset are still
+// alive (kept alive by something other than the plugin), and their size in
+// bytes in `out_bytes` (may be null).
+MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_alive_for_testing(
+    int64_t* out_bytes);
+// For tests: the number of display buffers released since the last reset;
+// resets the count when `reset` is non-zero.
+MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_for_testing(
+    int32_t reset);
+
 // For tests: pause (non-zero) or resume (zero) rendering of every map, as the
 // platform does when the application enters the background or foreground.
 MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);

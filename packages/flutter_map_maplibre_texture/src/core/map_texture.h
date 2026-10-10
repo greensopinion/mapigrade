@@ -64,6 +64,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   bool Start();
   void Run();
+  // One iteration of the map thread's loop; returns true to stop.
+  bool RunOnce();
   bool Init();
   void Teardown();
   void Signal();
@@ -73,6 +75,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void ApplyCamera();
   void DrainEvents();
   void MaybeRender();
+  void MaybeNotifyAfterResize();
 
   void Emit(int32_t type, const char* message = nullptr,
             const FrameInfo* frame = nullptr);
@@ -108,6 +111,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   Viewport viewport_{};
   bool render_pending_ = false;
   uint64_t next_frame_id_ = 1;
+  // When to tell Flutter once more that a frame is available after the last
+  // resize (steady clock, ns), or 0 for not pending.
+  int64_t notify_after_resize_at_ns_ = 0;
   // Set when a render was deferred because Flutter hadn't taken the latest
   // frame or no buffer was free; Present() wakes the map thread.
   std::atomic<bool> waiting_for_buffer_{false};
@@ -125,5 +131,9 @@ void SetAllPaused(bool paused);
 // Queues ReduceMemoryUse() for every live map, for example after an iOS
 // memory warning. Defined in map_texture_api.cpp.
 void ReduceAllMemoryUse();
+
+// The sum of rendered frames over every live map, for logging. Defined in
+// map_texture_api.cpp.
+int64_t TotalRenderedFrames();
 
 }  // namespace map_texture

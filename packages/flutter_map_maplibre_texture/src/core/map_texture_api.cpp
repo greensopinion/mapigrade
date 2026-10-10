@@ -46,6 +46,15 @@ void ReduceAllMemoryUse() {
   for (auto& [handle, texture] : Registry()) texture->ReduceMemoryUse();
 }
 
+int64_t TotalRenderedFrames() {
+  std::lock_guard lock(registry_mutex);
+  int64_t total = 0;
+  for (auto& [handle, texture] : Registry()) {
+    total += texture->stats().rendered_frames;
+  }
+  return total;
+}
+
 }  // namespace map_texture
 
 extern "C" {

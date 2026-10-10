@@ -1,8 +1,13 @@
 // macOS and iOS render target (designs D3b and D4). MapLibre renders through a
 // borrowed-texture session into one private MTLTexture. Each rendered frame is
-// copied on the GPU into one of three IOSurface-backed CVPixelBuffers, wrapped
-// as MTLTextures through CVMetalTextureCache, and Flutter samples that
+// copied on the GPU into one of three IOSurface-backed CVPixelBuffers, each
+// wrapped as an MTLTexture made from its IOSurface, and Flutter samples that
 // IOSurface through FlutterTexture. No pixels pass through CPU memory.
+//
+// The textures are made directly from the IOSurfaces rather than through a
+// CVMetalTextureCache: a cache keeps the IOSurfaces of released buffers alive
+// until a flush after its maximum texture age, which kept the memory of
+// replaced buffer sets alive after resizes.
 
 #import <CoreVideo/CoreVideo.h>
 #if TARGET_OS_OSX
@@ -13,8 +18,13 @@
 #import <Metal/Metal.h>
 #include <mach/mach.h>
 
+#import <IOSurface/IOSurfaceRef.h>
+
 #include <array>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 #include "MapTextureRegistry.h"
 #include "core/map_texture.h"
@@ -47,6 +57,19 @@ using map_texture::TargetSize;
 
 @end
 
+// For tests: the IOSurfaces of released pixel buffers, to check that they are
+// freed (map_texture_released_buffers_alive_for_testing).
+static std::mutex gReleasedMutex;
+static std::vector<std::pair<IOSurfaceID, size_t>> gReleased;
+
+static void RecordReleased(CVPixelBufferRef buffer) {
+  IOSurfaceRef surface = CVPixelBufferGetIOSurface(buffer);
+  if (surface == nullptr) return;
+  std::lock_guard lock(gReleasedMutex);
+  gReleased.emplace_back(IOSurfaceGetID(surface),
+                         IOSurfaceGetAllocSize(surface));
+}
+
 namespace map_texture {
 namespace {
 
@@ -61,7 +84,8 @@ void RunOnMainSync(dispatch_block_t block) {
 
 struct BufferSet {
   std::array<CVPixelBufferRef, kBufferCount> pixel_buffers{};
-  std::array<CVMetalTextureRef, kBufferCount> cv_textures{};
+  // Textures made from the pixel buffers' IOSurfaces, the copy destinations.
+  std::array<id<MTLTexture>, kBufferCount> textures{};
   // The texture MapLibre renders into.
   id<MTLTexture> render_texture = nil;
   TargetSize size{};
@@ -71,26 +95,23 @@ struct BufferSet {
   void Release() {
     render_texture = nil;
     for (int i = 0; i < kBufferCount; ++i) {
-      if (cv_textures[i] != nullptr) CFRelease(cv_textures[i]);
-      if (pixel_buffers[i] != nullptr) CVPixelBufferRelease(pixel_buffers[i]);
-      cv_textures[i] = nullptr;
+      textures[i] = nil;
+      if (pixel_buffers[i] != nullptr) {
+        RecordReleased(pixel_buffers[i]);
+        CVPixelBufferRelease(pixel_buffers[i]);
+      }
       pixel_buffers[i] = nullptr;
     }
-  }
-
-  id<MTLTexture> texture(int index) const {
-    return CVMetalTextureGetTexture(cv_textures[index]);
   }
 };
 
 class MetalRenderTarget : public RenderTarget {
  public:
-  MetalRenderTarget(id<MTLDevice> device, CVMetalTextureCacheRef cache,
+  MetalRenderTarget(id<MTLDevice> device,
                     NSObject<FlutterTextureRegistry>* registry,
                     MLTFlutterTexture* texture, int64_t texture_id)
       : device_(device),
         queue_([device newCommandQueue]),
-        cache_(cache),
         registry_(registry),
         texture_(texture),
         texture_id_(texture_id) {}
@@ -99,7 +120,6 @@ class MetalRenderTarget : public RenderTarget {
     current_.Release();
     prepared_.Release();
     if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
-    CFRelease(cache_);
   }
 
   int64_t texture_id() const override { return texture_id_; }
@@ -110,10 +130,13 @@ class MetalRenderTarget : public RenderTarget {
       (id)kCVPixelBufferIOSurfacePropertiesKey : @{},
       (id)kCVPixelBufferMetalCompatibilityKey : @YES,
     };
-    NSDictionary* texture_attributes = @{
-      (id)kCVMetalTextureUsage :
-          @(MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget),
-    };
+    MTLTextureDescriptor* buffer_descriptor = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                     width:size.physical_width
+                                    height:size.physical_height
+                                 mipmapped:NO];
+    buffer_descriptor.usage =
+        MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
     for (int i = 0; i < kBufferCount; ++i) {
       CVReturn result = CVPixelBufferCreate(
           kCFAllocatorDefault, size.physical_width, size.physical_height,
@@ -123,12 +146,12 @@ class MetalRenderTarget : public RenderTarget {
         prepared_.Release();
         return false;
       }
-      result = CVMetalTextureCacheCreateTextureFromImage(
-          kCFAllocatorDefault, cache_, prepared_.pixel_buffers[i],
-          (__bridge CFDictionaryRef)texture_attributes, MTLPixelFormatBGRA8Unorm,
-          size.physical_width, size.physical_height, 0,
-          &prepared_.cv_textures[i]);
-      if (result != kCVReturnSuccess) {
+      prepared_.textures[i] = [device_
+          newTextureWithDescriptor:buffer_descriptor
+                         iosurface:CVPixelBufferGetIOSurface(
+                                       prepared_.pixel_buffers[i])
+                             plane:0];
+      if (prepared_.textures[i] == nil) {
         prepared_.Release();
         return false;
       }
@@ -188,7 +211,8 @@ class MetalRenderTarget : public RenderTarget {
   bool CopyToBuffer(int index) override {
     id<MTLCommandBuffer> commands = [queue_ commandBuffer];
     id<MTLBlitCommandEncoder> blit = [commands blitCommandEncoder];
-    [blit copyFromTexture:current_.render_texture toTexture:current_.texture(index)];
+    [blit copyFromTexture:current_.render_texture
+                toTexture:current_.textures[index]];
     [blit endEncoding];
     [commands commit];
     // MapLibre's render_update has already waited for its own command
@@ -234,7 +258,6 @@ class MetalRenderTarget : public RenderTarget {
 
   id<MTLDevice> device_;
   id<MTLCommandQueue> queue_;
-  CVMetalTextureCacheRef cache_;
   NSObject<FlutterTextureRegistry>* registry_;
   MLTFlutterTexture* texture_;
   const int64_t texture_id_;
@@ -254,19 +277,23 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
   if (registry == nil) return nullptr;
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
   if (device == nil) return nullptr;
-  CVMetalTextureCacheRef cache = nullptr;
-  if (CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil,
-                                &cache) != kCVReturnSuccess) {
-    return nullptr;
-  }
   MLTFlutterTexture* texture =
       [[MLTFlutterTexture alloc] initWithOwner:std::move(owner)];
   __block int64_t texture_id = 0;
   RunOnMainSync(^{
     texture_id = [registry registerTexture:texture];
   });
-  return std::make_unique<MetalRenderTarget>(device, cache, registry, texture,
+  return std::make_unique<MetalRenderTarget>(device, registry, texture,
                                              texture_id);
+}
+
+// The map thread is a std::thread with no autorelease pool, so objects
+// autoreleased there, such as each frame's command buffer and with it the
+// buffer it copied into, stayed alive until the thread exited at dispose.
+void RunInPlatformScope(const std::function<void()>& work) {
+  @autoreleasepool {
+    work();
+  }
 }
 
 std::string PlatformCachePath() {
@@ -299,4 +326,43 @@ extern "C" int32_t map_texture_process_thread_count(void) {
   vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
                 count * sizeof(thread_act_t));
   return static_cast<int32_t>(count);
+}
+
+extern "C" int32_t map_texture_thermal_state(void) {
+  return static_cast<int32_t>([NSProcessInfo processInfo].thermalState);
+}
+
+extern "C" int64_t map_texture_memory_footprint(void) {
+  task_vm_info_data_t info{};
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_VM_INFO,
+                reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) {
+    return -1;
+  }
+  return static_cast<int64_t>(info.phys_footprint);
+}
+
+extern "C" int32_t map_texture_released_buffers_alive_for_testing(
+    int64_t* out_bytes) {
+  std::lock_guard lock(gReleasedMutex);
+  int32_t alive = 0;
+  int64_t bytes = 0;
+  for (auto [id, size] : gReleased) {
+    // A lookup by id finds the surface only while something keeps it alive.
+    // The ids of freed surfaces can be reused, so tests reset the list first.
+    IOSurfaceRef surface = IOSurfaceLookup(id);
+    if (surface == nullptr) continue;
+    CFRelease(surface);
+    ++alive;
+    bytes += static_cast<int64_t>(size);
+  }
+  if (out_bytes != nullptr) *out_bytes = bytes;
+  return alive;
+}
+
+extern "C" int32_t map_texture_released_buffers_for_testing(int32_t reset) {
+  std::lock_guard lock(gReleasedMutex);
+  auto count = static_cast<int32_t>(gReleased.size());
+  if (reset != 0) gReleased.clear();
+  return count;
 }

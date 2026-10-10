@@ -68,6 +68,8 @@ A function in `map_texture_api.cpp`, `map_texture::SetAllPaused(bool)`, applies 
 
 On iOS, the plugin observes `UIApplicationDidEnterBackgroundNotification` and calls `SetAllPaused(true)` on the main thread before the notification handler returns, and observes `UIApplicationWillEnterForegroundNotification` and calls `SetAllPaused(false)`. This matches the points where Flutter's iOS engine disables and enables its own GPU work. The wait in `SetAllPaused(true)` is bounded by one render, which took 2.74 ms on average on the reference Mac.
 
+*Result (tasks 4.1, 5.3 and 5.4, 2026-10-10):* on the iPhone 15 Pro Max, a release build panning continuously over San Francisco with Metal API validation enabled was sent to the background 20 times by launching Settings through `devicectl`, and 3 times with the home gesture. Both observers fired every time. `SetAllPaused(true)` blocked the main thread for 1.9 ms on average and 8.9 ms at most (21 transitions), the duration of the render in progress; with an idle map it returned in 1 to 2 µs. The rendered-frame count logged at each pause equalled the count logged before the following resume, so no frame was rendered in the background, and rendering resumed after each return (about 550 frames per 5 s in the foreground). The device log had no Metal background execution errors and no render errors. Because the example uses the scene lifecycle, the plugin also pauses at registration if the app is launched in the background (for example while the device is locked), when no did-enter-background notification arrives.
+
 *Alternative:* pause from Dart, through `AppLifecycleListener` and a new C ABI call. We rejected it. Dart receives the lifecycle change asynchronously through a platform channel, so the map thread could still commit a frame after the app has entered the background. The native notification runs synchronously before the app is suspended.
 
 *Alternative:* rely on Flutter no longer calling `copyPixelBuffer` in the background, which stops the map thread through the display pacing in D4. We rejected it. The pacing allows one more render after the last frame Flutter took, and that render would be GPU work in the background.
@@ -94,6 +96,16 @@ Dart binds the C ABI with `@Native` declarations resolved from the process (D5).
 - Sustained run: a 5-minute continuous pan, recording `ProcessInfo.thermalState` at the start and end and the displayed frame rate for each 30 s interval. The concept doc lists thermal state as a metric; a short run on a phone doesn't show throttling.
 - GPU time and readback check: a Metal System Trace on the device, as on macOS.
 - App size: the size of `Runner.app` for a release build of the `flutter create` template app and of the example, measured the same way as for macOS in `limitations.md`.
+
+### D18. Releasing replaced display buffers (amendment, 2026-10-10)
+
+Found on the iPhone: every resize kept the replaced buffer set alive until the map was disposed. Three causes, measured by counting the released buffers' IOSurfaces that are still alive (details and measurements in `docs/flutter-texture-cache-followup.md`):
+
+- The map thread is a `std::thread` with no autorelease pool, so each frame's autoreleased command buffer, and the buffer it copied into, stayed alive until the thread exited. *Change:* the core runs the map thread's setup, each loop iteration and teardown through `RunInPlatformScope()`, a platform function declared in `render_target.h`; on Apple platforms it is an `@autoreleasepool`.
+- The bridge wrapped its buffers through its own `CVMetalTextureCache`, which keeps an IOSurface alive until the cache has been idle longer than its maximum age (1 s) and is used or flushed again. *Change:* the bridge creates each buffer's `MTLTexture` directly from its IOSurface (`newTextureWithDescriptor:iosurface:plane:`). This amends D3/D3b, which named `CVMetalTextureCache`.
+- Flutter's Darwin embedders wrap each pixel buffer through their own `CVMetalTextureCache` in the same way and don't flush it per frame. *Workaround:* 1.1 s after the last resize, the core calls `RenderTarget::FrameAvailable()` once more, so that Flutter creates a texture after an idle period longer than the cache's maximum age and frees the aged entries. This doesn't help during a long continuous resize. The proper fix belongs in Flutter.
+
+*Alternatives considered:* reusing buffer sets per size, and allocating buffers only after the size is stable. Both reduce how many buffers Flutter's cache sees but leave the causes in place; the first two causes are in the plugin and are fixed instead.
 
 ## Risks / Trade-offs
 

@@ -8,11 +8,12 @@
 // continuously; see design.md.
 //
 // The core in this directory has no platform dependencies. Each platform
-// implements RenderTarget and the two factory functions at the end of this
+// implements RenderTarget and the three functions at the end of this
 // file (macOS and iOS: darwin/.../MapTextureMetal.mm).
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -84,5 +85,10 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 
 // The path of MapLibre's tile cache database, or an empty string for none.
 std::string PlatformCachePath();
+
+// Runs `work` in the platform's per-iteration scope on the map thread. On
+// Apple platforms this is an autorelease pool, so that Objective-C objects
+// autoreleased on the map thread are released after each loop iteration.
+void RunInPlatformScope(const std::function<void()>& work);
 
 }  // namespace map_texture

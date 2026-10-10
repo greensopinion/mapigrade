@@ -1,8 +1,10 @@
-# Limitations and findings of the macOS vertical slice
+# Limitations and findings of the macOS and iOS vertical slices
 
-Measured results are in `benchmarks.md`. The design and its amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md`.
+Measured results are in `benchmarks.md`. The designs and their amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md` (macOS) and `openspec/changes/ios-texture-vertical-slice/design.md` (iOS, decisions D11 to D18).
 
 ## App bundle size
+
+### macOS
 
 Release builds, arm64, measured with `du -sk` on 2026-10-09:
 
@@ -15,9 +17,22 @@ Release builds, arm64, measured with `du -sk` on 2026-10-09:
 
 The rest of the increase is the plugin's native code in the app executable and the example's own Dart code. The FFI library is built for arm64 only; a universal build would roughly double the framework.
 
+### iOS
+
+`Runner.app` of release builds for iOS devices (`flutter build ios --release --no-codesign`, arm64), measured with `du -sk` on 2026-10-10. The builds are unsigned; signing adds the code signature and the provisioning profile.
+
+| Bundle | Size |
+| --- | --- |
+| `flutter create` template app (baseline) | 14,224 KB |
+| example app with this plugin | 27,736 KB |
+| increase | 13,512 KB (13.2 MiB) |
+| of which `MapLibreNativeC.framework` | 12,852 KB |
+
+This is the size of the app bundle, not the App Store download size, which Apple computes after compression and app thinning.
+
 ## Licenses and third-party notices
 
-We have not completed a license review. Before any distribution, the following must be reviewed and their notices included with the app. The FFI build installs them in `third_party/maplibre-native-ffi/share/maplibre-native-c/`:
+We have not completed a license review. Before any distribution, the following must be reviewed and their notices included with the app. The FFI build installs them in `third_party/maplibre-native-ffi/<preset>/share/maplibre-native-c/`:
 
 | File | Component | License |
 | --- | --- | --- |
@@ -28,7 +43,7 @@ We have not completed a license review. Before any distribution, the following m
 | `licenses/nunicode.txt` | nunicode | MIT |
 | `licenses/pmtiles.txt` | PMTiles | BSD 3-Clause |
 
-The macOS build of the FFI doesn't link its Rust platform component, so no Rust crate notices apply to this build.
+The Apple builds of the FFI (macOS and iOS) don't link its Rust platform component, so no Rust crate notices apply to them.
 
 Map data: the example uses OpenFreeMap tiles (OpenStreetMap data, ODbL) and the MapLibre demo tiles. The example does not show the attribution that OpenStreetMap data requires. A product must show it.
 
@@ -50,23 +65,43 @@ The engine source asserts the platform thread in `Shell::OnPlatformViewMarkTextu
 
 ### Colors
 
-Map colors match Flutter's within 1/255 per channel without setting a color space on the IOSurface (README, Color check).
+Map colors match Flutter's within 1/255 per channel on macOS without setting a color space on the IOSurface (README, Color check). On the iPhone they match exactly: rendered to an image with `RepaintBoundary.toImage` (`example/integration_test/color_measurement.dart`), the map's fill and background and the Flutter swatches of the same colors had identical RGB values.
+
+### Frame rate on the iPhone over dense areas
+
+Over central London the iPhone 15 Pro Max displayed 41 map frames per second at the median second (p10 37, p90 57), and 39 at the median second of a 5-minute run, whose lowest second was 30 fps (`benchmarks.md`). That meets the 30 fps minimum but not the 60 fps target. A frame takes about 17 ms: `render_update` 15.2 ms, which is MapLibre's CPU encoding followed by the wait for its GPU work, plus the copy, 1.8 ms. That is just over two 120 Hz vsync intervals, so most frames are displayed every third vsync. The Mac renders the same path at 117 fps at the median second with a 4.5 ms `render_update`.
+
+The map thread does the CPU encoding, waits for the GPU, copies and waits again, one after the other (design D2). Moving the render session to its own thread (D2, alternative), so that encoding of the next frame overlaps the GPU work of the previous one, may raise the iPhone frame rate; it has not been tried. The thermal state stayed nominal for 5 minutes, so the limit is rendering cost, not throttling.
+
+### Rendering pauses in the background (iOS)
+
+iOS doesn't allow GPU work in the background. The plugin pauses rendering when the app enters the background, waiting for a render in progress (at most 8.9 ms measured), and resumes it before the app enters the foreground (design D13). Over 23 transitions on the iPhone no frame was rendered in the background, and Metal API validation reported no errors. An app launched in the background, for example while the device is locked, receives no did-enter-background notification, so the plugin also pauses at registration if the app is in the background.
+
+### Replaced display buffers stayed alive after resizes
+
+Every resize allocates a new set of three display buffers. Until the fixes in design D18, the replaced buffers stayed alive until the map was disposed: on the iPhone the footprint went from 292 MiB to 696 MiB after 300 resizes, and a test run that started with the phone locked was terminated for using too much memory. Two causes were in the plugin and are fixed: the map thread had no autorelease pool, and the plugin wrapped its buffers through its own `CVMetalTextureCache`. The third is Flutter's Darwin texture cache, which keeps the buffers it has displayed until it has been idle for 1 s; the plugin works around it by telling Flutter once more that a frame is available 1.1 s after the last resize. After the fixes, the footprint is 246 MiB 2.5 s after the last of 300 resizes. During a burst of resizes Flutter's cache still holds the replaced buffers (the footprint reached 457 MiB during the 300 resizes). Details and a proposed Flutter fix: `docs/flutter-texture-cache-followup.md`.
+
+### Memory warnings release little (iOS)
+
+On a memory warning the plugin calls `mln_render_session_reduce_memory_use()` (design D14). Measured on the iPhone with the map full screen after visiting zoom levels 10 to 16 over San Francisco with the OpenFreeMap Liberty style (`example/integration_test/memory_measurement.dart`, 2026-10-10): the footprint was 236 MiB before the map was created and 396 MiB before the reduction, and 388 MiB 2 s and 389 MiB 7 s after it, so the reduction released about 8 MiB of the 160 MiB the map added. In MapLibre's source, the reduction clears the renderer's tile cache and unused images; the Metal context's `reduceMemoryUsage()` is empty.
 
 ## Known limitations
 
-- arm64 only: the FFI preset is `macos-arm64-metal`, and the example sets `ARCHS = arm64`.
+- arm64 only: the FFI presets are `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal`, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds.
+- iOS 15.5 or later, the FFI's iOS deployment target.
 - Swift Package Manager only: the plugin has no podspec.
 - One Flutter engine per process: the plugin keeps the texture registry of the engine that registered it last.
 - The map's sprite and glyph density is fixed when the map is created (`mln_map_options.scale_factor`). After a device pixel ratio change the map renders at the new ratio, but MapLibre logs a warning and keeps sprites at the original density. A map recreated at the new ratio would fix this.
 - We did not test moving the window between displays with different pixel ratios, because only one display was available. Resizing was tested by resizing the map widget on every frame for 10 s in an integration test, and by dragging the example window's edge for about 10 s by hand; after the drag the map filled the window at the correct scale.
 - The displayed map frame can lag the Flutter overlays by one or more frames during camera changes. Each displayed frame reports its camera (`MapTextureController.frames`), which the `flutter_map` slice needs to align overlays.
-- `render_update` waits on the map thread until the GPU completes. At 119 frames per second this was not a limit on the reference Mac. On slower GPUs the session may need its own thread (design D2, alternative).
+- `render_update` waits on the map thread until the GPU completes. On the reference Mac this is not a limit (117 fps over central London); on the iPhone it is (see Frame rate on the iPhone over dense areas).
+- During a burst of resizes, Flutter's texture cache keeps the replaced display buffers until the resizing stops (see Replaced display buffers stayed alive after resizes). A continuous resize that lasts long, such as dragging a desktop window edge, holds memory for as long as it lasts.
 - The plugin exposes only style, camera (center, zoom, bearing), resize and dispose. There are no gestures, pitch or animations.
 
-## What the iOS slice can reuse
+## What the Android slice can reuse
 
-- `src/core/` as is: the map thread, command queue, camera coalescing, buffer state, pacing, events and the C ABI. It has no Apple dependencies.
-- The Dart API (`lib/src/texture/`) as is.
-- Most of `MapTextureMetal.mm`: `CVPixelBuffer`, IOSurface, `CVMetalTextureCache`, `MTLBlitCommandEncoder` and `FlutterTexture` work the same on iOS. The changes are the `Flutter` instead of `FlutterMacOS` import and the registrar.
-- The build script, after adding the `ios-arm64-metal` and `ios-simulator-arm64-metal` presets, with an xcframework that has a slice per platform.
-- The measurement procedure (`example/lib/benchmark.dart`) and the integration tests.
+- `src/core/` as is: the map thread, command queue, camera coalescing, buffer state, pacing, events and the C ABI, and from the iOS slice the pause gate (`render_gate.h`, `SetAllPaused`), the memory reduction command (`ReduceAllMemoryUse`) and the platform scope hook (`RunInPlatformScope`, which can be empty on Android). The Android bridge drives pause and memory reduction from its own lifecycle callbacks.
+- The Dart API (`lib/src/texture/`) and the test hooks (`package:flutter_map_maplibre_texture/testing.dart`) as is.
+- The integration tests, including the lifecycle tests (pause, dispose while paused, memory reduction) and the released-buffer test, which needs an Android implementation of `map_texture_released_buffers_alive_for_testing`.
+- The measurement procedure (`example/lib/benchmark.dart`, including the 5-minute mode) and the memory and color measurements in `example/integration_test/`.
+- `MaybeNotifyAfterResize()` is a workaround for Flutter's Darwin embedders; check whether Android's `SurfaceProducer` path needs it before keeping it there.

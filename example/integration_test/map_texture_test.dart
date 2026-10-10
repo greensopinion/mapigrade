@@ -3,6 +3,7 @@
 //   cd example && flutter test integration_test -d macos
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map_maplibre_texture/flutter_map_maplibre_texture.dart';
@@ -225,12 +226,16 @@ void main() {
     await cycle();
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final before = processThreadCount();
+    final footprintBefore = memoryFootprintForTesting();
     for (var i = 0; i < 50; i++) {
       await cycle();
     }
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final after = processThreadCount();
-    debugPrint('thread count: before $before, after 50 cycles $after');
+    String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
+    debugPrint('thread count: before $before, after 50 cycles $after; '
+        'memory footprint ${mib(footprintBefore)} MiB before, '
+        '${mib(memoryFootprintForTesting())} MiB after');
     expect(after, lessThanOrEqualTo(before));
   });
 
@@ -404,6 +409,8 @@ void main() {
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
+    final footprintBefore = memoryFootprintForTesting();
+    var footprintMax = footprintBefore;
 
     // Sizes that fit the view: a 1600x1000 window on macOS, a 402x874 screen
     // on an iPhone 16 Pro.
@@ -422,6 +429,9 @@ void main() {
       i++;
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 8));
+      if (i % 30 == 0) {
+        footprintMax = math.max(footprintMax, memoryFootprintForTesting());
+      }
     }
     // Whole logical pixels, so the physical size is exact.
     final finalSize = Size((view.width * 0.8).floorToDouble(),
@@ -433,8 +443,56 @@ void main() {
         (f) =>
             f.physicalSize.width == finalSize.width * ratio &&
             f.physicalSize.height == finalSize.height * ratio);
-    debugPrint('resize: $i sizes, final frame $frame; ${controller.stats()}');
+    await Future<void>.delayed(const Duration(seconds: 1));
+    String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
+    debugPrint('resize: $i sizes, final frame $frame; ${controller.stats()}; '
+        'memory footprint ${mib(footprintBefore)} MiB before, '
+        '${mib(footprintMax)} MiB max during, '
+        '${mib(memoryFootprintForTesting())} MiB after');
     expect(frame.scaleFactor, ratio);
+  });
+
+  // Before the fixes in docs/flutter-texture-cache-followup.md, almost every
+  // display buffer replaced by a resize stayed alive until the map was
+  // disposed. Flutter's own texture cache keeps them during a burst of
+  // resizes; the plugin makes it free them after the burst.
+  testWidgets('display buffers replaced by resizes are freed afterwards',
+      (tester) async {
+    final controller = MapTextureController.create(
+        pixelRatio: tester.view.devicePixelRatio);
+    controllers.add(controller);
+    final size = ValueNotifier(const Size(200, 200));
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ValueListenableBuilder<Size>(
+          valueListenable: size,
+          builder: (context, s, _) => SizedBox(
+              width: s.width,
+              height: s.height,
+              child: MapTextureView(controller: controller)),
+        ),
+      ),
+    ));
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await loaded;
+    resetReleasedBuffersForTesting();
+    final view = tester.view.physicalSize / tester.view.devicePixelRatio;
+    for (var i = 0; i < 120; i++) {
+      final t = i / 120;
+      size.value = Size(view.width * (0.3 + 0.6 * t),
+          view.height * (0.2 + 0.5 * (1 - t)));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 2500));
+    final r = releasedBuffersForTesting();
+    debugPrint('released buffers: ${r.alive} of ${r.released} alive '
+        '2.5 s after the last resize');
+    expect(r.released, greaterThan(100));
+    expect(r.alive, lessThanOrEqualTo(r.released ~/ 4));
   });
 
   testWidgets('example shows a style load failure and keeps running',
