@@ -1,4 +1,4 @@
-# flutter_map_maplibre_texture
+# flutter_mapigrade
 
 A new Flutter plugin project.
 

@@ -1,6 +1,6 @@
 ## 1. Shared Darwin sources (D11)
 
-- [x] 1.1 Move `packages/flutter_map_maplibre_texture/macos/flutter_map_maplibre_texture/` to `darwin/flutter_map_maplibre_texture/` with `git mv`, keep the `core` and `Frameworks/MapLibreNativeC.xcframework` symlinks working from the new location, and set `sharedDarwinSource: true` for `macos` (no `ios` entry yet) in the plugin's `pubspec.yaml`; verify that `ls -l` resolves both symlinks
+- [x] 1.1 Move `packages/flutter_mapigrade/macos/flutter_mapigrade/` to `darwin/flutter_mapigrade/` with `git mv`, keep the `core` and `Frameworks/MapLibreNativeC.xcframework` symlinks working from the new location, and set `sharedDarwinSource: true` for `macos` (no `ios` entry yet) in the plugin's `pubspec.yaml`; verify that `ls -l` resolves both symlinks
 - [x] 1.2 Replace the `FlutterMacOS` imports in the bridge sources and the public header with the `TARGET_OS_OSX` conditional import from D11; verify that `flutter analyze` passes and that the macOS example builds with `flutter build macos`
 - [x] 1.3 Rerun the macOS integration tests (`flutter test integration_test -d macos`) and the native core tests after the move; verify that all of them pass before any iOS code is added, and commit the move on its own
 

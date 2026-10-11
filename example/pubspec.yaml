@@ -1,5 +1,5 @@
-name: flutter_map_maplibre_texture_example
-description: "Demonstrates how to use the flutter_map_maplibre_texture plugin."
+name: flutter_mapigrade_example
+description: "Demonstrates how to use the flutter_mapigrade plugin."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -17,13 +17,13 @@ dependencies:
   flutter:
     sdk: flutter
 
-  flutter_map_maplibre_texture:
+  flutter_mapigrade:
     # When depending on this package from a real application you should use:
-    #   flutter_map_maplibre_texture: ^x.y.z
+    #   flutter_mapigrade: ^x.y.z
     # See https://dart.dev/tools/pub/dependencies#version-constraints
     # The example app is bundled with the plugin so we use a path dependency on
     # the parent directory to use the current plugin's version.
-    path: ../packages/flutter_map_maplibre_texture
+    path: ../packages/flutter_mapigrade
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

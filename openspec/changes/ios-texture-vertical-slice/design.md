@@ -4,7 +4,7 @@ See proposal.md for motivation and scope, and specs/map-texture/spec.md for the 
 
 Current state, as checked in this repository on 2026-10-09:
 
-- The plugin's Apple code is in `packages/flutter_map_maplibre_texture/macos/flutter_map_maplibre_texture/`, a Swift package with `FlutterMapMaplibreTexturePlugin.mm`, `MapTextureMetal.mm` and `MapTextureRegistry.h`. `Sources/.../core` is a symlink to `src/core/`, and `Frameworks/MapLibreNativeC.xcframework` is a symlink to the build output in `third_party/`. The only macOS-specific APIs in these files are the `FlutterMacOS` import and `NSCachesDirectory` (which also exists on iOS). `CVPixelBuffer`, IOSurface, `CVMetalTextureCache`, `MTLBlitCommandEncoder`, `FlutterTexture` and `mach` thread enumeration are available on iOS.
+- The plugin's Apple code is in `packages/flutter_mapigrade/macos/flutter_mapigrade/`, a Swift package with `MapigradePlugin.mm`, `MapTextureMetal.mm` and `MapTextureRegistry.h`. `Sources/.../core` is a symlink to `src/core/`, and `Frameworks/MapLibreNativeC.xcframework` is a symlink to the build output in `third_party/`. The only macOS-specific APIs in these files are the `FlutterMacOS` import and `NSCachesDirectory` (which also exists on iOS). `CVPixelBuffer`, IOSurface, `CVMetalTextureCache`, `MTLBlitCommandEncoder`, `FlutterTexture` and `mach` thread enumeration are available on iOS.
 - `src/core/` has no Apple dependencies. `map_texture_api.cpp` keeps all live maps in a handle registry.
 - `scripts/build_maplibre_ffi.sh` builds one preset (`macos-arm64-metal`) and wraps the dylib in a versioned macOS framework inside `MapLibreNativeC.xcframework`.
 
@@ -33,7 +33,7 @@ Platform constraint: iOS doesn't allow an app to submit GPU work while it is in 
 
 ### D11. Shared `darwin/` sources
 
-Move `macos/flutter_map_maplibre_texture/` to `darwin/flutter_map_maplibre_texture/` and set `sharedDarwinSource: true` for both `ios` and `macos` in the plugin's `pubspec.yaml`. `Package.swift` declares `.macOS("14.3")` and `.iOS("15.5")`. The bridge sources import Flutter as:
+Move `macos/flutter_mapigrade/` to `darwin/flutter_mapigrade/` and set `sharedDarwinSource: true` for both `ios` and `macos` in the plugin's `pubspec.yaml`. `Package.swift` declares `.macOS("14.3")` and `.iOS("15.5")`. The bridge sources import Flutter as:
 
 ```objc
 #if TARGET_OS_OSX

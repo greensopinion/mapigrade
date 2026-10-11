@@ -13,7 +13,7 @@
 //   flutter build ios --release --dart-define=BENCHMARK=true
 //   xcrun devicectl device install app --device <device> build/ios/iphoneos/Runner.app
 //   xcrun devicectl device process launch --device <device> --console \
-//     org.maplibre.flutterMapMaplibreTextureExample
+//     com.greensopinion.mapigradeExample
 //
 // With --dart-define=BENCHMARK_SUSTAINED_S=<seconds>, the measured pass
 // instead pans back and forth over the warm-up path for that many seconds,
@@ -25,8 +25,8 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/scheduler.dart';
-import 'package:flutter_map_maplibre_texture/flutter_map_maplibre_texture.dart';
-import 'package:flutter_map_maplibre_texture/testing.dart';
+import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/testing.dart';
 
 const benchmarkEnabled = bool.fromEnvironment('BENCHMARK');
 

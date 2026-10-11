@@ -10,8 +10,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_map_maplibre_texture/testing.dart';
-import 'package:flutter_map_maplibre_texture_example/color_check.dart';
+import 'package:flutter_mapigrade/testing.dart';
+import 'package:flutter_mapigrade_example/color_check.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 

@@ -55,13 +55,13 @@ cd example
 # run: a window behind others, or partly under another window, gets fewer frames or none.
 flutter build macos --release --dart-define=BENCHMARK=true
 open -W --env MLT_WINDOW_SIZE=1600x1000 --stdout result.txt \
-  build/macos/Build/Products/Release/flutter_map_maplibre_texture_example.app
+  build/macos/Build/Products/Release/flutter_mapigrade_example.app
 
 # iPhone: the result line is read from the console.
 flutter build ios --release --dart-define=BENCHMARK=true
 xcrun devicectl device install app --device <device> build/ios/iphoneos/Runner.app
 xcrun devicectl device process launch --device <device> --console \
-  -e '{"MLT_KEEP_AWAKE":"1"}' org.maplibre.flutterMapMaplibreTextureExample
+  -e '{"MLT_KEEP_AWAKE":"1"}' com.greensopinion.mapigradeExample
 
 # 5-minute run: add --dart-define=BENCHMARK_SUSTAINED_S=300 to the iOS build.
 ```

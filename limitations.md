@@ -102,7 +102,7 @@ On a memory warning the plugin calls `mln_render_session_reduce_memory_use()` (d
 ## What the Android slice can reuse
 
 - `src/core/` as is: the map thread, command queue, camera coalescing, buffer state, pacing, events and the C ABI, and from the iOS slice the pause gate (`render_gate.h`, `SetAllPaused`), the memory reduction command (`ReduceAllMemoryUse`) and the platform scope hook (`RunInPlatformScope`, which can be empty on Android). The Android bridge drives pause and memory reduction from its own lifecycle callbacks.
-- The Dart API (`lib/src/texture/`) and the test hooks (`package:flutter_map_maplibre_texture/testing.dart`) as is.
+- The Dart API (`lib/src/texture/`) and the test hooks (`package:flutter_mapigrade/testing.dart`) as is.
 - The integration tests, including the lifecycle tests (pause, dispose while paused, memory reduction) and the released-buffer test, which needs an Android implementation of `map_texture_released_buffers_alive_for_testing`.
 - The measurement procedure (`example/lib/benchmark.dart`, including the 5-minute mode) and the memory and color measurements in `example/integration_test/`.
 - `MaybeNotifyAfterResize()` is a workaround for Flutter's Darwin embedders; check whether Android's `SurfaceProducer` path needs it before keeping it there.

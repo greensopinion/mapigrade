@@ -4,7 +4,7 @@ The macOS vertical slice met its go/no-go criteria: the median displayed map fra
 
 ## What Changes
 
-- Add iOS to the `flutter_map_maplibre_texture` plugin. It reuses the C/C++ core (`src/core/`), the Dart API (`lib/src/texture/`) and the Metal bridge, as listed in `limitations.md` ("What the iOS slice can reuse").
+- Add iOS to the `flutter_mapigrade` plugin. It reuses the C/C++ core (`src/core/`), the Dart API (`lib/src/texture/`) and the Metal bridge, as listed in `limitations.md` ("What the iOS slice can reuse").
 - Move the plugin's Apple native code from `macos/` to a shared `darwin/` directory (Flutter's `sharedDarwinSource`), so that macOS and iOS build the same bridge sources. Platform differences (the `Flutter` and `FlutterMacOS` imports, application lifecycle notifications) are handled with conditional compilation in those sources.
 - Extend `scripts/build_maplibre_ffi.sh` to build the `ios-arm64-metal` and `ios-simulator-arm64-metal` presets in addition to `macos-arm64-metal`, and produce one `MapLibreNativeC.xcframework` with a slice per platform. The FFI commit stays pinned at `dd97d20f8fab6990cd87c13f091ce00e662707bd`.
 - Stop rendering while the iOS app is in the background, and resume when it returns to the foreground, showing the latest camera.
@@ -26,7 +26,7 @@ None.
 
 ## Impact
 
-- Code: `packages/flutter_map_maplibre_texture/macos/` moves to `darwin/`; the bridge sources gain iOS code paths; `src/core/` gains a pause and resume operation and a memory-reduction command, which have no Apple dependencies. The Dart API doesn't change.
+- Code: `packages/flutter_mapigrade/macos/` moves to `darwin/`; the bridge sources gain iOS code paths; `src/core/` gains a pause and resume operation and a memory-reduction command, which have no Apple dependencies. The Dart API doesn't change.
 - Example: a new `example/ios/` project. Its minimum iOS version is 15.5, which is the FFI's iOS deployment target.
 - Build prerequisites: Xcode with the iOS SDK and an iOS simulator runtime, in addition to the macOS prerequisites. A connected iPhone with a development team for signing is needed for device tests and measurements.
 - Distribution: the iOS app bundle includes `MapLibreNativeC.framework`. This change records the size increase.

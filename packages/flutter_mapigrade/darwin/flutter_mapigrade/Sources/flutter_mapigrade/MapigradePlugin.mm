@@ -1,4 +1,4 @@
-#import "FlutterMapMaplibreTexturePlugin.h"
+#import "MapigradePlugin.h"
 
 #import "MapTextureRegistry.h"
 
@@ -31,7 +31,7 @@ static void MLTPauseRendering(NSNotification*) {
   map_texture::SetAllPaused(true);
   auto waited = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::steady_clock::now() - start);
-  NSLog(@"flutter_map_maplibre_texture: paused rendering in %lld us "
+  NSLog(@"flutter_mapigrade: paused rendering in %lld us "
         @"(rendered frames: %lld)",
         static_cast<long long>(waited.count()),
         static_cast<long long>(map_texture::TotalRenderedFrames()));
@@ -42,14 +42,14 @@ static void MLTPauseRendering(NSNotification*) {
 static void MLTResumeRendering(NSNotification*) {
   int64_t rendered = map_texture::TotalRenderedFrames();
   map_texture::SetAllPaused(false);
-  NSLog(@"flutter_map_maplibre_texture: resumed rendering "
+  NSLog(@"flutter_mapigrade: resumed rendering "
         @"(rendered frames before resuming: %lld)",
         static_cast<long long>(rendered));
 }
 
 static void MLTReduceMemoryUse(NSNotification*) {
   map_texture::ReduceAllMemoryUse();
-  NSLog(@"flutter_map_maplibre_texture: memory warning, reducing memory use");
+  NSLog(@"flutter_mapigrade: memory warning, reducing memory use");
 }
 
 static void MLTObserveApplicationLifecycle(void) {
@@ -69,7 +69,7 @@ static void MLTObserveApplicationLifecycle(void) {
 }
 #endif
 
-@implementation FlutterMapMaplibreTexturePlugin
+@implementation MapigradePlugin
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   gTextureRegistry = registrar.textures;

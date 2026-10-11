@@ -1,4 +1,4 @@
-name: flutter_map_maplibre_texture
+name: flutter_mapigrade
 description: "Displays a MapLibre Native map in a Flutter Texture widget, rendered on the GPU through MapLibre Native FFI."
 version: 0.0.1
 publish_to: none
@@ -21,8 +21,8 @@ flutter:
   plugin:
     platforms:
       ios:
-        pluginClass: FlutterMapMaplibreTexturePlugin
+        pluginClass: MapigradePlugin
         sharedDarwinSource: true
       macos:
-        pluginClass: FlutterMapMaplibreTexturePlugin
+        pluginClass: MapigradePlugin
         sharedDarwinSource: true

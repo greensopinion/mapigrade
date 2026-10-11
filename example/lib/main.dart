@@ -4,8 +4,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter_map_maplibre_texture/flutter_map_maplibre_texture.dart';
-import 'package:flutter_map_maplibre_texture/testing.dart';
+import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/testing.dart';
 
 import 'benchmark.dart';
 

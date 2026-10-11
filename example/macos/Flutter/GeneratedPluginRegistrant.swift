@@ -5,8 +5,8 @@
 import FlutterMacOS
 import Foundation
 
-import flutter_map_maplibre_texture
+import flutter_mapigrade
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
-  FlutterMapMaplibreTexturePlugin.register(with: registry.registrar(forPlugin: "FlutterMapMaplibreTexturePlugin"))
+  MapigradePlugin.register(with: registry.registrar(forPlugin: "MapigradePlugin"))
 }

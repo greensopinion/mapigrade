@@ -331,7 +331,7 @@ std::string PlatformCachePath() {
       .firstObject;
   if (caches == nil) return {};
   NSURL* directory =
-      [caches URLByAppendingPathComponent:@"flutter_map_maplibre_texture"
+      [caches URLByAppendingPathComponent:@"flutter_mapigrade"
                               isDirectory:YES];
   [[NSFileManager defaultManager] createDirectoryAtURL:directory
                            withIntermediateDirectories:YES

@@ -41,7 +41,7 @@ MapLibre Native renders the map on the GPU into memory that Flutter displays wit
 +----------------------------------------------------+
 ```
 
-The package is named `flutter_map_maplibre_texture`. The name follows the `flutter_map` plugin naming convention, and "texture" distinguishes it from `flutter_map_maplibre` (section 9), which displays the native MapLibre SDK view.
+The project is named Mapigrade, and its Flutter package is named `flutter_mapigrade`. It is distinct from `flutter_map_maplibre` (section 9), which displays the native MapLibre SDK view.
 
 ## 3. Decisions
 
@@ -57,7 +57,7 @@ The package is named `flutter_map_maplibre_texture`. The name follows the `flutt
 | 8 | Threads that the native core creates own the MapLibre runtime, map and render session; Dart sends commands through `dart:ffi` | Keeps MapLibre work off Flutter's UI thread; one owner per MapLibre object (section 5) |
 | 9 | Zero-copy is preferred; GPU-to-GPU copies are acceptable; CPU readback is not | CPU readback of full frames can't reach the frame rate target |
 | 10 | Apple bridge: MapLibre renders into borrowed Metal textures backed by a set of three IOSurface-backed `CVPixelBuffer`s; fallback: one texture plus a Metal blit | Zero-copy, if switching the target texture each frame costs little (section 7) |
-| 11 | One package, `flutter_map_maplibre_texture`, with an internal boundary: `lib/src/texture/` must not import `flutter_map` | Avoids coordinated releases of two packages while the texture core API is changing; can be split later without renaming (section 5) |
+| 11 | One package, `flutter_mapigrade`, with an internal boundary: `lib/src/texture/` must not import `flutter_map` | Avoids coordinated releases of two packages while the texture core API is changing; can be split later without renaming (section 5) |
 
 ## 4. Integration model
 
@@ -83,7 +83,7 @@ FlutterMap(
 ### Package layout
 
 ```
-packages/flutter_map_maplibre_texture/
+packages/flutter_mapigrade/
   lib/src/texture/   Dart API: controller, widget, @Native bindings
                      (must not import package:flutter_map; a test checks this)
   lib/src/layer/     flutter_map layer (after the texture core works)

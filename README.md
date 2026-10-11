@@ -1,4 +1,4 @@
-# flutter_native_map
+# Mapigrade
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS and iOS, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
 
@@ -10,12 +10,12 @@ A proof of concept that renders a MapLibre Native map on the GPU into a Flutter 
 ## Repository layout
 
 ```
-packages/flutter_map_maplibre_texture/   Flutter plugin (macOS and iOS)
+packages/flutter_mapigrade/              Flutter plugin (macOS and iOS)
   lib/src/texture/                       Dart API: MapTextureController, MapTextureView, @Native bindings
   lib/testing.dart                       test hooks and measurement helpers (not for applications)
   lib/src/layer/                         flutter_map layer (later change; empty)
   src/core/                              C++ core: map thread, commands, buffer state, C ABI (no Apple dependencies)
-  darwin/flutter_map_maplibre_texture/   Swift package shared by macOS and iOS: Metal render target,
+  darwin/flutter_mapigrade/              Swift package shared by macOS and iOS: Metal render target,
                                          FlutterTexture, plugin class, iOS lifecycle observers
   test/                                  Dart unit tests; test/native/ C++ unit tests for the core
 example/                                 macOS and iOS example app, integration tests, benchmark, color check
@@ -112,7 +112,7 @@ The example shows the map with a control panel above it: style selection (OpenFr
 
 ```sh
 # C++ unit tests for the core (no MapLibre)
-cd packages/flutter_map_maplibre_texture
+cd packages/flutter_mapigrade
 cmake -S test/native -B build/native-tests
 cmake --build build/native-tests
 ctest --test-dir build/native-tests --output-on-failure
@@ -131,7 +131,7 @@ flutter drive -d <iPhone id> --driver=test_driver/integration_test.dart \
   --target=integration_test/map_texture_test.dart
 ```
 
-The iOS lifecycle tests use test hooks (`package:flutter_map_maplibre_texture/testing.dart`) that call the same functions as the background, foreground and memory warning handlers. The real notifications were checked on an iPhone (design D13, result).
+The iOS lifecycle tests use test hooks (`package:flutter_mapigrade/testing.dart`) that call the same functions as the background, foreground and memory warning handlers. The real notifications were checked on an iPhone (design D13, result).
 
 ## Measurements
 
@@ -140,13 +140,13 @@ cd example
 # macOS (open brings the window to the front; a window behind others gets no frames)
 flutter build macos --release --dart-define=BENCHMARK=true
 open -W --env MLT_WINDOW_SIZE=1600x1000 --stdout result.txt \
-  build/macos/Build/Products/Release/flutter_map_maplibre_texture_example.app
+  build/macos/Build/Products/Release/flutter_mapigrade_example.app
 
 # iPhone (add --dart-define=BENCHMARK_SUSTAINED_S=300 for the 5-minute run)
 flutter build ios --release --dart-define=BENCHMARK=true
 xcrun devicectl device install app --device <device> build/ios/iphoneos/Runner.app
 xcrun devicectl device process launch --device <device> --console \
-  -e '{"MLT_KEEP_AWAKE":"1"}' org.maplibre.flutterMapMaplibreTextureExample
+  -e '{"MLT_KEEP_AWAKE":"1"}' com.greensopinion.mapigradeExample
 
 # Memory and color measurements (any device)
 flutter drive -d <device> --driver=test_driver/integration_test.dart \
@@ -157,7 +157,7 @@ flutter drive -d <device> --driver=test_driver/integration_test.dart \
 
 The benchmark pans over central London for 30 s to load the area, pans the same path again for 30 s while measuring, prints a line starting with `BENCHMARK_RESULT`, and exits. Results are in `benchmarks.md`.
 
-Instruments' `xctrace` launches an app by its bundle identifier, which the Debug and Release builds share. Delete `build/macos/Build/Products/Debug/flutter_map_maplibre_texture_example.app` before tracing the Release build, or `xctrace` starts the Debug build.
+Instruments' `xctrace` launches an app by its bundle identifier, which the Debug and Release builds share. Delete `build/macos/Build/Products/Debug/flutter_mapigrade_example.app` before tracing the Release build, or `xctrace` starts the Debug build.
 
 ## MapLibre Native FFI build details
 
@@ -194,7 +194,7 @@ The window shows a map of San Francisco.
 
 ## Packaging
 
-`packages/flutter_map_maplibre_texture/darwin/flutter_map_maplibre_texture/Package.swift` declares `MapLibreNativeC.xcframework` as a binary target (through a symlink into `third_party/`), so Xcode links the framework into the app, embeds it in `Contents/Frameworks/` and signs it. The plugin's C++ core (`src/core/`, also a symlink) and the Metal bridge are compiled into the app executable, which exports the `map_texture_*` functions that Dart binds with `@Native`.
+`packages/flutter_mapigrade/darwin/flutter_mapigrade/Package.swift` declares `MapLibreNativeC.xcframework` as a binary target (through a symlink into `third_party/`), so Xcode links the framework into the app, embeds it in `Contents/Frameworks/` and signs it. The plugin's C++ core (`src/core/`, also a symlink) and the Metal bridge are compiled into the app executable, which exports the `map_texture_*` functions that Dart binds with `@Native`.
 
 On iOS, Xcode embeds and signs the framework in `Runner.app/Frameworks/`. The example app is arm64 only, because the FFI presets are arm64 only: `ARCHS = arm64` in `example/macos/Runner/Configs/AppInfo.xcconfig`, and `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64` in `example/ios/Flutter/Debug.xcconfig` and `Release.xcconfig`.
 
