@@ -143,8 +143,34 @@ void main() {
             near(f.camera.zoom, camera.zoom));
     controller.setCamera(camera);
     final displayed = await frame;
-    // MapLibre reports bearing with the opposite sign convention.
-    expect(displayed.camera.bearing.abs(), closeTo(30, 1e-6));
+    // The frame reports the bearing with the sign it was set with; the
+    // layer's transform relies on it (flutter-map-layer design D23).
+    expect(displayed.camera.bearing, closeTo(30, 1e-6));
+  });
+
+  testWidgets('display time increases from frame to frame', (tester) async {
+    final controller = await showMap(tester);
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleJson(colorStyle('#3366cc'));
+    await loaded;
+
+    final displayed = <FrameCamera>[];
+    final sub = controller.frames.listen(displayed.add);
+    for (var i = 0; i < 30; i++) {
+      controller
+          .setCamera(MapCamera(latitude: 0, longitude: i * 0.1, zoom: 3));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await sub.cancel();
+
+    expect(displayed.length, greaterThan(10));
+    expect(displayed.first.displayTime, greaterThan(0));
+    for (var k = 1; k < displayed.length; k++) {
+      expect(displayed[k].displayTime,
+          greaterThan(displayed[k - 1].displayTime),
+          reason: 'frame ${displayed[k].frameId}');
+    }
   });
 
   testWidgets('rapid camera updates do not build up a backlog',

@@ -55,7 +55,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   // Flutter's raster thread. Marks the latest frame as presented and returns
   // its buffer, retained, through RenderTarget::CopyBufferLocked. Reports a
-  // frame-displayed event when the frame is new.
+  // frame-displayed event with the display time when the frame is new.
   void* Present();
 
   map_texture_stats stats();
@@ -87,7 +87,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void MaybeNotifyAfterResize();
 
   void Emit(int32_t type, const char* message = nullptr,
-            const FrameInfo* frame = nullptr);
+            const FrameInfo* frame = nullptr, int64_t display_time_us = 0);
   void ReportStatus(const char* what, mln_status status);
 
   const int64_t handle_;

@@ -15,12 +15,23 @@
 #include <cstdint>
 #include <mutex>
 
+#include <time.h>
+
 #include "command_queue.h"
 
 namespace map_texture {
 
 inline constexpr int kBufferCount = 3;
 inline constexpr int kMaxBufferCount = 4;
+
+// The clock of Flutter's FrameTiming on macOS and iOS, in microseconds: the
+// engine reads Dart_TimelineGetTicks, which is CLOCK_MONOTONIC_RAW (design
+// D24). std::chrono::steady_clock is CLOCK_UPTIME_RAW on Apple platforms and
+// differs from it by the time the device has slept.
+inline int64_t DisplayClockUs() {
+  return static_cast<int64_t>(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) /
+                              1000);
+}
 
 // What a buffer holds: the frame id and the camera and size it was rendered
 // with.
@@ -74,6 +85,9 @@ class BufferState {
     FrameInfo info;
     // True if this present returns a frame that wasn't returned before.
     bool is_new = false;
+    // Set when is_new: the time at which Flutter took the frame, from
+    // DisplayClockUs().
+    int64_t display_time_us = 0;
   };
 
   // Marks the latest buffer as presented and returns it. `use` runs under the
@@ -87,6 +101,7 @@ class BufferState {
       result.index = latest_;
       result.info = info_[latest_];
       result.is_new = info_[latest_].frame_id != last_presented_frame_id_;
+      if (result.is_new) result.display_time_us = DisplayClockUs();
       presented_ = latest_;
       last_presented_frame_id_ = info_[latest_].frame_id;
     }

@@ -32,6 +32,7 @@ class FrameCamera {
     required this.camera,
     required this.physicalSize,
     required this.scaleFactor,
+    required this.displayTime,
   });
 
   /// Increases by one for each frame the map renders.
@@ -39,6 +40,11 @@ class FrameCamera {
   final MapCamera camera;
   final Size physicalSize;
   final double scaleFactor;
+
+  /// The time at which Flutter took the frame for display, in microseconds on
+  /// the clock of [FrameTiming.timestampInMicroseconds], so that the frame can
+  /// be matched to the Flutter frame whose rasterization displayed it.
+  final int displayTime;
 
   @override
   String toString() =>
@@ -322,6 +328,7 @@ class MapTextureController {
         physicalSize:
             Size(e.physicalWidth.toDouble(), e.physicalHeight.toDouble()),
         scaleFactor: e.scaleFactor,
+        displayTime: e.displayTimeUs,
       );
     }
     mapTextureEventFree(pointer);

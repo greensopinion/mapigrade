@@ -43,6 +43,10 @@ typedef struct map_texture_event {
   int32_t physical_width;
   int32_t physical_height;
   double scale_factor;
+  // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED: the time at which Flutter took
+  // the frame for display, in microseconds on the clock of Flutter's
+  // FrameTiming.
+  int64_t display_time_us;
   // Set for MAP_TEXTURE_EVENT_LOADING_FAILED and MAP_TEXTURE_EVENT_RENDER_ERROR;
   // otherwise null. UTF-8, null-terminated.
   char* message;

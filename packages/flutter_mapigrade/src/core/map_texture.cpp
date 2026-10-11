@@ -158,7 +158,8 @@ void* MapTexture::Present() {
         stats_.pickup_wait_total_ns += now - published;
       }
     }
-    Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &presented.info);
+    Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &presented.info,
+         presented.display_time_us);
   }
   if (waiting_for_buffer_.exchange(false)) Signal();
   return buffer;
@@ -604,7 +605,7 @@ bool MapTexture::RenderAhead() {
 }
 
 void MapTexture::Emit(int32_t type, const char* message,
-                      const FrameInfo* frame) {
+                      const FrameInfo* frame, int64_t display_time_us) {
   std::lock_guard lock(callback_mutex_);
   if (callback_ == nullptr) return;
   auto* event =
@@ -620,6 +621,7 @@ void MapTexture::Emit(int32_t type, const char* message,
     event->physical_width = static_cast<int32_t>(frame->physical_width);
     event->physical_height = static_cast<int32_t>(frame->physical_height);
     event->scale_factor = frame->scale_factor;
+    event->display_time_us = display_time_us;
   }
   if (message != nullptr) event->message = strdup(message);
   callback_(event);

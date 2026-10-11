@@ -13,8 +13,15 @@ class MainFlutterWindow: NSWindow {
     if let value = ProcessInfo.processInfo.environment["MLT_WINDOW_SIZE"] {
       let parts = value.split(separator: "x").compactMap { Double($0) }
       if parts.count == 2 {
-        self.setContentSize(NSSize(width: parts[0], height: parts[1]))
+        let size = NSSize(width: parts[0], height: parts[1])
+        self.setContentSize(size)
         self.center()
+        // Something after awakeFromNib resets the window to the nib's 800x600
+        // content size, so apply the size again once launch has finished.
+        DispatchQueue.main.async {
+          self.setContentSize(size)
+          self.center()
+        }
       }
     }
 

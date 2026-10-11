@@ -65,6 +65,20 @@ class Benchmark {
   final _mapFrameTimes = <Duration>[];
   final _mapFrameIds = <int>{};
   bool _measuring = false;
+  FrameCamera? _lastFrame;
+
+  /// The size of the last displayed map frame, so that each result records
+  /// the size it was measured at.
+  Map<String, Object> _mapSize() {
+    final f = _lastFrame;
+    if (f == null) return {'map_physical_size': 'unknown'};
+    return {
+      'map_physical_size':
+          '${f.physicalSize.width.round()}x${f.physicalSize.height.round()}',
+      'map_scale_factor': f.scaleFactor,
+    };
+  }
+
   final _clock = Stopwatch()..start();
   Duration _measureStart = Duration.zero;
 
@@ -76,6 +90,7 @@ class Benchmark {
     });
     controller.frames.listen((f) {
       if (!_measuring) return;
+      _lastFrame = f;
       if (_mapFrameIds.add(f.frameId)) _mapFrameTimes.add(_clock.elapsed);
     });
     SchedulerBinding.instance.addTimingsCallback((timings) {
@@ -135,6 +150,7 @@ class Benchmark {
     }
     final result = {
       'duration_s': sustainedDuration.inSeconds,
+      ..._mapSize(),
       'interval_s': sustainedInterval.inSeconds,
       'map_fps_per_interval': [
         for (final n in framesPerInterval) n / sustainedInterval.inSeconds,
@@ -227,6 +243,7 @@ class Benchmark {
     final copies = after.copyCount - before.copyCount;
     return {
       'duration_s': seconds,
+      ..._mapSize(),
       'render_ahead': renderAhead,
       'zero_copy': zeroCopy,
       'flutter_frames': _frameTimings.length,

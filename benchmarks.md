@@ -2,15 +2,17 @@
 
 ## Frame rate during continuous pan
 
-Measured 2026-10-10 over central London (see Path), in release builds:
+Measured over central London (see Path), in release builds, macOS on 2026-10-11 (3 runs) and the iPhone on 2026-10-10:
 
 | Displayed map frames per second | macOS (MacBook Pro, M2 Max) | iPhone 15 Pro Max |
 | --- | --- | --- |
-| per-second p10 / p50 / p90 | 116 / 117 / 119 | 87 / 99–100 / 105 |
-| lowest second | 112 | 85 |
-| average over 30 s | 117.1 | 97 |
+| per-second p10 / p50 / p90 | 88–90 / 95–97 / 99–101 | 87 / 99–100 / 105 |
+| lowest second | 83–84 | 85 |
+| average over 30 s | 94.0–95.0 | 97 |
 
-Against the go/no-go values: both meet the 30 fps minimum and the 60 fps target. The iPhone numbers are with rendering ahead (design D19), the default since 2026-10-10: while a frame takes longer than a refresh interval, the next frame renders without waiting until Flutter has taken the previous one. On the Mac a frame takes 5.7 ms, less than the 8.33 ms refresh interval, so the map stays paced there.
+Against the go/no-go values: both meet the 30 fps minimum and the 60 fps target. The iPhone numbers are with rendering ahead (design D19), the default since 2026-10-10: while a frame takes longer than a refresh interval, the next frame renders without waiting until Flutter has taken the previous one. On the Mac a frame cycle takes 9.8 ms (`render_update` 6.7 ms, copy 0.59 ms), longer than the 8.33 ms refresh interval, so the Mac renders ahead too: about 1,000 of 3,060 rendered frames per run.
+
+The macOS numbers recorded before 2026-10-11 (per-second p10 / p50 / p90 116 / 117 / 119, lowest second 112, average 117.1, a frame of 5.7 ms) were measured with a smaller map than the Setup states. The macOS runner applied `MLT_WINDOW_SIZE` only in `awakeFromNib`, after which the window returned to the nib's 800x600 content size, and at the display's default resolution (1512x982 logical pixels) a 1600x1000 window doesn't fit anyway. Those runs therefore rendered about 1600x1200 physical pixels instead of 3200x2000. The same applies to every earlier macOS result in this file that is marked as measured before 2026-10-11. Since 2026-10-11 the runner applies the size again after launch, and the benchmark reports the size of the displayed map frames (`map_physical_size`).
 
 Before rendering ahead, the iPhone map waited for Flutter to take each frame, the GPU idled between frames and stayed in its minimum performance state, and runs settled at about 40 or about 57 fps at the median second (`render_update` about 17 or about 11.7 ms). The first measurement over London (per-second p10 / p50 / p90 37 / 41 / 57, average 46.4) and the 5-minute run below were in the slower state.
 
@@ -42,7 +44,7 @@ Before 2026-10-10 the benchmark panned east from San Francisco (37.7749, -122.41
 | --- | --- | --- |
 | Device | MacBook Pro (Mac14,5), Apple M2 Max, 12 CPU cores (8 performance, 4 efficiency), built-in Liquid Retina XDR display, 120 Hz | iPhone 15 Pro Max (iPhone16,2), ProMotion display, 120 Hz (`CADisableMinimumFrameDurationOnPhone` is set) |
 | OS | macOS 26.6.2 (25G83) | iOS 26.7.1 (23H30) |
-| Map size | window 1600x1000 logical pixels, pixel ratio 2, 3200x2000 physical | full screen, portrait, 430x932 logical pixels, pixel ratio 3, 1290x2796 physical |
+| Map size | window 1600x1000 logical pixels, pixel ratio 2, 3200x2000 physical (since 2026-10-11; before, about 800x600 logical, see above); the display scaled to 1800x1169 logical pixels | full screen, portrait, 430x932 logical pixels, pixel ratio 3, 1290x2796 physical |
 | Measured Flutter vsync interval | 8.333 ms | 8.335 ms |
 
 Both: Xcode 26.6 (17F113); Flutter 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4, Impeller (Metal); MapLibre Native FFI commit `dd97d20f8fab6990cd87c13f091ce00e662707bd` (presets `macos-arm64-metal` and `ios-arm64-metal`); style OpenFreeMap Liberty (`https://tiles.openfreemap.org/styles/liberty`); the example's Flutter control panel above the map. Thermal state on the iPhone was nominal at the start and end of every run.
@@ -72,7 +74,7 @@ The app prints one line starting with `BENCHMARK_RESULT` (or `BENCHMARK_SUSTAINE
 
 Displayed map frames: Dart counts each distinct frame id that Flutter took from the texture (the "frame displayed" event) and the time between them.
 
-These tables are from the first London measurement, before rendering ahead (iPhone in the slower state).
+These tables are from the first London measurement, before rendering ahead (iPhone in the slower state), measured before 2026-10-11: the macOS column is for a map of about 1600x1200 physical pixels (see above).
 
 | Metric (median / p95 / p99 / max) | macOS | iPhone |
 | --- | --- | --- |
@@ -92,6 +94,23 @@ These tables are from the first London measurement, before rendering ahead (iPho
 
 `render_update` returns only after MapLibre's command buffer completes (design, Context), so its duration is MapLibre's CPU encoding plus GPU execution on the map thread.
 
+macOS at 3200x2000 physical pixels (2026-10-11, 3 runs, ranges over the runs):
+
+| Metric | macOS |
+| --- | --- |
+| Displayed map frame interval, median / p95 / p99 / max | 8.36 / 16.72–16.77 / 16.89–16.91 / 19.5–25.7 ms |
+| Flutter frame interval, median / p95 / p99 / max | 8.333 / 8.336 / 8.339–8.340 / 8.345–8.350 ms |
+| Flutter frame total span, median / p95 / p99 / max | 0.42–0.43 / 1.20–1.23 / 1.36–1.39 / 3.3–5.7 ms |
+| Flutter raster, median / p95 / p99 / max | 0.25 / 0.89–0.90 / 0.99–1.01 / 2.3–5.5 ms |
+| Displayed map frames in 30 s | 2,821–2,849 |
+| Map frames rendered | 3,061–3,070 |
+| Frames rendered ahead (design D19) | 1,001–1,047 |
+| `render_update`, average (maximum) | 6.69–6.72 ms (18.2–37.6 ms) |
+| GPU copy into the display buffer, average | 0.58–0.60 ms |
+| Renders skipped because no buffer was free | 0 |
+
+Conditions: the Setup, with the built-in display as the only display, scaled to 1800x1169 logical pixels ("More Space") so that the 1600x1000 window fits, at 120 Hz.
+
 ### 5-minute run (iPhone, before rendering ahead)
 
 The measured pass pans back and forth over the warm-up path for 300 s. Average displayed map frame rate per 30 s interval: 40.5, 39.5, 39.9, 39.5, 39.4, 39.5, 39.8, 39.8, 40.7, 39.8. Per second: p10 33, p50 39, p90 52, lowest 30. Thermal state: nominal at the start of every interval and at the end. Skipped renders: 0. The frame rate doesn't decrease over the 5 minutes.
@@ -104,7 +123,96 @@ Not run: the iPhone XR (iPhone11,8, A12, 60 Hz) intended as a slower-GPU data po
 
 On 2026-10-09, with the earlier San Francisco path (see Path), a second run of the benchmark under Instruments' Metal System Trace (`xcrun xctrace record --template 'Metal System Trace'`) shows GPU work for the whole process: MapLibre's rendering, the per-frame copy and Flutter's compositing share one process and one GPU, and the trace doesn't attribute work to them separately. Over the traced run (warm-up and measured pass), the process's top-level GPU intervals summed to 4,117 ms on the vertex channel, 2,156 ms on the fragment channel and 680 ms on the compute channel (blits). Tracing reduced the displayed map frame rate to 97 frames per second (p95 interval 17.1 ms), so the untraced run's 119.0 fps was the result for that path.
 
-Per frame, the best available bound for MapLibre's GPU time on that path was the `render_update` average of 2.74 ms, which includes CPU encoding; over central London it is 4.52 ms on macOS and 15.22 ms on the iPhone (Results).
+Per frame, the best available bound for MapLibre's GPU time on that path was the `render_update` average of 2.74 ms, which includes CPU encoding; over central London it is 15.22 ms on the iPhone and 6.7 ms on macOS at 3200x2000 physical pixels (Results). The Stage 1 trace and the 2.74 ms were measured before 2026-10-11, with the smaller map.
+
+## Alignment during camera changes (Stage 3)
+
+The alignment benchmark (`example/lib/alignment_benchmark.dart`, flutter-map-layer change, designs D25, D26 and D28) shows the map as the base layer of a `FlutterMap` (`flutter_map` 8.3.2) and moves the `flutter_map` camera through its `MapController` on every Flutter frame. For each Flutter frame it records the map frame whose camera the layer's transform used (k_used) and the map frame that Flutter displayed (k_shown). From these it computes the alignment error: the largest distance, over the viewport corners and center, between where the displayed map frame draws a coordinate and where the overlays draw it. It computes the error both with the compensating transform (the last-reported-frame transform) and without it. All errors are in logical pixels.
+
+### macOS (task 6.1)
+
+Measured 2026-10-11, 3 runs, release build, 20 s per phase. Pans go back and forth over a 3,000 logical pixel path east of the Path's start at MapLibre zoom 14. Zoom goes between MapLibre zoom 13 and 15 at the Path's start, and rotation turns continuously. A warm-up runs every kind of camera change first.
+
+| Phase | Builds matched | Frames with k_shown ≠ k_used | With transform p50 / p95 / max | Without transform p50 / p95 / max |
+| --- | --- | --- | --- | --- |
+| pan 100 px/s | 2,390–2,396 of 2,398–2,401 | 78.5–79.4% | 0.83 / 1.67 / 2.5–7.5 | 1.67 / 2.5 / 3.33–8.33 |
+| pan 500 px/s | 2,401 of 2,401 | 77.6–79.0% | 4.17 / 8.33 / 12.5 | 8.33 / 12.5 / 12.5–16.67 |
+| pan 1,000 px/s | 2,401 of 2,401 | 78.0–80.6% | 8.33 / 16.67 / 25.0 | 16.67 / 25.0 / 33.33 |
+| pan 2,000 px/s | 2,401 of 2,401 | 78.5–80.7% | 16.67 / 33.33 / 50.0 | 33.33 / 50.0 / 66.67 |
+| zoom 1 level/s | 2,401 of 2,401 | 94.0–94.9% | 5.46 / 10.84 / 16.49 | 5.46 / 10.96 / 21.55 |
+| rotate 90°/s | 2,401 of 2,401 | 83.2–83.8% | 12.35 / 24.7 / 37.05 | 24.7 / 37.04 / 49.39 |
+
+Where the three runs agree, the table gives one value; otherwise it gives the range.
+
+- The measurement included 2,436 to 2,483 Flutter frames per phase. Of these, 35 to 82 were rasterized without a build (D25); they show the last build's camera and transform. A few builds at the start of the pan at 100 px/s had no displayed map frame yet (4, 8 and 5 builds). No display time fell outside a raster interval.
+- In pans the errors are whole multiples of the camera movement in one Flutter frame (speed / 120 Hz, 0.83 px at 100 px/s). Without the transform, the displayed map frame is two Flutter frames behind the overlays at p50. With the transform it is one frame off, because in about 79% of frames Flutter displays a map frame that is newer than the one the transform was built for.
+- In the zoom phase the transform doesn't reduce the p50 or p95 error.
+
+Conditions: the Setup's macOS device, OS, Xcode, Flutter and MapLibre Native FFI versions and style. The built-in display was the only display, scaled to 1800x1169 logical pixels, at 120 Hz. The window had 1600x1000 logical pixels at pixel ratio 2, which is 3200x2000 physical pixels, and every phase reported a 1600x1000 viewport. Thermal state was nominal at the start and the end of every phase. There were no overlays apart from three 16 px markers.
+
+Procedure:
+
+```sh
+cd example
+flutter build macos --release --dart-define=ALIGNMENT_BENCHMARK=true
+open -W --env MLT_WINDOW_SIZE=1600x1000 --stdout result.txt \
+  build/macos/Build/Products/Release/flutter_mapigrade_example.app
+```
+
+The app prints one `ALIGNMENT_RESULT` line per phase and exits. Before 2026-10-11 the macOS runner applied `MLT_WINDOW_SIZE` only in `awakeFromNib`, and the window then returned to the nib's 800x600 content size. Runs on 2026-10-10 therefore measured at 800x600, where the map renders a quarter as many pixels. In those runs Flutter displayed a newer frame than the transform used in 90–99% of frames, and the p50 error with the transform equaled the p50 error without it in every phase.
+
+### Screen capture check (macOS, task 6.3)
+
+This check tests whether the computed error matches what the window server composites (design D29). The alignment benchmark's video mode draws a grid of red discs, 20 px in radius and 150 px apart, from a GeoJSON source in a JSON style, and a `CircleLayer` puts a blue dot of 3 px radius at each disc's center. The run is 5 s at rest followed by the pan at 1,000 px/s for 30 s. A capture tool (`example/tool/alignment_capture.swift`) records the window with ScreenCaptureKit at 120 Hz and 1 image pixel per logical pixel. In every captured frame it measures the distance between each fully visible disc's center and its dot, and the width of `flutter_map`'s gray background at the left and right edges. Frames before the first movement count as at rest; after that, only frames whose discs moved count as the pan.
+
+Measured 2026-10-11, 1 run, release build:
+
+| | Captured | Computed by the benchmark in the same run |
+| --- | --- | --- |
+| At rest: distance p50 / p95 / max | 0.03 / 0.05 / 0.05 px (105 frames, 45 discs each) | 0 / 0 / 0 px |
+| Pan at 1,000 px/s: distance p50 / p95 / max | 8.40 / 8.53 / 9.13 px over all discs; 8.39 / 8.48 / 8.54 px for the per-frame median (3,311 frames that moved, 45–50 discs each) | with transform 8.33 / 8.33 / 8.34 px, without transform 8.33 / 8.33 / 8.34 px (3,604 Flutter frames, 3,601 of 3,601 builds matched) |
+| Uncovered strip at an edge | 16 px in 3,295 of the 3,311 moving frames | — |
+
+- The capture and the computation agree within 0.06 px at p50, well inside the 2 px limit of the task. So MapLibre renders at the camera it reports, the conversion and the transform are correct while the camera moves, and the map frame Flutter takes in a raster pass is composited with the overlays of the same Flutter frame.
+- The strip is 16 px wide, which is two Flutter frames of movement at 1,000 px/s (16.7 px). It appears in almost every moving frame.
+- In this run the map displayed 120 frames per second, and Flutter displayed a newer frame than the transform used in 99.9% of Flutter frames, so the errors with and without the transform were equal. The 1600x1000 runs above had 77.6–80.7% such frames in the pans. The check covers the computation in both cases, because it tests the inputs of the computation, not the frequency of new frames.
+
+Conditions: the Setup's macOS device and versions. The built-in display was at its default resolution (1512x982 logical pixels), at 120 Hz. The window had 1400x880 logical pixels at pixel ratio 2. Thermal state was nominal at the end of both phases.
+
+Procedure:
+
+```sh
+cd example
+flutter build macos --release --dart-define=ALIGNMENT_BENCHMARK=true \
+  --dart-define=ALIGNMENT_VIDEO=true --dart-define=ALIGNMENT_PHASE_S=30
+swiftc -O -o /tmp/alignment_capture tool/alignment_capture.swift
+open --env MLT_WINDOW_SIZE=1400x880 --stdout result.txt \
+  build/macos/Build/Products/Release/flutter_mapigrade_example.app
+/tmp/alignment_capture "$(pgrep -f flutter_mapigrade_example.app/Contents/MacOS)" 50
+```
+
+The capture tool needs the Screen Recording permission for the process that runs it, and prints one `ALIGNMENT_CAPTURE_RESULT` line.
+
+### iPhone (task 6.2)
+
+Measured 2026-10-11, 3 runs, release build, 20 s per phase, with the same phases as on macOS.
+
+| Phase | Map frames per second (average) | Builds matched | Frames with k_shown ≠ k_used | With transform p50 / p95 / max | Without transform p50 / p95 / max |
+| --- | --- | --- | --- | --- | --- |
+| pan 100 px/s | 93.8–104.4 | 2,394–2,395 of 2,400 | 78.4–87.2% | 0.83 / 1.67 / 2.5–3.32 | 1.67 / 2.5–2.51 / 4.16–4.17 |
+| pan 500 px/s | 96.0–97.0 | 2,400 of 2,400 | 80.6–81.4% | 4.17 / 8.35 / 12.52–12.54 | 8.34 / 12.52 / 16.7–20.86 |
+| pan 1,000 px/s | 94.0–94.3 | 2,400 of 2,400 | 79.1–79.2% | 8.33 / 16.71 / 25.05–25.08 | 16.69 / 25.05 / 33.4–33.41 |
+| pan 2,000 px/s | 94.2–94.7 | 2,400 of 2,400 | 79.2–79.6% | 16.66–16.67 / 33.41–33.42 / 50.1–50.13 | 33.37–33.38 / 50.1 / 66.79–66.8 |
+| zoom 1 level/s | 108.4–109.9 | 2,400 of 2,400 | 90.5–91.7% | 2.96–2.97 / 5.96 / 9.0–11.72 | 5.92–5.95 / 8.97 / 15.04–15.05 |
+| rotate 90°/s | 78.8–81.2 | 2,400 of 2,400 | 64.8–66.6% | 6.72 / 13.46 / 20.2–26.85 | 20.14–20.15 / 26.87–26.88 / 33.61–40.35 |
+
+- The measurement included 2,402 to 2,485 Flutter frames per phase. Of these, 8 to 85 were rasterized without a build. 5 or 6 builds at the start of the pan at 100 px/s had no displayed map frame yet. No display time fell outside a raster interval.
+- As on macOS, the transform halves the p50 error of pans: one Flutter frame of movement instead of two. It also halves the p50 error of zoom. For rotation it reduces the p50 error to a third (6.72 against 20.14). Rotation is also the phase with the lowest map frame rate and the fewest frames where k_shown ≠ k_used.
+- Frame rate check: the same session's frame-rate benchmark without the layer (`benchmark.dart`, 3 runs, 1290x2796 physical pixels) displayed 98.0, 98.0 and 98.9 map frames per second on average, with per-second p10 / p50 / p90 84–87 / 100–102 / 107–111 and `render_update` 8.2–8.3 ms. The pan at 100 px/s with the layer displayed 104.4, 93.8 and 94.0 per second: in two of three runs about 4% fewer than without the layer. The two benchmarks pan differently (30 s east against 20 s back and forth over 3,000 px of the same area), so the comparison isn't exact. We accepted the difference as within run-to-run variation; its cause is unknown.
+
+Conditions: the Setup's iPhone, OS, Xcode, Flutter and MapLibre Native FFI versions and style. Full screen, portrait, 430x932 logical pixels at pixel ratio 3, which is 1290x2796 physical pixels. Auto-Lock was off, and the app was launched with `MLT_KEEP_AWAKE=1`. Thermal state was nominal at the start of every run and at the end of every phase.
+
+Procedure: as for `benchmark.dart` (Setup), with `--dart-define=ALIGNMENT_BENCHMARK=true` in the iOS build. The app prints one `ALIGNMENT_RESULT` line per phase and exits.
 
 ## No CPU readback on the frame path
 

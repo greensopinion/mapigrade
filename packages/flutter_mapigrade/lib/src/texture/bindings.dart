@@ -38,6 +38,8 @@ final class MapTextureEventStruct extends Struct {
   external int physicalHeight;
   @Double()
   external double scaleFactor;
+  @Int64()
+  external int displayTimeUs;
   external Pointer<Utf8> message;
 }
 

@@ -167,6 +167,26 @@ void PresentRunsCallbackWithResult() {
   CHECK(seen == 2);
 }
 
+void NewFramesHaveIncreasingDisplayTime() {
+  BufferState state;
+  int64_t previous = 0;
+  for (uint64_t id = 1; id <= 20; ++id) {
+    state.Publish(static_cast<int>(id % 3), Frame(id));
+    int64_t before = map_texture::DisplayClockUs();
+    auto presented = state.Present([](const BufferState::Presented&) {});
+    int64_t after = map_texture::DisplayClockUs();
+    CHECK(presented.is_new);
+    CHECK(presented.display_time_us >= before);
+    CHECK(presented.display_time_us <= after);
+    CHECK(presented.display_time_us >= previous);
+    previous = presented.display_time_us;
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    auto again = state.Present([](const BufferState::Presented&) {});
+    CHECK(!again.is_new);
+    CHECK(again.display_time_us == 0);
+  }
+}
+
 void ThreeBuffersAlwaysHaveAFreeBuffer() {
   BufferState state;
   int current = state.AcquireFree(-1);
@@ -288,6 +308,8 @@ int main() {
       {"PresentedBufferIsNotFree", PresentedBufferIsNotFree},
       {"PresentReportsNewFramesOnce", PresentReportsNewFramesOnce},
       {"PresentRunsCallbackWithResult", PresentRunsCallbackWithResult},
+      {"NewFramesHaveIncreasingDisplayTime",
+       NewFramesHaveIncreasingDisplayTime},
       {"ThreeBuffersAlwaysHaveAFreeBuffer", ThreeBuffersAlwaysHaveAFreeBuffer},
       {"TwoBuffersSkipWhenNoneIsFree", TwoBuffersSkipWhenNoneIsFree},
       {"LatestPresentedPacesRendering", LatestPresentedPacesRendering},

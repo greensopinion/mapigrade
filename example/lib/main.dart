@@ -7,7 +7,10 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/testing.dart';
 
+import 'alignment_benchmark.dart';
 import 'benchmark.dart';
+import 'flutter_map_page.dart';
+import 'timing_probe.dart';
 
 /// Prints every displayed frame with its camera:
 /// `--dart-define=LOG_FRAMES=true`.
@@ -29,9 +32,13 @@ const styles = [
   MapStyle('Invalid URL', 'https://invalid.example.invalid/style.json'),
 ];
 
-void main() => runApp(const MaterialApp(
+void main() => runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: MapScreen(),
+      home: alignmentBenchmarkEnabled
+          ? const AlignmentBenchmarkPage()
+          : flutterMapPageAtLaunch
+              ? FlutterMapPage(styleUrl: styles.first.url)
+              : const MapScreen(),
     ));
 
 class MapScreen extends StatefulWidget {
@@ -85,13 +92,19 @@ class _MapScreenState extends State<MapScreen>
         pixelRatio: MediaQuery.devicePixelRatioOf(context));
     _subscriptions.add(controller.events.listen(_onEvent));
     _subscriptions.add(controller.frames.listen(_onFrame));
-    if (benchmarkEnabled) _camera = start;
+    if (benchmarkEnabled || timingProbeEnabled) _camera = start;
     controller.loadStyleUrl(styles[_styleIndex].url);
     controller.setCamera(_camera);
     _controller = controller;
     if (continuousPanAtLaunch && !benchmarkEnabled) _panTicker.start();
     if (benchmarkEnabled) {
       Benchmark(controller, onCamera: (camera) {
+        _camera = camera;
+        controller.setCamera(camera);
+      }).run();
+    }
+    if (timingProbeEnabled) {
+      TimingProbe(controller, onCamera: (camera) {
         _camera = camera;
         controller.setCamera(camera);
       }).run();
@@ -257,6 +270,7 @@ class _MapScreenState extends State<MapScreen>
                 _button('zoom-out', Icons.remove, () => _zoom(-1)),
                 _button('rotate-left', Icons.rotate_left, () => _rotate(-15)),
                 _button('rotate-right', Icons.rotate_right, () => _rotate(15)),
+                _button('open-flutter-map', Icons.layers, _openFlutterMapPage),
               ]),
               Wrap(spacing: 4, children: [
                 _button('pan-west', Icons.arrow_back, () => _pan(-0.25, 0)),
@@ -288,6 +302,11 @@ class _MapScreenState extends State<MapScreen>
       ),
     );
   }
+
+  void _openFlutterMapPage() => Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+          builder: (_) => FlutterMapPage(styleUrl: styles[_styleIndex].url)));
 
   Widget _button(String key, IconData icon, VoidCallback onPressed) =>
       IconButton.filledTonal(

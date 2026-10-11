@@ -59,11 +59,15 @@ The system SHALL render the map at the widget's logical size multiplied by the d
 - **THEN** after the rotation, the map fills the widget's new bounds without stretching, and features keep their size in logical pixels
 
 ### Requirement: Camera of each displayed frame
-The system SHALL report to Dart the camera (center, zoom, bearing) and viewport size that each displayed frame was rendered with. The report SHALL identify the frame, so that Dart can tell which camera the currently displayed frame corresponds to.
+The system SHALL report to Dart the camera (center, zoom, bearing) and viewport size that each displayed frame was rendered with. The report SHALL identify the frame, so that Dart can tell which camera the currently displayed frame corresponds to. The report SHALL also include the time at which Flutter took the frame for display, on the same clock as Flutter's frame timings, so that Dart can match the frame to the Flutter frame that displayed it.
 
 #### Scenario: Frame camera is reported
 - **WHEN** a new frame becomes available for display
 - **THEN** Dart receives the camera and viewport size the frame was rendered with, and an identifier of that frame
+
+#### Scenario: Display time matches a Flutter frame
+- **WHEN** Flutter takes a frame for display while it rasterizes a Flutter frame
+- **THEN** the reported display time lies between the start and the end of that Flutter frame's rasterization, as reported by Flutter's frame timings
 
 ### Requirement: Rendering on demand
 The system SHALL render a frame only when the map needs a new frame, for example after a camera, style, size or data change, or during a style transition. When the map does not change, the system SHALL NOT render frames.
