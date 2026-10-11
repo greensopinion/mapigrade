@@ -23,11 +23,13 @@ const libertyStyleUrl = 'https://tiles.openfreemap.org/styles/liberty';
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  // `--dart-define=COPY=true` measures maps with the copy.
+  const copyFree = !bool.fromEnvironment('COPY');
 
   testWidgets('memory footprint before and after a memory reduction',
       (tester) async {
     final controller = MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio);
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     addTearDown(controller.dispose);
     await tester.pumpWidget(MapTextureView(controller: controller));
 
@@ -63,6 +65,7 @@ void main() {
     final statsAfter = controller.stats();
 
     debugPrint('MEMORY_RESULT ${jsonEncode({
+          'copy_free': copyFree,
           'baseline_before_map_mib': mib(baseline),
           'before_reduction_mib': mib(before),
           'after_2s_mib': mib(after2s),
@@ -89,7 +92,7 @@ void main() {
     }
 
     final controller = MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio);
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     final size = ValueNotifier(const Size(200, 200));
     await tester.pumpWidget(Directionality(
       textDirection: TextDirection.ltr,

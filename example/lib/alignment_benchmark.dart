@@ -37,7 +37,7 @@ import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/testing.dart';
 import 'package:latlong2/latlong.dart';
 
-import 'benchmark.dart' show start;
+import 'benchmark.dart' show copyFree, start;
 
 const alignmentBenchmarkEnabled = bool.fromEnvironment('ALIGNMENT_BENCHMARK');
 const alignmentPhaseDuration = Duration(
@@ -211,6 +211,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
       if (alignmentVideo) ...[
         MapLibreTextureLayer(
           styleJson: videoStyle(),
+          copyFree: copyFree,
           onController: _onController,
         ),
         CircleLayer(
@@ -222,6 +223,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
       ] else ...[
         MapLibreTextureLayer(
           styleUrl: libertyStyleUrl,
+          copyFree: copyFree,
           onController: _onController,
         ),
         MarkerLayer(
@@ -399,7 +401,7 @@ class AlignmentBenchmark {
           ];
     stdout.writeln(
       'ALIGNMENT_CONDITIONS ${jsonEncode({'platform': Platform.operatingSystem, 'flutter_map': flutterMapVersion, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
-          '${mapController.camera.nonRotatedSize.height.round()}', 'phase_s': alignmentPhaseDuration.inSeconds, 'thermal_state': thermalStateForTesting()})}',
+          '${mapController.camera.nonRotatedSize.height.round()}', 'phase_s': alignmentPhaseDuration.inSeconds, 'copy_free': copyFree, 'thermal_state': thermalStateForTesting()})}',
     );
 
     // The video mode's style has no tiles, and its idle event can come

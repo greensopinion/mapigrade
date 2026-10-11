@@ -71,7 +71,7 @@ Map colors match Flutter's within 1/255 per channel on macOS without setting a c
 
 Over central London the iPhone 15 Pro Max displays 99 to 100 map frames per second at the median second (p10 87, lowest second 85) with rendering ahead (design D19), which meets the 60 fps target. Without it, the map waited for Flutter to take each frame before rendering the next, the GPU idled between frames, and iOS kept the GPU in its minimum performance state: `render_update` took about 17 ms and the median second had 40 frames (`benchmarks.md`, iPhone variants). Rendering ahead keeps the GPU busy, so it runs at higher clocks; this costs more power, and about 1% of rendered frames are replaced before Flutter displays them. The 5-minute run was measured before rendering ahead, so the thermal behavior with rendering ahead is not measured.
 
-A render thread (design D2, alternative) did not help: the FFI waits for the GPU inside `render_update`, so it can only remove the map thread's work between frames, 0.1 ms. Rendering directly into the display buffers saves the copy (1.6 ms per frame) but needs a patched FFI (design D20); it remains an experiment.
+A render thread (design D2, alternative) did not help: the FFI waits for the GPU inside `render_update`, so it can only remove the map thread's work between frames, 0.1 ms. Rendering directly into the display buffers saves the copy (1.5 ms per frame on the iPhone); maps do this by default since 2026-10-11 (`copyFree`, design D20). On the Mac it made `render_update` about 0.7 ms longer, more than the 0.5 ms copy, and gave no consistent gain (`benchmarks.md`, 2026-10-11); `copyFree: false` keeps the copy. On the iPhone a copy-free frame costs about one refresh interval, so more rendered frames are replaced before Flutter displays them (7–9% against 3–5%); we accepted this, because counting those frames copy-free still spends less render time per displayed frame than the copy, and a 5-minute run showed no thermal difference.
 
 ### Rendering pauses in the background (iOS)
 
@@ -84,6 +84,8 @@ Every resize allocates a new set of three display buffers. Until the fixes in de
 ### Memory warnings release little (iOS)
 
 On a memory warning the plugin calls `mln_render_session_reduce_memory_use()` (design D14). Measured on the iPhone with the map full screen after visiting zoom levels 10 to 16 over San Francisco with the OpenFreeMap Liberty style (`example/integration_test/memory_measurement.dart`, 2026-10-10): the footprint was 236 MiB before the map was created and 396 MiB before the reduction, and 388 MiB 2 s and 389 MiB 7 s after it, so the reduction released about 8 MiB of the 160 MiB the map added. In MapLibre's source, the reduction clears the renderer's tile cache and unused images; the Metal context's `reduceMemoryUsage()` is empty.
+
+The same measurement with copy-free maps (2026-10-11, debug builds, 2 runs per mode, alternating): copy-free, 391.6 MiB before the reduction (both runs) and 381.0–381.2 MiB 7 s after it; with the copy, 399.5–399.8 MiB before and 394.6–396.3 MiB after. A copy-free map has no private render texture (13.8 MiB at 1290x2796), and it used about 8 MiB less before the reduction and about 14 MiB less after it. The footprint before the map was created was 242.6–249.0 MiB in all runs.
 
 ### Alignment during camera changes (Stage 3)
 

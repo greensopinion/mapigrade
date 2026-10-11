@@ -64,7 +64,7 @@ typedef struct map_texture_stats {
   int64_t render_update_total_ns;
   int64_t render_update_max_ns;
   // GPU copies of the render texture into a buffer, including the wait for
-  // completion.
+  // completion. Always 0 for a copy-free map.
   int64_t copy_count;
   int64_t copy_total_ns;
   int64_t copy_max_ns;
@@ -94,10 +94,15 @@ typedef struct map_texture_stats {
 } map_texture_stats;
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread.
-// Events are delivered through `callback`, from any thread. Returns a handle
-// (> 0) or a negative MAP_TEXTURE_ERROR_* value.
+// With `copy_free` non-zero (what the Dart API passes by default), MapLibre
+// renders each frame directly into a free display buffer; otherwise it renders
+// into one render texture, and each frame is copied on the GPU into a free
+// display buffer (design D20). Events are
+// delivered through `callback`, from any thread. Returns a handle (> 0) or a
+// negative MAP_TEXTURE_ERROR_* value.
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
-    double pixel_ratio, map_texture_event_callback callback);
+    double pixel_ratio, int32_t copy_free,
+    map_texture_event_callback callback);
 
 // Returns the Flutter texture id, or a negative error.
 MAP_TEXTURE_EXPORT int64_t map_texture_texture_id(int64_t handle);
@@ -150,9 +155,6 @@ MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_for_testing(
 // a display refresh interval (the default), -1 never renders ahead, 1 always
 // renders without waiting until Flutter has taken the latest frame.
 MAP_TEXTURE_EXPORT void map_texture_set_render_ahead_for_testing(int32_t mode);
-// EXPERIMENT: maps created while this is on render directly into the display
-// buffers instead of copying each frame into them (design D20).
-MAP_TEXTURE_EXPORT void map_texture_set_zero_copy_for_testing(int32_t on);
 
 // For tests: pause (non-zero) or resume (zero) rendering of every map, as the
 // platform does when the application enters the background or foreground.

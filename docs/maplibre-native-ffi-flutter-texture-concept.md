@@ -56,7 +56,7 @@ The project is named Mapigrade, and its Flutter package is named `flutter_mapigr
 | 7 | Integration model A: MapLibre renders the base layer; `flutter_map` controls the camera, gestures and overlays | Keeps Flutter composition; keeps the MapLibre API small (section 6) |
 | 8 | Threads that the native core creates own the MapLibre runtime, map and render session; Dart sends commands through `dart:ffi` | Keeps MapLibre work off Flutter's UI thread; one owner per MapLibre object (section 5) |
 | 9 | Zero-copy is preferred; GPU-to-GPU copies are acceptable; CPU readback is not | CPU readback of full frames can't reach the frame rate target |
-| 10 | Apple bridge: MapLibre renders into borrowed Metal textures backed by a set of three IOSurface-backed `CVPixelBuffer`s; fallback: one texture plus a Metal blit | Zero-copy, if switching the target texture each frame costs little (section 7) |
+| 10 | Apple bridge: MapLibre renders into borrowed Metal textures backed by a set of three IOSurface-backed `CVPixelBuffer`s; fallback: one texture plus a Metal blit | Zero-copy, if switching the target texture each frame costs little (section 7). The default since 2026-10-11; the blit is the option `copyFree: false` |
 | 11 | One package, `flutter_mapigrade`, with an internal boundary: `lib/src/texture/` must not import `flutter_map` | Avoids coordinated releases of two packages while the texture core API is changing; can be split later without renaming (section 5) |
 
 ## 4. Integration model
@@ -153,6 +153,8 @@ We considered having Dart's main isolate own the runtime and map through the off
 There are three buffers so that MapLibre never writes to the one Flutter shows now or may still sample: **latest** (the last completed frame), **presented** (the one `copyPixelBuffer` returned last) and **free** (the render target). If no buffer is free, the map thread skips rendering until one is.
 
 **Fallback:** if switching the target texture each frame costs too much, MapLibre renders into one borrowed texture, and each frame is copied into a free buffer with a Metal blit. That is one GPU copy each frame, which decision 9 allows.
+
+**Status (2026-10-11):** the slices first shipped the fallback, because each `set_target` made the map publish a new render update and render without end. After maplibre-native-ffi#807 fixed that, switching the target before each frame became the default (OpenSpec change `copy-free-default`, design D37). The blit remains available per map as `copyFree: false`.
 
 macOS and iOS differ mainly in plugin registration, display scale changes (macOS windows move between displays) and app lifecycle (iOS backgrounding).
 

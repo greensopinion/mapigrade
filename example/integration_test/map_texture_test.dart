@@ -46,14 +46,16 @@ void main() {
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   final controllers = <MapTextureController>[];
-  // EXPERIMENT: `--dart-define=ZERO_COPY=true` runs every test with maps that
-  // render directly into the display buffers.
-  setZeroCopyForTesting(const bool.fromEnvironment('ZERO_COPY'));
+  // `--dart-define=COPY=true` runs every test with maps that copy each frame
+  // instead of the default copy-free maps. The tests below that name a mode
+  // run in that mode either way.
+  const copyFree = !bool.fromEnvironment('COPY');
 
   /// Creates a controller and shows it in a 400x300 view.
-  Future<MapTextureController> showMap(WidgetTester tester) async {
+  Future<MapTextureController> showMap(WidgetTester tester,
+      {bool copyFree = copyFree}) async {
     final controller = MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio);
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     await tester.pumpWidget(Directionality(
       textDirection: TextDirection.ltr,
@@ -75,7 +77,8 @@ void main() {
   });
 
   testWidgets('create and dispose', (tester) async {
-    final controller = MapTextureController.create(pixelRatio: 2);
+    final controller =
+        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
     expect(controller.textureId, greaterThanOrEqualTo(0));
     controller.dispose();
     expect(controller.isDisposed, isTrue);
@@ -217,9 +220,10 @@ void main() {
     expect(stats.renderedFrames,
         lessThanOrEqualTo(stats.presentedFrames + stats.renderAheadFrames + 1));
     // From the first frame that shows a sent camera on, displayed cameras
-    // never go backwards: no stale camera is shown after a newer one.
-    final first =
-        displayed.indexWhere((f) => near(f.camera.longitude, sent.first));
+    // never go backwards: no stale camera is shown after a newer one. Camera
+    // updates coalesce, so the first sent camera may never be displayed.
+    final first = displayed.indexWhere(
+        (f) => sent.any((longitude) => near(f.camera.longitude, longitude)));
     expect(first, greaterThanOrEqualTo(0));
     for (var k = first + 1; k < displayed.length; k++) {
       expect(displayed[k].camera.longitude,
@@ -228,7 +232,8 @@ void main() {
   });
 
   testWidgets('calls after dispose report an error', (tester) async {
-    final controller = MapTextureController.create(pixelRatio: 2);
+    final controller =
+        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
     controller.dispose();
     expect(
         () => controller.setCamera(
@@ -245,7 +250,8 @@ void main() {
   testWidgets('50 create/dispose cycles keep the thread count stable',
       (tester) async {
     Future<void> cycle() async {
-      final controller = MapTextureController.create(pixelRatio: 2);
+      final controller =
+        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
       final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
       controller.resize(const Size(400, 300), 2);
       controller.loadStyleJson(colorStyle('#123456'));
@@ -298,6 +304,61 @@ void main() {
     await Future<void>.delayed(const Duration(seconds: 10));
     final after = controller.stats();
     debugPrint('idle: rendered ${before.renderedFrames} -> '
+        '${after.renderedFrames} over 10 s');
+    expect(after.renderedFrames, before.renderedFrames);
+  });
+
+  testWidgets('copy-free map renders frames without copies', (tester) async {
+    final controller = await showMap(tester, copyFree: true);
+    expect(controller.copyFree, isTrue);
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleJson(colorStyle('#00ff00'));
+    await loaded;
+    await waitFor<FrameCamera>(controller.frames, (_) => true);
+    final stats = controller.stats();
+    expect(stats.renderedFrames, greaterThan(0));
+    expect(stats.copyCount, 0);
+  });
+
+  // Selecting a display buffer as the target before each render made the map
+  // render without end before maplibre-native-ffi#807 (design D20).
+  testWidgets('idle copy-free map renders no frames for 10 seconds',
+      (tester) async {
+    final controller = await showMap(tester, copyFree: true);
+    final idle = waitFor<MapIdle>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await idle;
+    final before = controller.stats();
+    await Future<void>.delayed(const Duration(seconds: 10));
+    final after = controller.stats();
+    debugPrint('idle copy-free: rendered ${before.renderedFrames} -> '
+        '${after.renderedFrames} over 10 s');
+    expect(after.renderedFrames, before.renderedFrames);
+  });
+
+  testWidgets('map with the copy renders frames with copies', (tester) async {
+    final controller = await showMap(tester, copyFree: false);
+    expect(controller.copyFree, isFalse);
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleJson(colorStyle('#00ff00'));
+    await loaded;
+    await waitFor<FrameCamera>(controller.frames, (_) => true);
+    final stats = controller.stats();
+    expect(stats.renderedFrames, greaterThan(0));
+    // A frame is counted as copied just before it's counted as rendered.
+    expect(stats.copyCount, greaterThanOrEqualTo(stats.renderedFrames));
+  });
+
+  testWidgets('idle map with the copy renders no frames for 10 seconds',
+      (tester) async {
+    final controller = await showMap(tester, copyFree: false);
+    final idle = waitFor<MapIdle>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await idle;
+    final before = controller.stats();
+    await Future<void>.delayed(const Duration(seconds: 10));
+    final after = controller.stats();
+    debugPrint('idle with copy: rendered ${before.renderedFrames} -> '
         '${after.renderedFrames} over 10 s');
     expect(after.renderedFrames, before.renderedFrames);
   });
@@ -422,7 +483,7 @@ void main() {
 
   testWidgets('resizing on every frame for 10 seconds', (tester) async {
     final controller = MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio);
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final size = ValueNotifier(const Size(400, 300));
     await tester.pumpWidget(Directionality(
@@ -491,7 +552,7 @@ void main() {
   testWidgets('display buffers replaced by resizes are freed afterwards',
       (tester) async {
     final controller = MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio);
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final size = ValueNotifier(const Size(200, 200));
     await tester.pumpWidget(Directionality(

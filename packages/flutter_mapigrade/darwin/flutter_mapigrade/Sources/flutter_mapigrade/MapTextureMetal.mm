@@ -1,8 +1,10 @@
-// macOS and iOS render target (designs D3b and D4). MapLibre renders through a
-// borrowed-texture session into one private MTLTexture. Each rendered frame is
-// copied on the GPU into one of three IOSurface-backed CVPixelBuffers, each
-// wrapped as an MTLTexture made from its IOSurface, and Flutter samples that
-// IOSurface through FlutterTexture. No pixels pass through CPU memory.
+// macOS and iOS render target (designs D3b, D4 and D20). MapLibre renders
+// through a borrowed-texture session into one private MTLTexture. Each
+// rendered frame is copied on the GPU into one of three IOSurface-backed
+// CVPixelBuffers, each wrapped as an MTLTexture made from its IOSurface, and
+// Flutter samples that IOSurface through FlutterTexture. A copy-free map has no
+// private texture: MapLibre renders directly into the buffers' textures. No
+// pixels pass through CPU memory.
 //
 // The textures are made directly from the IOSurfaces rather than through a
 // CVMetalTextureCache: a cache keeps the IOSurfaces of released buffers alive
@@ -21,7 +23,6 @@
 #import <IOSurface/IOSurfaceRef.h>
 
 #include <array>
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -58,10 +59,6 @@ using map_texture::TargetSize;
 
 @end
 
-// EXPERIMENT (design D20): maps created while this is on render directly into
-// the display buffers.
-static std::atomic<bool> gRendersIntoBuffers{false};
-
 // For tests: the IOSurfaces of released pixel buffers, to check that they are
 // freed (map_texture_released_buffers_alive_for_testing).
 static std::mutex gReleasedMutex;
@@ -89,9 +86,10 @@ void RunOnMainSync(dispatch_block_t block) {
 
 struct BufferSet {
   std::array<CVPixelBufferRef, kBufferCount> pixel_buffers{};
-  // Textures made from the pixel buffers' IOSurfaces, the copy destinations.
+  // Textures made from the pixel buffers' IOSurfaces: the copy destinations,
+  // or for a copy-free map, the render targets.
   std::array<id<MTLTexture>, kBufferCount> textures{};
-  // The texture MapLibre renders into.
+  // The texture MapLibre renders into; nil for a copy-free map.
   id<MTLTexture> render_texture = nil;
   TargetSize size{};
 
@@ -219,8 +217,9 @@ class MetalRenderTarget : public RenderTarget {
 
   bool RendersIntoBuffers() const override { return renders_into_buffers_; }
 
-  // Needs the FFI patch in scripts/patches/: without it, each same-size
-  // set_target makes the map publish another render update (design D3).
+  // A same-size set_target doesn't make the map publish another render update
+  // (maplibre-native-ffi#807); before that change, the map rendered without
+  // end (design D3).
   mln_status SelectBuffer(mln_render_session session, int index) override {
     mln_metal_borrowed_texture_descriptor descriptor =
         Descriptor(current_.size, current_.textures[index]);
@@ -300,7 +299,7 @@ class MetalRenderTarget : public RenderTarget {
 }  // namespace
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner) {
+    std::weak_ptr<MapTexture> owner, bool copy_free) {
   NSObject<FlutterTextureRegistry>* registry = MLTTextureRegistry();
   if (registry == nil) return nullptr;
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -312,7 +311,7 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
     texture_id = [registry registerTexture:texture];
   });
   return std::make_unique<MetalRenderTarget>(
-      device, registry, texture, texture_id, gRendersIntoBuffers.load());
+      device, registry, texture, texture_id, copy_free);
 }
 
 // The map thread is a std::thread with no autorelease pool, so objects
@@ -393,8 +392,4 @@ extern "C" int32_t map_texture_released_buffers_for_testing(int32_t reset) {
   auto count = static_cast<int32_t>(gReleased.size());
   if (reset != 0) gReleased.clear();
   return count;
-}
-
-extern "C" void map_texture_set_zero_copy_for_testing(int32_t on) {
-  gRendersIntoBuffers.store(on != 0);
 }

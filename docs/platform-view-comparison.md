@@ -22,7 +22,7 @@ The comparison is between two ways of embedding a map, so the reasons below appl
 
 ## 1. Frame rate of the Flutter UI around the map
 
-Mapigrade is unlikely to render the map itself faster than a native view. `MLNMapView` renders into its own Metal layer on its own display link. Mapigrade does the same rendering and then either copies the frame or, with copy-free rendering, takes about one refresh interval longer per frame on the iPhone (`benchmarks.md`). Over central London the iPhone 15 Pro Max displays about 100 map frames per second.
+Mapigrade is unlikely to render the map itself faster than a native view. `MLNMapView` renders into its own Metal layer on its own display link. Mapigrade does the same rendering and then either copies the frame into the buffer Flutter displays or, with copy-free rendering, renders directly into that buffer; a copy-free frame costs about one refresh interval on the iPhone (`benchmarks.md`). Over central London the iPhone 15 Pro Max displays about 100 map frames per second with the copy and about 110 copy-free.
 
 The frame rate that may differ is that of the Flutter UI around the map:
 

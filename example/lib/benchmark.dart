@@ -33,9 +33,10 @@ const benchmarkEnabled = bool.fromEnvironment('BENCHMARK');
 /// `--dart-define=RENDER_AHEAD=always` or `=never` overrides when the map
 /// renders without waiting until Flutter has taken the latest frame; the
 /// default renders ahead while a frame takes longer than a refresh interval.
-/// EXPERIMENT: `--dart-define=ZERO_COPY=true` renders directly into the
-/// display buffers. main.dart applies it before creating the map.
-const zeroCopy = bool.fromEnvironment('ZERO_COPY');
+/// `--dart-define=COPY=true` creates maps that render into a separate texture
+/// and copy each frame into the display buffers, instead of the default
+/// copy-free maps, on every page of the example.
+const copyFree = !bool.fromEnvironment('COPY');
 
 const renderAhead = String.fromEnvironment(
   'RENDER_AHEAD',
@@ -245,7 +246,7 @@ class Benchmark {
       'duration_s': seconds,
       ..._mapSize(),
       'render_ahead': renderAhead,
-      'zero_copy': zeroCopy,
+      'copy_free': copyFree,
       'flutter_frames': _frameTimings.length,
       'flutter_frame_total_span_ms': percentiles([
         for (final t in _frameTimings) ms(t.totalSpan),

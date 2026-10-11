@@ -60,8 +60,3 @@ void setRenderAheadForTesting(bool? always) =>
       false => -1,
       true => 1,
     });
-
-/// EXPERIMENT: maps created while this is on render directly into the display
-/// buffers instead of copying each frame into them.
-void setZeroCopyForTesting(bool on) =>
-    mapTextureSetZeroCopyForTesting(on ? 1 : 0);

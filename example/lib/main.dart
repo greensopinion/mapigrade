@@ -5,7 +5,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
-import 'package:flutter_mapigrade/testing.dart';
 
 import 'alignment_benchmark.dart';
 import 'benchmark.dart';
@@ -85,11 +84,9 @@ class _MapScreenState extends State<MapScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_controller != null) return;
-    // EXPERIMENT: rendering directly into the display buffers is chosen when a
-    // map is created.
-    setZeroCopyForTesting(zeroCopy);
     final controller = MapTextureController.create(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context));
+        pixelRatio: MediaQuery.devicePixelRatioOf(context),
+        copyFree: copyFree);
     _subscriptions.add(controller.events.listen(_onEvent));
     _subscriptions.add(controller.frames.listen(_onFrame));
     if (benchmarkEnabled || timingProbeEnabled) _camera = start;

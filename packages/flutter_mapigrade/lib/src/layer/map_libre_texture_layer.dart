@@ -21,6 +21,7 @@ class MapLibreTextureLayer extends StatefulWidget {
     super.key,
     this.styleUrl,
     this.styleJson,
+    this.copyFree = true,
     this.onController,
   }) : assert(
          (styleUrl == null) != (styleJson == null),
@@ -29,6 +30,11 @@ class MapLibreTextureLayer extends StatefulWidget {
 
   final String? styleUrl;
   final String? styleJson;
+
+  /// Whether the map renders directly into the displayed buffers (the
+  /// default); see [MapTextureController.create]. Read when the layer creates
+  /// its map.
+  final bool copyFree;
 
   /// Called with the layer's controller after it is created, for tests and
   /// measurements.
@@ -49,6 +55,7 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
     if (_controller != null) return;
     final controller = MapTextureController.create(
       pixelRatio: MediaQuery.devicePixelRatioOf(context),
+      copyFree: widget.copyFree,
     );
     _controller = controller;
     // A new displayed frame changes the transform.

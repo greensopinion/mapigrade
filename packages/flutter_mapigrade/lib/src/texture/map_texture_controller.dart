@@ -115,7 +115,7 @@ class MapTextureStats {
   final Duration renderUpdateMax;
 
   /// GPU copies of the rendered frame into a display buffer, including the
-  /// wait for completion.
+  /// wait for completion. Always 0 for a copy-free map.
   final int copyCount;
   final Duration copyTotal;
   final Duration copyMax;
@@ -191,22 +191,37 @@ class MapTextureException implements Exception {
 /// Commands return immediately; the map renders on its own native thread.
 /// Calls after [dispose] throw [MapTextureDisposedException].
 class MapTextureController {
-  MapTextureController._(this._handle, this.textureId, this._callable);
+  MapTextureController._(
+      this._handle, this.textureId, this.copyFree, this._callable);
 
   /// Creates a map that renders at [pixelRatio] device pixels per logical
   /// pixel. The ratio fixes the density of the style's sprites and glyphs for
   /// the map's lifetime; later [resize] calls may change the render ratio.
-  factory MapTextureController.create({required double pixelRatio}) {
+  ///
+  /// With [copyFree] (the default), MapLibre renders each frame directly into
+  /// the buffer that Flutter displays. With `copyFree: false`, it renders into
+  /// a separate texture, and each frame is copied into that buffer on the GPU.
+  /// On an iPhone 15 Pro Max copy-free rendering saved the 1.5 ms copy per
+  /// frame and raised the slowest seconds of a continuous pan from 83–88 to
+  /// 98–104 frames per second. A copy-free frame costs about one display
+  /// refresh interval there, so the map more often renders a frame that Flutter
+  /// replaces before displaying it (6.9–8.5% of rendered frames, against
+  /// 3.0–5.4% with the copy). On an M2 Max Mac at 3200x2000 physical pixels it
+  /// gave no consistent gain, because rendering took longer by more than the
+  /// copy it saved.
+  factory MapTextureController.create(
+      {required double pixelRatio, bool copyFree = true}) {
     late final MapTextureController controller;
     final callable = NativeCallable<MapTextureEventCallback>.listener(
         (Pointer<MapTextureEventStruct> event) => controller._onEvent(event));
-    final handle = mapTextureCreate(pixelRatio, callable.nativeFunction);
+    final handle =
+        mapTextureCreate(pixelRatio, copyFree ? 1 : 0, callable.nativeFunction);
     if (handle <= 0) {
       callable.close();
       throw MapTextureException('map_texture_create failed with $handle');
     }
     final textureId = mapTextureTextureId(handle);
-    controller = MapTextureController._(handle, textureId, callable);
+    controller = MapTextureController._(handle, textureId, copyFree, callable);
     return controller;
   }
 
@@ -215,6 +230,10 @@ class MapTextureController {
 
   /// The id for a `Texture` widget.
   final int textureId;
+
+  /// Whether the map renders directly into the displayed buffers; see
+  /// [MapTextureController.create].
+  final bool copyFree;
 
   final _events = StreamController<MapEvent>.broadcast();
   final _frames = StreamController<FrameCamera>.broadcast();

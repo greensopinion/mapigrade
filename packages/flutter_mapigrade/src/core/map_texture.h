@@ -24,9 +24,12 @@ namespace map_texture {
 class MapTexture : public std::enable_shared_from_this<MapTexture> {
  public:
   // Creates the platform render target, starts the map thread, and waits
-  // until the thread has created the runtime and map. Returns null on failure.
+  // until the thread has created the runtime and map. With `copy_free`, the
+  // session renders directly into the display buffers (design D20). Returns
+  // null on failure.
   static std::shared_ptr<MapTexture> Create(
-      int64_t handle, double pixel_ratio, map_texture_event_callback callback);
+      int64_t handle, double pixel_ratio, bool copy_free,
+      map_texture_event_callback callback);
 
   ~MapTexture();
 
@@ -64,7 +67,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   MapTexture(int64_t handle, double pixel_ratio,
              map_texture_event_callback callback);
 
-  bool Start();
+  bool Start(bool copy_free);
   void Run();
   // One iteration of the map thread's loop; returns true to stop.
   bool RunOnce();

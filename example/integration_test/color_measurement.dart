@@ -10,7 +10,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_mapigrade/testing.dart';
 import 'package:flutter_mapigrade_example/color_check.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -21,12 +20,11 @@ void main() {
 
   testWidgets('map colors match Flutter swatches within 2/255',
       (tester) async {
-    // EXPERIMENT: `--dart-define=ZERO_COPY=true` renders directly into the
-    // display buffers.
-    setZeroCopyForTesting(const bool.fromEnvironment('ZERO_COPY'));
     final boundaryKey = GlobalKey();
     await tester.pumpWidget(MaterialApp(
-        home: RepaintBoundary(key: boundaryKey, child: const ColorCheck())));
+        home: RepaintBoundary(key: boundaryKey, child: const ColorCheck(
+            // `--dart-define=COPY=true` checks a map with the copy.
+            copyFree: !bool.fromEnvironment('COPY')))));
     // The style has no tiles to load; a few seconds cover loading and the
     // first frames.
     await Future<void>.delayed(const Duration(seconds: 3));

@@ -49,8 +49,10 @@ third_party/                             FFI checkout and build output (gitignor
    events stream ◄── NativeCallable.listener ◄─┤                   render error, idle
                                                │   if a render update is pending, Flutter has
                                                │   taken the latest frame, and a buffer is free:
-                                               │     render_update into the render texture
-                                               │     blit into the free IOSurface buffer
+                                               │     set_target to the free IOSurface buffer
+                                               │     render_update into it
+                                               │     (copyFree: false: render_update into the
+                                               │      render texture, blit into the free buffer)
                                                │     publish it as latest
                                                │     textureFrameAvailable (via main queue)
                                                │                                        copyPixelBuffer:
@@ -66,13 +68,18 @@ Dart never calls MapLibre. It calls the plugin's C ABI (`src/core/map_texture_ap
 ### Frame path
 
 ```
-MapLibre (Metal) ──render──► private MTLTexture (BGRA8, one per size)
-                 ──blit────► IOSurface-backed CVPixelBuffer (one of three: latest, presented, free),
+MapLibre (Metal) ──render──► IOSurface-backed CVPixelBuffer (one of three: latest, presented, free),
                              through an MTLTexture made from its IOSurface
                  ──────────► FlutterTexture.copyPixelBuffer ──► Flutter composites it as a Texture widget
+
+copyFree: false:
+MapLibre (Metal) ──render──► private MTLTexture (BGRA8, one per size)
+                 ──blit────► IOSurface-backed CVPixelBuffer, as above
 ```
 
-All copies stay on the GPU. The three buffers ensure that the map thread never writes into the buffer Flutter displays or the one it displays next. The map renders only when MapLibre publishes a render update, and only after Flutter has taken the previous frame, so it renders nothing while the map is idle and no more frames than the display shows.
+Maps are copy-free by default (design D20): before each render, `mln_metal_borrowed_texture_set_target()` makes the free buffer's MTLTexture the session's target, and MapLibre renders directly into it. With `MapTextureController.create(copyFree: false)` or `MapLibreTextureLayer(copyFree: false)`, MapLibre renders into one private texture, and each frame is copied on the GPU into the free buffer (design D3b). In a continuous pan on the iPhone 15 Pro Max (2026-10-11), copy-free raised the median second from 98–101 to 109–111 fps and the lowest second from 83–88 to 98–104; 6.9–8.5% of rendered frames weren't displayed, against 3.0–5.4% with the copy, but copy-free still spent less render time per displayed frame. On an M2 Max Mac at 3200x2000 it gave no consistent gain, because `render_update` became about 0.7 ms longer, more than the copy (`benchmarks.md`).
+
+No pixels pass through CPU memory, and the copy, if any, stays on the GPU. The three buffers ensure that the map thread never writes into the buffer Flutter displays or the one it displays next. The map renders only when MapLibre publishes a render update, and only after Flutter has taken the previous frame, so it renders nothing while the map is idle and no more frames than the display shows.
 
 Each displayed frame is reported to Dart with the camera and size it was rendered with (`MapTextureController.frames`), taken from `mln_render_session_projection_create()` after the frame rendered.
 
@@ -80,7 +87,7 @@ Each displayed frame is reported to Dart with the camera and size it was rendere
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | commit `dd97d20f8fab6990cd87c13f091ce00e662707bd`, presets `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal` (`scripts/maplibre_ffi.lock`) |
+| MapLibre Native FFI | commit `6f5a662093873a5a690de34fe21f6329b58e77e3`, presets `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal` (`scripts/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.5 |
 
@@ -168,7 +175,7 @@ Instruments' `xctrace` launches an app by its bundle identifier, which the Debug
 The script:
 
 1. clones `https://github.com/maplibre/maplibre-native-ffi.git` into `third_party/maplibre-native-ffi-src/` and checks out the pinned commit;
-2. applies the local patches in `scripts/patches/maplibre-native-ffi-*.patch` (currently one: a borrowed-texture `set_target` doesn't post an unchanged size to the map, needed only by the copy-free experiment, design D20 of the iOS slice; merged upstream on 2026-10-11 as [maplibre-native-ffi#807](https://github.com/maplibre/maplibre-native-ffi/pull/807), commit `6f5a662`, so the patch can be removed when the pinned commit includes it);
+2. applies the local patches in `scripts/patches/maplibre-native-ffi-*.patch`, if any (currently none; the last one, needed by copy-free maps, was merged upstream as [maplibre-native-ffi#807](https://github.com/maplibre/maplibre-native-ffi/pull/807) and is in the pinned commit);
 3. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
 4. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
 5. wraps each installed preset's dylib in a framework and combines them into `MapLibreNativeC.xcframework` for the Flutter plugin.

@@ -2,15 +2,20 @@
 
 ## Frame rate during continuous pan
 
-Measured over central London (see Path), in release builds, macOS on 2026-10-11 (3 runs) and the iPhone on 2026-10-10:
+Measured over central London (see Path), in release builds, with the defaults: copy-free rendering (design D37 of the copy-free-default change) and rendering ahead (design D19). Both devices on 2026-10-11, 3 runs each, at MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3`; the Mac on AC power:
 
 | Displayed map frames per second | macOS (MacBook Pro, M2 Max) | iPhone 15 Pro Max |
 | --- | --- | --- |
-| per-second p10 / p50 / p90 | 88–90 / 95–97 / 99–101 | 87 / 99–100 / 105 |
-| lowest second | 83–84 | 85 |
-| average over 30 s | 94.0–95.0 | 97 |
+| per-second p10 / p50 / p90 | 97–98 / 101–102 / 108–111 | 103–106 / 108–112 / 116–120 |
+| lowest second | 93–95 | 99–104 |
+| average over 30 s | 101.9–102.6 | 110.3–111.8 |
+| map frame interval median / p95 / p99 | 8.34 / 16.69 / 16.75–16.77 ms | 8.34 / 16.51–16.64 / 16.74–16.81 ms |
+| `render_update`, frame cycle | 7.53–7.59 ms, 9.06–9.18 ms | 7.37–7.91 ms, 8.20–8.26 ms |
+| rendered frames not displayed | 6.5–7.2% | 7.6–9.6% |
 
-Against the go/no-go values: both meet the 30 fps minimum and the 60 fps target. The iPhone numbers are with rendering ahead (design D19), the default since 2026-10-10: while a frame takes longer than a refresh interval, the next frame renders without waiting until Flutter has taken the previous one. On the Mac a frame cycle takes 9.8 ms (`render_update` 6.7 ms, copy 0.59 ms), longer than the 8.33 ms refresh interval, so the Mac renders ahead too: about 1,000 of 3,060 rendered frames per run.
+Against the go/no-go values: both meet the 30 fps minimum and the 60 fps target. Rendering ahead is the default since 2026-10-10: while a frame takes longer than a refresh interval, the next frame renders without waiting until Flutter has taken the previous one. On both devices a frame cycle is longer than the 8.33 ms refresh interval, so both render ahead almost all the time.
+
+Before copy-free rendering became the default, the same benchmark with the copy measured, at FFI commit `dd97d20f8fab6990cd87c13f091ce00e662707bd`: on macOS (2026-10-11, 3 runs) per-second p10 / p50 / p90 88–90 / 95–97 / 99–101, lowest second 83–84, average 94.0–95.0, frame cycle 9.8 ms (`render_update` 6.7 ms, copy 0.59 ms), with about 1,000 of 3,060 rendered frames per run rendered ahead; on the iPhone (2026-10-10) 87 / 99–100 / 105, lowest second 85, average 97. Both modes at the current commit are compared in "Copy-free with the upstream FFI fix" below.
 
 The macOS numbers recorded before 2026-10-11 (per-second p10 / p50 / p90 116 / 117 / 119, lowest second 112, average 117.1, a frame of 5.7 ms) were measured with a smaller map than the Setup states. The macOS runner applied `MLT_WINDOW_SIZE` only in `awakeFromNib`, after which the window returned to the nib's 800x600 content size, and at the display's default resolution (1512x982 logical pixels) a 1600x1000 window doesn't fit anyway. Those runs therefore rendered about 1600x1200 physical pixels instead of 3200x2000. The same applies to every earlier macOS result in this file that is marked as measured before 2026-10-11. Since 2026-10-11 the runner applies the size again after launch, and the benchmark reports the size of the displayed map frames (`map_physical_size`).
 
@@ -28,7 +33,47 @@ Before rendering ahead, the iPhone map waited for Flutter to take each frame, th
 | paced, copy-free (D20, experiment) | 58–59 / 60 / 64–69 | 11.2–11.5 ms | — | not traced |
 | render thread, paced (D2 alternative, removed; 3 runs) | 33–40 / 40–52 / 51–58 | 13.7–17.9 ms | 1.85 ms | not traced |
 
-The copy-free variants need the FFI patch in `scripts/patches/` (design D20). The first copy-free rendering-ahead runs predate the hysteresis in D19, and the map switched between rendering ahead and pacing in them. With the hysteresis, copy-free raised the lowest second from 84–86 to 102–103 fps; 8% of rendered frames weren't displayed, against 2.4% with the copy.
+The copy-free variants ran with a local FFI patch (design D20), which was merged upstream as maplibre-native-ffi#807 and has been in the pinned FFI commit since 2026-10-11. The first copy-free rendering-ahead runs predate the hysteresis in D19, and the map switched between rendering ahead and pacing in them. With the hysteresis, copy-free raised the lowest second from 84–86 to 102–103 fps; 8% of rendered frames weren't displayed, against 2.4% with the copy. The copy-free runs with the upstream fix are in the next section.
+
+#### Copy-free with the upstream FFI fix (2026-10-11, 3 runs each)
+
+Copy-free maps were an option on 2026-10-11 (`copyFree: true`, example define `COPY_FREE=true`) and became the default later that day; since then the example define `COPY=true` selects the copy. We ran the benchmark with and without it, alternating the variants, at MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3`, which includes maplibre-native-ffi#807. Upstream, a same-size `set_target` still resets the session's record of the rendered update; the local patch that the 2026-10-10 runs used did not. Rendering ahead with the hysteresis (the default) in all runs. "Not displayed" is the share of rendered frames that Flutter didn't display (1 − displayed / rendered). The benchmark doesn't report the thermal state, and it wasn't recorded.
+
+iPhone 15 Pro Max, setup as above:
+
+| Variant | per-second p10 / p50 / p90 | lowest second | average | `render_update` | copy | frame cycle | not displayed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| with copy | 87–91 / 98–101 / 110–113 | 83–88 | 98.4–99.8 | 7.84–8.27 ms | 1.52–1.53 ms | 9.48–9.86 ms | 3.0–5.4% |
+| copy-free | 104–106 / 109–111 / 115–119 | 98–104 | 109.2–111.0 | 7.73–8.03 ms | — | 8.37–8.46 ms | 6.9–8.5% |
+
+MacBook Pro (M2 Max), setup as above (window 1600x1000, map 3200x2000 physical pixels, display at 1800x1169), but on battery power (34% to 29% over the session; Low Power Mode off):
+
+| Variant | per-second p10 / p50 / p90 | lowest second | average | `render_update` | copy | frame cycle | not displayed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| with copy | 88–91 / 97 / 101–103 | 86–88 | 95.8–96.8 | 6.81 ms | 0.53–0.54 ms | 9.54–9.63 ms | 7.2–8.7% |
+| copy-free | 86–93 / 95–105 / 109–119 | 76–88 | 96.1–104.9 | 7.55–7.62 ms | — | 9.17–9.82 ms | 3.8–5.7% |
+
+On the iPhone, copy-free didn't change `render_update`, so it shortened the frame cycle by about the copy, and raised the median second by about 10 fps and the lowest second by about 15 fps. It left more rendered frames undisplayed than the copy, as on 2026-10-10. On the Mac, copy-free made `render_update` 0.75 ms longer, more than the 0.54 ms copy it removed; we didn't trace it, and the depth and stencil textures that the Metal backend reallocates after each target change (design D20) are a likely cause. Two copy-free Mac runs averaged 103.6 and 104.9 fps, and the third 96.1 fps with the lowest second of the session (76), so on the Mac copy-free gave no consistent gain.
+
+*Second session (2026-10-11, 3 runs each, same FFI commit).* The Mac was on AC power, otherwise as above. On each device the runs with the copy alternated with runs of an abandoned FFI change, and the copy-free runs followed in a second block of the same session.
+
+| Device, variant | per-second p10 / p50 / p90 | lowest second | average | `render_update` | copy | frame cycle | not displayed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| iPhone, with copy | 87–88 / 99–102 / 109–111 | 84–86 | 98.4–99.1 | 8.07–8.20 ms | 1.53–1.54 ms | 9.67–9.83 ms | 2.9–4.3% |
+| iPhone, copy-free | 103–104 / 109–111 / 116–120 | 98–101 | 109.4–110.7 | 7.53–7.97 ms | — | 8.31–8.47 ms | 7.2–8.6% |
+| Mac, with copy | 91–98 / 100–102 / 105–108 | 88–96 | 99.8–101.9 | 6.81–6.90 ms | 0.49–0.54 ms | 9.05–9.43 ms | 5.9–7.9% |
+| Mac, copy-free | 96–97 / 101–103 / 106–110 | 90–93 | 101.3–102.8 | 7.58–7.62 ms | — | 9.10–9.12 ms | 6.5–7.7% |
+
+The second session repeated the first: on the iPhone copy-free raised the median second by about 10 fps and the lowest second by about 15, and on the Mac it made `render_update` about 0.7 ms longer and gave no consistent gain (1.5 fps on average, with overlapping ranges).
+
+*Cost of the undisplayed frames.* Copy-free renders more frames that Flutter replaces before displaying them, because a copy-free frame costs about one refresh interval and the map renders ahead almost all the time (design D19). Counting those frames, the map thread's `render_update` plus copy time per displayed frame was:
+
+| Device | with copy | copy-free |
+| --- | --- | --- |
+| iPhone (both sessions) | 9.91–10.10 ms | 8.24–8.62 ms |
+| Mac (both sessions) | 7.76–8.07 ms | 7.85–8.25 ms |
+
+On the iPhone the undisplayed frames cost less than the copy they replace, and the map thread spent 901–952 ms per second rendering with copy-free against 988–993 ms with the copy. This time includes the wait for the GPU but isn't an energy measurement; the 5-minute runs below showed no thermal difference. We accepted the undisplayed frames on 2026-10-11.
 
 The per-second values count the displayed map frames in each whole second of the measured pass; p10 means that 10% of seconds had that many frames or fewer. An average over the pass hides the slow seconds, which is why the benchmark reports them.
 
@@ -47,7 +92,7 @@ Before 2026-10-10 the benchmark panned east from San Francisco (37.7749, -122.41
 | Map size | window 1600x1000 logical pixels, pixel ratio 2, 3200x2000 physical (since 2026-10-11; before, about 800x600 logical, see above); the display scaled to 1800x1169 logical pixels | full screen, portrait, 430x932 logical pixels, pixel ratio 3, 1290x2796 physical |
 | Measured Flutter vsync interval | 8.333 ms | 8.335 ms |
 
-Both: Xcode 26.6 (17F113); Flutter 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4, Impeller (Metal); MapLibre Native FFI commit `dd97d20f8fab6990cd87c13f091ce00e662707bd` (presets `macos-arm64-metal` and `ios-arm64-metal`); style OpenFreeMap Liberty (`https://tiles.openfreemap.org/styles/liberty`); the example's Flutter control panel above the map. Thermal state on the iPhone was nominal at the start and end of every run.
+Both: Xcode 26.6 (17F113); Flutter 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4, Impeller (Metal); MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3` for results measured from 2026-10-11 on, where the result names it, and `dd97d20f8fab6990cd87c13f091ce00e662707bd` before (presets `macos-arm64-metal` and `ios-arm64-metal`); style OpenFreeMap Liberty (`https://tiles.openfreemap.org/styles/liberty`); the example's Flutter control panel above the map. Thermal state on the iPhone was nominal at the start and end of every run until 2026-10-10; the 30 s benchmark doesn't report it, and it wasn't recorded for the 2026-10-11 runs.
 
 Procedure (`example/lib/benchmark.dart`):
 
@@ -114,6 +159,17 @@ Conditions: the Setup, with the built-in display as the only display, scaled to 
 ### 5-minute run (iPhone, before rendering ahead)
 
 The measured pass pans back and forth over the warm-up path for 300 s. Average displayed map frame rate per 30 s interval: 40.5, 39.5, 39.9, 39.5, 39.4, 39.5, 39.8, 39.8, 40.7, 39.8. Per second: p10 33, p50 39, p90 52, lowest 30. Thermal state: nominal at the start of every interval and at the end. Skipped renders: 0. The frame rate doesn't decrease over the 5 minutes.
+
+### 5-minute run (iPhone, rendering ahead, copy-free and with copy)
+
+Measured 2026-10-11 at MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3`, one run each, release builds with `--dart-define=BENCHMARK_SUSTAINED_S=300`; the run with the copy came first, then a 5-minute pause, then the copy-free run.
+
+| Variant | per 30 s interval | per-second p10 / p50 / p90 | lowest second | displayed frames | thermal state |
+| --- | --- | --- | --- | --- | --- |
+| with copy | 97.5–98.9 | 86 / 99 / 109 | 84 | 29,422 | nominal at every interval start and at the end |
+| copy-free | 109.7–111.6 | 104 / 110 / 119 | 100 | 33,180 | nominal at every interval start and at the end |
+
+Skipped renders: 0 in both. Neither frame rate decreases over the 5 minutes. The thermal state has four levels, so a small difference in heat wouldn't show.
 
 ### Slower GPU (task 6.4)
 
@@ -213,6 +269,46 @@ Measured 2026-10-11, 3 runs, release build, 20 s per phase, with the same phases
 Conditions: the Setup's iPhone, OS, Xcode, Flutter and MapLibre Native FFI versions and style. Full screen, portrait, 430x932 logical pixels at pixel ratio 3, which is 1290x2796 physical pixels. Auto-Lock was off, and the app was launched with `MLT_KEEP_AWAKE=1`. Thermal state was nominal at the start of every run and at the end of every phase.
 
 Procedure: as for `benchmark.dart` (Setup), with `--dart-define=ALIGNMENT_BENCHMARK=true` in the iOS build. The app prints one `ALIGNMENT_RESULT` line per phase and exits.
+
+### Copy-free and with copy (2026-10-11)
+
+Before copy-free maps became the default, we ran the alignment benchmark with and without them, at MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3`, 3 runs each, alternating, 20 s per phase, on the Mac (1600x1000 window, display at 1800x1169, AC power) and the iPhone at the same time. Errors in logical px; "newer" is the share of Flutter frames with k_shown ≠ k_used.
+
+Mac:
+
+| Phase | Variant | Map fps | Newer | With transform p50 / p95 / max | Without transform p50 / p95 / max |
+| --- | --- | --- | --- | --- | --- |
+| pan 100 px/s | with copy | 99.5–102.5 | 83.2–85.6% | 0.83 / 1.67 / 2.5–3.33 | 1.67 / 2.5 / 2.5–4.17 |
+| | copy-free | 100.0–103.1 | 83.6–86.1% | 0.83 / 1.67 / 2.5–5.83 | 1.67 / 2.5 / 3.33–7.08 |
+| pan 1,000 px/s | with copy | 102.5–105.1 | 85.7–86.8% | 8.33 / 16.67 / 25 | 8.33–16.67 / 25 / 33.33 |
+| | copy-free | 100.0–103.2 | 83.8–86.3% | 8.33 / 16.67 / 25 | 16.67 / 25 / 33.33 |
+| pan 2,000 px/s | with copy | 103.7–104.5 | 86.7–87.4% | 16.67 / 33.33 / 50 | 16.67–33.33 / 50 / 50.01–66.67 |
+| | copy-free | 100.8–103.6 | 82.9–86.6% | 16.67 / 33.33 / 50–66.66 | 33.33 / 50 / 66.67 |
+| zoom 1 level/s | with copy | 108.7–113.2 | 90.8–94.5% | 5.46 / 10.84 / 16.49 | 5.46 / 10.96 / 21.55–22.05 |
+| | copy-free | 116.0–116.3 | 96.7–97.0% | 5.46 / 5.47 / 16.49 | 5.46 / 10.96 / 21.55–22.05 |
+| rotate 90°/s | with copy | 98.0–100.2 | 82.3–84.0% | 12.35 / 24.7 / 37.05–49.39 | 24.7 / 37.04 / 49.39–74.08 |
+| | copy-free | 96.4–97.3 | 78.3–81.4% | 12.35 / 24.7 / 37.04–37.05 | 24.7 / 37.04 / 49.39 |
+
+iPhone:
+
+| Phase | Variant | Map fps | Newer | With transform p50 / p95 / max | Without transform p50 / p95 / max |
+| --- | --- | --- | --- | --- | --- |
+| pan 100 px/s | with copy | 94.0–101.8 | 78.4–84.9% | 0.83 / 1.67 / 2.5–2.51 | 1.67 / 2.5 / 4.17 |
+| | copy-free | 109.0–112.0 | 91.0–93.4% | 0.83 / 1.67 / 2.5–2.51 | 1.67 / 2.5 / 4.17 |
+| pan 1,000 px/s | with copy | 94.8–95.5 | 79.5–80.3% | 8.33 / 16.7–16.71 / 25.06–33.41 | 16.68 / 25.05 / 33.4–33.41 |
+| | copy-free | 107.1–108.1 | 89.6–90.4% | 8.33 / 16.7 / 25.05–25.06 | 16.67 / 25.01–25.02 / 25.1–33.34 |
+| pan 2,000 px/s | with copy | 94.8–95.7 | 79.7–80.4% | 16.66–16.67 / 33.41–33.42 / 50.11–50.21 | 33.36–33.38 / 50.09–50.1 / 66.81–66.85 |
+| | copy-free | 108.2–108.5 | 87.6–90.6% | 16.67 / 33.39–33.4 / 50.11–66.58 | 33.33–33.34 / 50.03–50.05 / 66.73–99.96 |
+| zoom 1 level/s | with copy | 108.9–109.6 | 89.5–90.9% | 2.96 / 5.96 / 9 | 5.95 / 8.97 / 15.03–15.04 |
+| | copy-free | 102.5–104.9 | 85.8–87.8% | 2.96 / 5.96–5.97 / 8.98–8.99 | 2.98–3 / 8.96–8.97 / 11.99–14.61 |
+| rotate 90°/s | with copy | 82.3–83.5 | 69.0–70.0% | 6.72 / 13.47 / 20.18–20.2 | 20.14 / 26.87 / 33.66–40.29 |
+| | copy-free | 103.0–103.8 | 86.3–86.9% | 6.72 / 13.46 / 20.19–20.2 | 13.44 / 20.18–20.19 / 20.24–26.91 |
+
+The pan at 500 px/s gave the same p50 and p95 errors in both variants on both devices and is left out.
+
+- With the transform, copy-free gave the same p50 and p95 errors as the copy in every phase on both devices, except a lower p95 in the Mac's zoom phase (5.47 against 10.84 px). The baseline that the camera-prediction change compares against (8.33 px at p50 at 1,000 px/s with the transform) holds for copy-free maps.
+- On the iPhone, copy-free displayed 12–21 more map frames per second in the pans and the rotation, and Flutter showed a newer frame than the transform used more often (86–93% against 69–91%). Without the transform it reduced the p50 error in the zoom phase (3.0 against 5.95 px) and the rotation (13.44 against 20.14 px); in the pans it stayed two Flutter frames of movement.
+- Every phase on the Mac and in the runs with the copy on the iPhone ended at the nominal thermal state. The third copy-free iPhone run, the last of six consecutive runs (about 18 minutes), ended its phases from the pan at 500 px/s on at the fair thermal state; its errors match the other two copy-free runs.
 
 ## No CPU readback on the frame path
 

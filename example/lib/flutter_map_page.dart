@@ -6,6 +6,8 @@ import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'benchmark.dart' show copyFree;
+
 const flutterMapPageAtLaunch = bool.fromEnvironment('FLUTTER_MAP_PAGE');
 
 /// Charing Cross, St Paul's Cathedral and the Tower of London.
@@ -60,6 +62,7 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
             children: [
               MapLibreTextureLayer(
                 styleUrl: widget.styleUrl,
+                copyFree: copyFree,
                 onController: _onController,
               ),
               PolylineLayer(

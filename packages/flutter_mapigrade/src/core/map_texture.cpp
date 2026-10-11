@@ -49,11 +49,12 @@ uint32_t RoundToPixels(double value) {
 }  // namespace
 
 std::shared_ptr<MapTexture> MapTexture::Create(
-    int64_t handle, double pixel_ratio, map_texture_event_callback callback) {
+    int64_t handle, double pixel_ratio, bool copy_free,
+    map_texture_event_callback callback) {
   if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) return nullptr;
   std::shared_ptr<MapTexture> texture(
       new MapTexture(handle, pixel_ratio, callback));
-  if (!texture->Start()) return nullptr;
+  if (!texture->Start(copy_free)) return nullptr;
   return texture;
 }
 
@@ -72,8 +73,8 @@ MapTexture::~MapTexture() {
   }
 }
 
-bool MapTexture::Start() {
-  target_ = CreatePlatformRenderTarget(weak_from_this());
+bool MapTexture::Start(bool copy_free) {
+  target_ = CreatePlatformRenderTarget(weak_from_this(), copy_free);
   if (!target_) return false;
   thread_ = std::thread([this] { Run(); });
   std::unique_lock lock(init_mutex_);
@@ -529,26 +530,28 @@ void MapTexture::MaybeRender() {
   }
   if (result != MLN_RENDER_RESULT_RENDERED) return;
 
-  int64_t render_elapsed = elapsed;
-  start = NowNs();
-  bool copied = target_->RendersIntoBuffers() || target_->CopyToBuffer(index);
-  elapsed = NowNs() - start;
+  int64_t cost = elapsed;
+  if (!target_->RendersIntoBuffers()) {
+    start = NowNs();
+    bool copied = target_->CopyToBuffer(index);
+    elapsed = NowNs() - start;
+    cost += elapsed;
+    {
+      std::lock_guard lock(stats_mutex_);
+      ++stats_.copy_count;
+      stats_.copy_total_ns += elapsed;
+      stats_.copy_max_ns = std::max(stats_.copy_max_ns, elapsed);
+    }
+    if (!copied) {
+      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to copy the frame");
+      return;
+    }
+  }
   // Smoothed over about eight frames, so that one slow or fast frame doesn't
   // switch between pacing and rendering ahead.
-  int64_t cost = render_elapsed + elapsed;
   frame_cost_avg_ns_ = frame_cost_avg_ns_ == 0
                            ? cost
                            : frame_cost_avg_ns_ + (cost - frame_cost_avg_ns_) / 8;
-  {
-    std::lock_guard lock(stats_mutex_);
-    ++stats_.copy_count;
-    stats_.copy_total_ns += elapsed;
-    stats_.copy_max_ns = std::max(stats_.copy_max_ns, elapsed);
-  }
-  if (!copied) {
-    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to copy the frame");
-    return;
-  }
 
   FrameInfo info;
   info.frame_id = next_frame_id_++;

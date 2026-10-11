@@ -56,7 +56,10 @@ final style = jsonEncode({
 void main() => runApp(const MaterialApp(home: ColorCheck()));
 
 class ColorCheck extends StatefulWidget {
-  const ColorCheck({super.key});
+  const ColorCheck({super.key, this.copyFree = true});
+
+  /// Whether the map renders directly into the display buffers.
+  final bool copyFree;
 
   @override
   State<ColorCheck> createState() => _ColorCheckState();
@@ -70,7 +73,8 @@ class _ColorCheckState extends State<ColorCheck> {
     super.didChangeDependencies();
     if (_controller != null) return;
     final controller = MapTextureController.create(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context));
+        pixelRatio: MediaQuery.devicePixelRatioOf(context),
+        copyFree: widget.copyFree);
     controller.events.listen((event) => debugPrint('map event: $event'));
     controller.loadStyleJson(style);
     controller.setCamera(

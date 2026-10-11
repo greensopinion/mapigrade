@@ -2,10 +2,10 @@
 // renders into, the buffer set Flutter displays, and the Flutter texture
 // registration.
 //
-// The session renders into one render texture, and each frame is copied on
-// the GPU into a free buffer (design D3b). Rendering directly into the buffers
-// and switching targets with set_target (D3) made MapLibre render
-// continuously; see design.md.
+// A copy-free map, the default, renders directly into the free buffer, made
+// the session's target with set_target before each render (design D20).
+// Otherwise the session renders into one render texture, and each frame is
+// copied on the GPU into a free buffer (design D3b).
 //
 // The core in this directory has no platform dependencies. Each platform
 // implements RenderTarget and the three functions at the end of this
@@ -37,8 +37,9 @@ class RenderTarget {
   // The id of the registered Flutter texture.
   virtual int64_t texture_id() const = 0;
 
-  // Map thread. Allocates a new buffer set and a new render texture of
-  // `size`. They replace the current ones in SwapBuffersLocked().
+  // Map thread. Allocates a new buffer set of `size`, and unless the target
+  // renders into the buffers, a new render texture. They replace the current
+  // ones in SwapBuffersLocked().
   virtual bool PrepareBuffers(const TargetSize& size) = 0;
 
   // Map thread, under the BufferState lock. Replaces the current buffer set
@@ -54,22 +55,23 @@ class RenderTarget {
   virtual void* CopyBufferLocked(int index) = 0;
 
   // Map thread. Attaches a render session to `map` that renders into the
-  // render texture.
+  // render texture, or the current set's first buffer.
   virtual mln_status Attach(mln_map map, const TargetSize& size,
                             mln_render_session* out_session) = 0;
 
-  // Map thread. Changes the session's target to the render texture of the
-  // current set, after a resize.
+  // Map thread. Changes the session's target to the render texture, or the
+  // first buffer, of the current set, after a resize.
   virtual mln_status SetTarget(mln_render_session session,
                                const TargetSize& size) = 0;
 
   // Map thread. Copies the render texture into buffer `index` on the GPU and
-  // returns when the copy has completed (design D3b).
+  // returns when the copy has completed (design D3b). Not called when the
+  // target renders into the buffers.
   virtual bool CopyToBuffer(int index) = 0;
 
-  // EXPERIMENT (design D20): whether the session renders directly into the
-  // display buffers, so that no copy is needed. Then SelectBuffer() makes
-  // buffer `index` the session's target before each render.
+  // Whether the session renders directly into the display buffers (a
+  // copy-free map, design D20). Then SelectBuffer() makes buffer `index` the
+  // session's target before each render, and no copy is needed.
   virtual bool RendersIntoBuffers() const { return false; }
   virtual mln_status SelectBuffer(mln_render_session session, int index) {
     return MLN_STATUS_OK;
@@ -87,9 +89,10 @@ class RenderTarget {
 };
 
 // Creates the platform render target for `owner` and registers its Flutter
-// texture. Returns null on failure.
+// texture. With `copy_free`, the target renders directly into the display
+// buffers. Returns null on failure.
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner);
+    std::weak_ptr<MapTexture> owner, bool copy_free);
 
 // The path of MapLibre's tile cache database, or an empty string for none.
 std::string PlatformCachePath();

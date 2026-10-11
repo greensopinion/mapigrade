@@ -59,7 +59,7 @@ int64_t TotalRenderedFrames() {
 
 extern "C" {
 
-int64_t map_texture_create(double pixel_ratio,
+int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
                            map_texture_event_callback callback) {
   if (callback == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   int64_t handle;
@@ -67,7 +67,8 @@ int64_t map_texture_create(double pixel_ratio,
     std::lock_guard lock(registry_mutex);
     handle = next_handle++;
   }
-  auto texture = MapTexture::Create(handle, pixel_ratio, callback);
+  auto texture =
+      MapTexture::Create(handle, pixel_ratio, copy_free != 0, callback);
   if (!texture) return MAP_TEXTURE_ERROR_CREATE_FAILED;
   std::lock_guard lock(registry_mutex);
   // The map can't have rendered yet: its render session is attached by the
