@@ -67,6 +67,14 @@ class RenderTarget {
   // returns when the copy has completed (design D3b).
   virtual bool CopyToBuffer(int index) = 0;
 
+  // EXPERIMENT (design D20): whether the session renders directly into the
+  // display buffers, so that no copy is needed. Then SelectBuffer() makes
+  // buffer `index` the session's target before each render.
+  virtual bool RendersIntoBuffers() const { return false; }
+  virtual mln_status SelectBuffer(mln_render_session session, int index) {
+    return MLN_STATUS_OK;
+  }
+
   // Map thread. Tells Flutter that a new frame is available.
   virtual void FrameAvailable() = 0;
 

@@ -46,6 +46,9 @@ void main() {
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   final controllers = <MapTextureController>[];
+  // EXPERIMENT: `--dart-define=ZERO_COPY=true` runs every test with maps that
+  // render directly into the display buffers.
+  setZeroCopyForTesting(const bool.fromEnvironment('ZERO_COPY'));
 
   /// Creates a controller and shows it in a 400x300 view.
   Future<MapTextureController> showMap(WidgetTester tester) async {
@@ -181,9 +184,12 @@ void main() {
         reason: 'the last camera was never displayed');
     expect(caughtUp.elapsed, lessThan(const Duration(milliseconds: 500)));
     // The map renders at most one frame ahead of what Flutter displays, so
-    // camera updates that arrive between frames are coalesced.
+    // camera updates that arrive between frames are coalesced. Renders that
+    // start before Flutter took the latest frame (while frames take longer
+    // than a refresh interval, design D19) can replace an undisplayed frame.
     final stats = controller.stats();
-    expect(stats.renderedFrames, lessThanOrEqualTo(stats.presentedFrames + 1));
+    expect(stats.renderedFrames,
+        lessThanOrEqualTo(stats.presentedFrames + stats.renderAheadFrames + 1));
     // From the first frame that shows a sent camera on, displayed cameras
     // never go backwards: no stale camera is shown after a newer one.
     final first =

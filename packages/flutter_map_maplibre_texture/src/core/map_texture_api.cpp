@@ -118,6 +118,14 @@ int32_t map_texture_resize(int64_t handle, double logical_width,
   return MAP_TEXTURE_OK;
 }
 
+int32_t map_texture_set_display_refresh_rate(int64_t handle, double hz) {
+  if (!(hz >= 0)) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->SetDisplayRefreshRate(hz);
+  return MAP_TEXTURE_OK;
+}
+
 int32_t map_texture_get_stats(int64_t handle, map_texture_stats* out_stats) {
   if (out_stats == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   auto texture = Find(handle);
@@ -141,6 +149,13 @@ int32_t map_texture_dispose(int64_t handle) {
 
 void map_texture_set_paused_for_testing(int32_t paused) {
   map_texture::SetAllPaused(paused != 0);
+}
+
+void map_texture_set_render_ahead_for_testing(int32_t mode) {
+  using map_texture::RenderAheadMode;
+  map_texture::SetRenderAheadModeForTesting(
+      mode < 0 ? RenderAheadMode::kNever
+               : mode > 0 ? RenderAheadMode::kAlways : RenderAheadMode::kAuto);
 }
 
 void map_texture_reduce_memory_use_for_testing(void) {

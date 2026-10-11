@@ -164,9 +164,10 @@ Instruments' `xctrace` launches an app by its bundle identifier, which the Debug
 The script:
 
 1. clones `https://github.com/maplibre/maplibre-native-ffi.git` into `third_party/maplibre-native-ffi-src/` and checks out the pinned commit;
-2. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
-3. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
-4. wraps each installed preset's dylib in a framework and combines them into `MapLibreNativeC.xcframework` for the Flutter plugin.
+2. applies the local patches in `scripts/patches/maplibre-native-ffi-*.patch` (currently one: a borrowed-texture `set_target` doesn't post an unchanged size to the map, needed only by the copy-free experiment, design D20 of the iOS slice);
+3. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
+4. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
+5. wraps each installed preset's dylib in a framework and combines them into `MapLibreNativeC.xcframework` for the Flutter plugin.
 
 Output in `third_party/maplibre-native-ffi/` (gitignored):
 

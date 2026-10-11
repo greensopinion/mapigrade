@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Clones MapLibre Native FFI at the commit in scripts/maplibre_ffi.lock, builds
-# the presets listed there (or the ones given as arguments), installs each into
+# Clones MapLibre Native FFI at the commit in scripts/maplibre_ffi.lock,
+# applies the patches in scripts/patches/, builds the presets listed in the
+# lock file (or the ones given as arguments), installs each into
 # third_party/maplibre-native-ffi/<preset>/, and combines every installed
 # preset into third_party/maplibre-native-ffi/MapLibreNativeC.xcframework.
 #
@@ -41,6 +42,18 @@ if [[ ! -d "$src_dir/.git" ]]; then
 fi
 git -C "$src_dir" fetch --quiet origin "$MAPLIBRE_FFI_COMMIT" || true
 git -C "$src_dir" checkout --quiet --detach "$MAPLIBRE_FFI_COMMIT"
+
+# Local patches to the FFI, applied on top of the pinned commit. A patch that
+# is already applied is skipped, so the script can run again on the same
+# checkout.
+for patch in "$repo_root"/scripts/patches/maplibre-native-ffi-*.patch; do
+  [[ -e "$patch" ]] || continue
+  if git -C "$src_dir" apply --reverse --check "$patch" 2>/dev/null; then
+    continue
+  fi
+  git -C "$src_dir" apply "$patch"
+  echo "Applied $(basename "$patch")"
+done
 
 # Reads a version from the [vars] table of the FFI repository's mise.toml.
 pinned() {

@@ -70,6 +70,20 @@ final class MapTextureStatsStruct extends Struct {
   external int pausedRenders;
   @Int64()
   external int memoryReductions;
+  @Int64()
+  external int frameCycleCount;
+  @Int64()
+  external int frameCycleTotalNs;
+  @Int64()
+  external int pickupWaitCount;
+  @Int64()
+  external int pickupWaitTotalNs;
+  @Int64()
+  external int presentToRenderCount;
+  @Int64()
+  external int presentToRenderTotalNs;
+  @Int64()
+  external int renderAheadFrames;
 }
 
 typedef MapTextureEventCallback = Void Function(
@@ -124,6 +138,17 @@ external int mapTextureMemoryFootprint();
 @Native<Int32 Function(Pointer<Int64>)>(
     symbol: 'map_texture_released_buffers_alive_for_testing')
 external int mapTextureReleasedBuffersAliveForTesting(Pointer<Int64> outBytes);
+
+@Native<Void Function(Int32)>(
+    symbol: 'map_texture_set_render_ahead_for_testing')
+external void mapTextureSetRenderAheadForTesting(int mode);
+
+@Native<Void Function(Int32)>(symbol: 'map_texture_set_zero_copy_for_testing')
+external void mapTextureSetZeroCopyForTesting(int on);
+
+@Native<Int32 Function(Int64, Double)>(
+    symbol: 'map_texture_set_display_refresh_rate')
+external int mapTextureSetDisplayRefreshRate(int handle, double hz);
 
 @Native<Int32 Function(Int32)>(
     symbol: 'map_texture_released_buffers_for_testing')

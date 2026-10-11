@@ -29,10 +29,24 @@ import 'package:flutter_map_maplibre_texture/flutter_map_maplibre_texture.dart';
 import 'package:flutter_map_maplibre_texture/testing.dart';
 
 const benchmarkEnabled = bool.fromEnvironment('BENCHMARK');
+
+/// `--dart-define=RENDER_AHEAD=always` or `=never` overrides when the map
+/// renders without waiting until Flutter has taken the latest frame; the
+/// default renders ahead while a frame takes longer than a refresh interval.
+/// EXPERIMENT: `--dart-define=ZERO_COPY=true` renders directly into the
+/// display buffers. main.dart applies it before creating the map.
+const zeroCopy = bool.fromEnvironment('ZERO_COPY');
+
+const renderAhead = String.fromEnvironment(
+  'RENDER_AHEAD',
+  defaultValue: 'auto',
+);
 const phaseDuration = Duration(seconds: 30);
-const sustainedDuration =
-    Duration(seconds: int.fromEnvironment('BENCHMARK_SUSTAINED_S'));
+const sustainedDuration = Duration(
+  seconds: int.fromEnvironment('BENCHMARK_SUSTAINED_S'),
+);
 const sustainedInterval = Duration(seconds: 30);
+
 /// Central London, panning east from Charing Cross through Covent Garden, the
 /// City, Whitechapel and Limehouse: dense streets, buildings and labels along
 /// the whole path, so that the measurement covers the expensive case.
@@ -55,6 +69,11 @@ class Benchmark {
   Duration _measureStart = Duration.zero;
 
   Future<void> run() async {
+    setRenderAheadForTesting(switch (renderAhead) {
+      'always' => true,
+      'never' => false,
+      _ => null,
+    });
     controller.frames.listen((f) {
       if (!_measuring) return;
       if (_mapFrameIds.add(f.frameId)) _mapFrameTimes.add(_clock.elapsed);
@@ -91,24 +110,27 @@ class Benchmark {
   /// [sustainedInterval].
   Future<void> _runSustained() async {
     stdout.writeln(
-        'benchmark: sustained pan for ${sustainedDuration.inSeconds} s');
+      'benchmark: sustained pan for ${sustainedDuration.inSeconds} s',
+    );
     final measureStart = _measureStart = _clock.elapsed;
     final thermal = [thermalStateForTesting()];
     final timer = Timer.periodic(
-        sustainedInterval, (_) => thermal.add(thermalStateForTesting()));
+      sustainedInterval,
+      (_) => thermal.add(thermalStateForTesting()),
+    );
     final before = controller.stats();
     _measuring = true;
     await _pan(duration: sustainedDuration, backAndForth: true);
     _measuring = false;
     timer.cancel();
     final after = controller.stats();
-    final intervals = (sustainedDuration.inMicroseconds /
-            sustainedInterval.inMicroseconds)
-        .ceil();
+    final intervals =
+        (sustainedDuration.inMicroseconds / sustainedInterval.inMicroseconds)
+            .ceil();
     final framesPerInterval = List.filled(intervals, 0);
     for (final t in _mapFrameTimes) {
-      final i = (t - measureStart).inMicroseconds ~/
-          sustainedInterval.inMicroseconds;
+      final i =
+          (t - measureStart).inMicroseconds ~/ sustainedInterval.inMicroseconds;
       if (i >= 0 && i < intervals) framesPerInterval[i]++;
     }
     final result = {
@@ -127,6 +149,9 @@ class Benchmark {
     await stdout.flush();
     exit(0);
   }
+
+  static double _avgMs(Duration total, int count) =>
+      count == 0 ? 0 : total.inMicroseconds / 1000 / count;
 
   /// Percentiles of the displayed map frame rate over each whole second of
   /// the measured pass, which an average over the pass hides. p10 is the low
@@ -149,8 +174,10 @@ class Benchmark {
   /// Changes the camera on every Flutter frame for [duration] (default
   /// [phaseDuration]), panning east, or with [backAndForth] east for
   /// [phaseDuration] and back west, repeatedly.
-  Future<void> _pan(
-      {Duration duration = phaseDuration, bool backAndForth = false}) {
+  Future<void> _pan({
+    Duration duration = phaseDuration,
+    bool backAndForth = false,
+  }) {
     final done = Completer<void>();
     final degreesPerSecond = panSpeed * 360 / (1 << start.zoom.toInt());
     Duration? first;
@@ -163,10 +190,13 @@ class Benchmark {
         final phase = seconds % (2 * leg);
         seconds = phase <= leg ? phase : 2 * leg - phase;
       }
-      onCamera(MapCamera(
+      onCamera(
+        MapCamera(
           latitude: start.latitude,
           longitude: start.longitude + degreesPerSecond * seconds,
-          zoom: start.zoom));
+          zoom: start.zoom,
+        ),
+      );
       if (elapsed < duration) {
         SchedulerBinding.instance.scheduleFrameCallback(tick);
       } else {
@@ -197,18 +227,24 @@ class Benchmark {
     final copies = after.copyCount - before.copyCount;
     return {
       'duration_s': seconds,
+      'render_ahead': renderAhead,
+      'zero_copy': zeroCopy,
       'flutter_frames': _frameTimings.length,
-      'flutter_frame_total_span_ms':
-          percentiles([for (final t in _frameTimings) ms(t.totalSpan)]),
-      'flutter_frame_build_ms':
-          percentiles([for (final t in _frameTimings) ms(t.buildDuration)]),
-      'flutter_frame_raster_ms':
-          percentiles([for (final t in _frameTimings) ms(t.rasterDuration)]),
+      'flutter_frame_total_span_ms': percentiles([
+        for (final t in _frameTimings) ms(t.totalSpan),
+      ]),
+      'flutter_frame_build_ms': percentiles([
+        for (final t in _frameTimings) ms(t.buildDuration),
+      ]),
+      'flutter_frame_raster_ms': percentiles([
+        for (final t in _frameTimings) ms(t.rasterDuration),
+      ]),
       'flutter_frame_interval_ms': percentiles([
         for (var i = 1; i < _frameTimings.length; i++)
           (_frameTimings[i].timestampInMicroseconds(FramePhase.vsyncStart) -
-                  _frameTimings[i - 1]
-                      .timestampInMicroseconds(FramePhase.vsyncStart)) /
+                  _frameTimings[i - 1].timestampInMicroseconds(
+                    FramePhase.vsyncStart,
+                  )) /
               1000,
       ]),
       'map_frames_displayed': _mapFrameIds.length,
@@ -221,10 +257,27 @@ class Benchmark {
           ? 0
           : ms(after.renderUpdateTotal - before.renderUpdateTotal) / renders,
       'render_update_max_ms': ms(after.renderUpdateMax),
-      'copy_avg_ms':
-          copies == 0 ? 0 : ms(after.copyTotal - before.copyTotal) / copies,
+      'copy_avg_ms': copies == 0
+          ? 0
+          : ms(after.copyTotal - before.copyTotal) / copies,
       'skipped_renders': after.skippedRenders - before.skippedRenders,
       'waits_for_display': after.waitsForDisplay - before.waitsForDisplay,
+      // Where the time between two renders goes: render_update + copy, the
+      // wait until Flutter takes the frame, and the time from Flutter taking
+      // it until the next render starts.
+      'frame_cycle_avg_ms': _avgMs(
+        after.frameCycleTotal - before.frameCycleTotal,
+        after.frameCycleCount - before.frameCycleCount,
+      ),
+      'pickup_wait_avg_ms': _avgMs(
+        after.pickupWaitTotal - before.pickupWaitTotal,
+        after.pickupWaitCount - before.pickupWaitCount,
+      ),
+      'render_ahead_frames': after.renderAheadFrames - before.renderAheadFrames,
+      'present_to_render_avg_ms': _avgMs(
+        after.presentToRenderTotal - before.presentToRenderTotal,
+        after.presentToRenderCount - before.presentToRenderCount,
+      ),
     };
   }
 }

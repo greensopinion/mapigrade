@@ -1,6 +1,6 @@
 # MapLibre Native FFI + Flutter Texture: Concept
 
-**Status:** Concept and decisions; stage 1 (macOS vertical slice) done, decision: continue
+**Status:** Concept and decisions; stages 1 (macOS) and 2 (iOS) done, decision: continue
 **Updated:** 2026-10-09
 
 ## 1. Purpose
@@ -234,7 +234,7 @@ We checked these facts in the source at commit `dd97d20f8fab6990cd87c13f091ce00e
 |---|---|---|---|
 | 0. Reconnaissance | Done: this document and the FFI source check | Done | Continue |
 | 1. macOS vertical slice | Texture display, style, camera, resize, lifecycle, camera report for each frame, measurements | ≥30 fps and no CPU readback; if slow, find whether rendering, passing frames to Flutter, scheduling or synchronization causes it | Continue (2026-10-09): median 119 fps during continuous pan on an M2 Max, no CPU readback ([benchmarks](../benchmarks.md), [limitations](../limitations.md)) |
-| 2. iOS | Reuse the Metal bridge; iOS lifecycle; device measurements | ≥30 fps on iPhone | |
+| 2. iOS | Reuse the Metal bridge; iOS lifecycle; device measurements | ≥30 fps on iPhone | Continue (2026-10-10): over central London the iPhone 15 Pro Max displayed 99–100 map frames per second at the median second (p10 87, lowest second 85) with rendering ahead; no CPU readback; no rendering in the background ([benchmarks](../benchmarks.md), [limitations](../limitations.md)) |
 | 3. `flutter_map` layer | Layer widget, camera conversion, compensating transform, alignment and lag measurements, comparison with `flutter_map_maplibre` | If the texture is visibly misaligned with the overlays, don't present it as a drop-in base layer; consider model B | |
 | 4. Android | `SurfaceProducer` bridge, surface lifecycle, packaging, measurements | ≥30 fps on the reference Android device | |
 

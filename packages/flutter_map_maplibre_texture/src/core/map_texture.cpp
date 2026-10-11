@@ -8,6 +8,15 @@
 #include <string>
 
 namespace map_texture {
+
+namespace {
+std::atomic<RenderAheadMode> render_ahead_mode{RenderAheadMode::kAuto};
+}  // namespace
+
+void SetRenderAheadModeForTesting(RenderAheadMode mode) {
+  render_ahead_mode.store(mode);
+}
+
 namespace {
 
 constexpr uint64_t kMapEventMask =
@@ -50,7 +59,9 @@ std::shared_ptr<MapTexture> MapTexture::Create(
 
 MapTexture::MapTexture(int64_t handle, double pixel_ratio,
                        map_texture_event_callback callback)
-    : handle_(handle), initial_pixel_ratio_(pixel_ratio), callback_(callback) {}
+    : handle_(handle),
+      initial_pixel_ratio_(pixel_ratio),
+      callback_(callback) {}
 
 MapTexture::~MapTexture() {
   // Dispose() joins the thread; this only covers a failed Start().
@@ -97,6 +108,11 @@ void MapTexture::Resize(const Viewport& viewport) {
   Signal();
 }
 
+void MapTexture::SetDisplayRefreshRate(double hz) {
+  display_interval_ns_.store(
+      hz > 0 && std::isfinite(hz) ? static_cast<int64_t>(1e9 / hz) : 0);
+}
+
 void MapTexture::ReduceMemoryUse() {
   commands_.Push(Command::ReduceMemoryUse());
   Signal();
@@ -131,9 +147,16 @@ void* MapTexture::Present() {
     buffer = target_->CopyBufferLocked(p.index);
   });
   if (presented.is_new) {
+    int64_t now = NowNs();
+    presented_at_ns_.store(now);
+    int64_t published = published_at_ns_.load();
     {
       std::lock_guard lock(stats_mutex_);
       ++stats_.presented_frames;
+      if (published != 0) {
+        ++stats_.pickup_wait_count;
+        stats_.pickup_wait_total_ns += now - published;
+      }
     }
     Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &presented.info);
   }
@@ -169,9 +192,13 @@ void MapTexture::Run() {
   RunInPlatformScope([&] { Teardown(); });
 }
 
+bool MapTexture::RenderWanted() {
+  return render_pending_ && session_ != MLN_HANDLE_NULL &&
+         !waiting_for_buffer_.load() && !gate_.paused();
+}
+
 bool MapTexture::RunOnce() {
-  bool render_now = render_pending_ && session_ != MLN_HANDLE_NULL &&
-                    !waiting_for_buffer_.load() && !gate_.paused();
+  bool render_now = RenderWanted();
   int64_t timeout_ms = render_now ? 0 : kIdlePumpTimeoutMs;
   if (notify_after_resize_at_ns_ != 0) {
     int64_t until_ms = (notify_after_resize_at_ns_ - NowNs()) / 1'000'000;
@@ -241,7 +268,7 @@ bool MapTexture::Init() {
   return true;
 }
 
-void MapTexture::Teardown() {
+void MapTexture::DestroySession() {
   if (session_ != MLN_HANDLE_NULL) {
     mln_render_session_destroy(session_);
     session_ = MLN_HANDLE_NULL;
@@ -250,6 +277,10 @@ void MapTexture::Teardown() {
     target_->ReleaseBuffersLocked();
     buffers_.ResetLocked();
   });
+}
+
+void MapTexture::Teardown() {
+  DestroySession();
   if (map_ != MLN_HANDLE_NULL) {
     mln_map_destroy(map_);
     map_ = MLN_HANDLE_NULL;
@@ -286,25 +317,28 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kResize:
         ApplyResize(command.viewport);
         break;
-      case Command::Kind::kReduceMemoryUse: {
-        if (session_ == MLN_HANDLE_NULL) break;
-        // This releases cached tiles and images and submits no GPU work, so
-        // it also runs while rendering is paused.
-        mln_status status = mln_render_session_reduce_memory_use(session_);
-        if (status == MLN_STATUS_OK) {
-          std::lock_guard lock(stats_mutex_);
-          ++stats_.memory_reductions;
-        } else if (status != MLN_STATUS_INVALID_STATE) {
-          // MLN_STATUS_INVALID_STATE: no renderer exists yet, so there is
-          // nothing to release.
-          ReportStatus("mln_render_session_reduce_memory_use", status);
-        }
+      case Command::Kind::kReduceMemoryUse:
+        ApplyReduceMemoryUse();
         break;
-      }
       case Command::Kind::kDispose:
         *stop = true;
         return;
     }
+  }
+}
+
+void MapTexture::ApplyReduceMemoryUse() {
+  if (session_ == MLN_HANDLE_NULL) return;
+  // This releases cached tiles and images and submits no GPU work, so it also
+  // runs while rendering is paused.
+  mln_status status = mln_render_session_reduce_memory_use(session_);
+  if (status == MLN_STATUS_OK) {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.memory_reductions;
+  } else if (status != MLN_STATUS_INVALID_STATE) {
+    // MLN_STATUS_INVALID_STATE: no renderer exists yet, so there is nothing
+    // to release.
+    ReportStatus("mln_render_session_reduce_memory_use", status);
   }
 }
 
@@ -399,8 +433,10 @@ void MapTexture::DrainEvents() {
           Emit(MAP_TEXTURE_EVENT_IDLE);
           break;
         case MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE: {
-          std::lock_guard lock(stats_mutex_);
-          ++stats_.render_update_available_events;
+          {
+            std::lock_guard lock(stats_mutex_);
+            ++stats_.render_update_available_events;
+          }
           render_pending_ = true;
           break;
         }
@@ -423,9 +459,15 @@ void MapTexture::MaybeRender() {
   }
   RenderGateScope gate_scope(gate_);
 
-  // Present() signals the wake source once Flutter takes a frame, which
-  // retries this render.
-  if (!buffers_.LatestPresented()) {
+  // Normally the next frame renders only after Flutter has taken the latest
+  // one, and Present() signals the wake source to retry this render. While a
+  // frame takes longer than a display refresh interval, waiting would cost a
+  // whole refresh interval per frame, so the next frame renders right away;
+  // a frame Flutter hasn't taken yet is then replaced (design D19).
+  bool latest_presented = buffers_.LatestPresented();
+  bool render_ahead = !latest_presented && RenderAhead();
+  if (!latest_presented && !render_ahead) {
+    render_waited_for_display_ = true;
     {
       std::lock_guard lock(stats_mutex_);
       ++stats_.waits_for_display;
@@ -445,7 +487,32 @@ void MapTexture::MaybeRender() {
 
   mln_render_result result = MLN_RENDER_RESULT_NO_UPDATE;
   bool needs_repaint = false;
+  if (target_->RendersIntoBuffers()) {
+    mln_status select_status = target_->SelectBuffer(session_, index);
+    if (select_status != MLN_STATUS_OK) {
+      ReportStatus("select buffer", select_status);
+      return;
+    }
+  }
+
   int64_t start = NowNs();
+  {
+    std::lock_guard lock(stats_mutex_);
+    if (render_ahead) ++stats_.render_ahead_frames;
+    if (last_render_start_ns_ != 0 &&
+        start - last_render_start_ns_ < 100'000'000) {
+      ++stats_.frame_cycle_count;
+      stats_.frame_cycle_total_ns += start - last_render_start_ns_;
+    }
+    int64_t presented = presented_at_ns_.load();
+    if (render_waited_for_display_ && presented != 0 && presented <= start) {
+      ++stats_.present_to_render_count;
+      stats_.present_to_render_total_ns += start - presented;
+    }
+  }
+  last_render_start_ns_ = start;
+  render_waited_for_display_ = false;
+  render_pending_ = false;
   mln_status status =
       mln_render_session_render_update(session_, &result, &needs_repaint);
   int64_t elapsed = NowNs() - start;
@@ -455,16 +522,22 @@ void MapTexture::MaybeRender() {
     stats_.render_update_total_ns += elapsed;
     stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
   }
-  render_pending_ = false;
   if (status != MLN_STATUS_OK) {
     ReportStatus("mln_render_session_render_update", status);
     return;
   }
   if (result != MLN_RENDER_RESULT_RENDERED) return;
 
+  int64_t render_elapsed = elapsed;
   start = NowNs();
-  bool copied = target_->CopyToBuffer(index);
+  bool copied = target_->RendersIntoBuffers() || target_->CopyToBuffer(index);
   elapsed = NowNs() - start;
+  // Smoothed over about eight frames, so that one slow or fast frame doesn't
+  // switch between pacing and rendering ahead.
+  int64_t cost = render_elapsed + elapsed;
+  frame_cost_avg_ns_ = frame_cost_avg_ns_ == 0
+                           ? cost
+                           : frame_cost_avg_ns_ + (cost - frame_cost_avg_ns_) / 8;
   {
     std::lock_guard lock(stats_mutex_);
     ++stats_.copy_count;
@@ -495,6 +568,7 @@ void MapTexture::MaybeRender() {
   }
 
   buffers_.Publish(index, info);
+  published_at_ns_.store(NowNs());
   {
     std::lock_guard lock(stats_mutex_);
     ++stats_.rendered_frames;
@@ -504,6 +578,29 @@ void MapTexture::MaybeRender() {
   // runs, so needs_repaint needs no action here (see
   // mln_render_session_render_update in render_session.h).
   target_->FrameAvailable();
+}
+
+bool MapTexture::RenderAhead() {
+  switch (render_ahead_mode.load()) {
+    case RenderAheadMode::kNever:
+      return false;
+    case RenderAheadMode::kAlways:
+      return true;
+    case RenderAheadMode::kAuto:
+      break;
+  }
+  // Hysteresis: start rendering ahead when a frame costs more than a refresh
+  // interval, and go back to pacing only when it costs less than 3/4 of one,
+  // so that a frame cost close to the interval doesn't switch on every frame.
+  int64_t interval = display_interval_ns_.load();
+  if (interval <= 0) {
+    rendering_ahead_ = false;
+  } else if (frame_cost_avg_ns_ > interval) {
+    rendering_ahead_ = true;
+  } else if (frame_cost_avg_ns_ < interval * 3 / 4) {
+    rendering_ahead_ = false;
+  }
+  return rendering_ahead_;
 }
 
 void MapTexture::Emit(int32_t type, const char* message,

@@ -21,6 +21,7 @@
 #import <IOSurface/IOSurfaceRef.h>
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -56,6 +57,10 @@ using map_texture::TargetSize;
 }
 
 @end
+
+// EXPERIMENT (design D20): maps created while this is on render directly into
+// the display buffers.
+static std::atomic<bool> gRendersIntoBuffers{false};
 
 // For tests: the IOSurfaces of released pixel buffers, to check that they are
 // freed (map_texture_released_buffers_alive_for_testing).
@@ -109,8 +114,10 @@ class MetalRenderTarget : public RenderTarget {
  public:
   MetalRenderTarget(id<MTLDevice> device,
                     NSObject<FlutterTextureRegistry>* registry,
-                    MLTFlutterTexture* texture, int64_t texture_id)
-      : device_(device),
+                    MLTFlutterTexture* texture, int64_t texture_id,
+                    bool renders_into_buffers)
+      : renders_into_buffers_(renders_into_buffers),
+        device_(device),
         queue_([device newCommandQueue]),
         registry_(registry),
         texture_(texture),
@@ -156,6 +163,9 @@ class MetalRenderTarget : public RenderTarget {
         return false;
       }
     }
+    prepared_.size = size;
+    // Rendering directly into the buffers needs no separate render texture.
+    if (renders_into_buffers_) return true;
     MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
         texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                      width:size.physical_width
@@ -168,7 +178,6 @@ class MetalRenderTarget : public RenderTarget {
       prepared_.Release();
       return false;
     }
-    prepared_.size = size;
     return true;
   }
 
@@ -205,6 +214,16 @@ class MetalRenderTarget : public RenderTarget {
   mln_status SetTarget(mln_render_session session,
                        const TargetSize& size) override {
     mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size);
+    return mln_metal_borrowed_texture_set_target(session, &descriptor);
+  }
+
+  bool RendersIntoBuffers() const override { return renders_into_buffers_; }
+
+  // Needs the FFI patch in scripts/patches/: without it, each same-size
+  // set_target makes the map publish another render update (design D3).
+  mln_status SelectBuffer(mln_render_session session, int index) override {
+    mln_metal_borrowed_texture_descriptor descriptor =
+        Descriptor(current_.size, current_.textures[index]);
     return mln_metal_borrowed_texture_set_target(session, &descriptor);
   }
 
@@ -246,16 +265,25 @@ class MetalRenderTarget : public RenderTarget {
   }
 
  private:
+  // The descriptor for the current render texture, or with renders into
+  // buffers, for the current set's first buffer, until SelectBuffer().
   mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size) {
+    return Descriptor(size, renders_into_buffers_ ? current_.textures[0]
+                                                  : current_.render_texture);
+  }
+
+  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
+                                                   id<MTLTexture> texture) {
     mln_metal_borrowed_texture_descriptor descriptor =
         mln_metal_borrowed_texture_descriptor_default();
     descriptor.extent = size.extent;
     descriptor.physical_width = size.physical_width;
     descriptor.physical_height = size.physical_height;
-    descriptor.texture = (__bridge void*)current_.render_texture;
+    descriptor.texture = (__bridge void*)texture;
     return descriptor;
   }
 
+  const bool renders_into_buffers_;
   id<MTLDevice> device_;
   id<MTLCommandQueue> queue_;
   NSObject<FlutterTextureRegistry>* registry_;
@@ -283,8 +311,8 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
   RunOnMainSync(^{
     texture_id = [registry registerTexture:texture];
   });
-  return std::make_unique<MetalRenderTarget>(device, registry, texture,
-                                             texture_id);
+  return std::make_unique<MetalRenderTarget>(
+      device, registry, texture, texture_id, gRendersIntoBuffers.load());
 }
 
 // The map thread is a std::thread with no autorelease pool, so objects
@@ -365,4 +393,8 @@ extern "C" int32_t map_texture_released_buffers_for_testing(int32_t reset) {
   auto count = static_cast<int32_t>(gReleased.size());
   if (reset != 0) gReleased.clear();
   return count;
+}
+
+extern "C" void map_texture_set_zero_copy_for_testing(int32_t on) {
+  gRendersIntoBuffers.store(on != 0);
 }

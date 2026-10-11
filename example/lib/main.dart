@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map_maplibre_texture/flutter_map_maplibre_texture.dart';
+import 'package:flutter_map_maplibre_texture/testing.dart';
 
 import 'benchmark.dart';
 
@@ -77,6 +78,9 @@ class _MapScreenState extends State<MapScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_controller != null) return;
+    // EXPERIMENT: rendering directly into the display buffers is chosen when a
+    // map is created.
+    setZeroCopyForTesting(zeroCopy);
     final controller = MapTextureController.create(
         pixelRatio: MediaQuery.devicePixelRatioOf(context));
     _subscriptions.add(controller.events.listen(_onEvent));

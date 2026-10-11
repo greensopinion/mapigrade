@@ -87,7 +87,15 @@ class MapTextureStats {
         renderUpdateAvailableEvents = s.renderUpdateAvailableEvents,
         needsRepaintFrames = s.needsRepaintFrames,
         pausedRenders = s.pausedRenders,
-        memoryReductions = s.memoryReductions;
+        memoryReductions = s.memoryReductions,
+        frameCycleCount = s.frameCycleCount,
+        frameCycleTotal = Duration(microseconds: s.frameCycleTotalNs ~/ 1000),
+        pickupWaitCount = s.pickupWaitCount,
+        pickupWaitTotal = Duration(microseconds: s.pickupWaitTotalNs ~/ 1000),
+        presentToRenderCount = s.presentToRenderCount,
+        presentToRenderTotal =
+            Duration(microseconds: s.presentToRenderTotalNs ~/ 1000),
+        renderAheadFrames = s.renderAheadFrames;
 
   final int renderedFrames;
 
@@ -122,6 +130,24 @@ class MapTextureStats {
   /// Times the renderer was asked to release cached resources, for example
   /// after an iOS memory warning.
   final int memoryReductions;
+
+  /// Time from one render to the start of the next, while rendering
+  /// continuously.
+  final int frameCycleCount;
+  final Duration frameCycleTotal;
+
+  /// Time from publishing a frame until Flutter takes it.
+  final int pickupWaitCount;
+  final Duration pickupWaitTotal;
+
+  /// Time from Flutter taking a frame until the next render starts, for
+  /// renders that waited for Flutter to take the latest frame.
+  final int presentToRenderCount;
+  final Duration presentToRenderTotal;
+
+  /// Renders started before Flutter had taken the latest frame, because a
+  /// frame took longer than a display refresh interval.
+  final int renderAheadFrames;
 
   @override
   String toString() =>
@@ -187,7 +213,7 @@ class MapTextureController {
   final _events = StreamController<MapEvent>.broadcast();
   final _frames = StreamController<FrameCamera>.broadcast();
   bool _disposed = false;
-  double? _width, _height, _pixelRatio;
+  double? _width, _height, _pixelRatio, _refreshRate;
 
   /// Style, loading, render and idle events.
   Stream<MapEvent> get events => _events.stream;
@@ -228,6 +254,15 @@ class MapTextureController {
     _width = logicalSize.width;
     _height = logicalSize.height;
     _pixelRatio = pixelRatio;
+  }
+
+  /// Sets the refresh rate in Hz of the display that shows the map.
+  /// [MapTextureView] calls this.
+  void setDisplayRefreshRate(double hz) {
+    if (_disposed) throw const MapTextureDisposedException();
+    if (hz == _refreshRate) return;
+    _check(mapTextureSetDisplayRefreshRate(_handle, hz));
+    _refreshRate = hz;
   }
 
   MapTextureStats stats() {

@@ -20,12 +20,12 @@ void reduceMemoryUseForTesting() => mapTextureReduceMemoryUseForTesting();
 /// The device's thermal state, for measurements: `nominal`, `fair`,
 /// `serious`, `critical`, or `unknown`.
 String thermalStateForTesting() => switch (mapTextureThermalState()) {
-      0 => 'nominal',
-      1 => 'fair',
-      2 => 'serious',
-      3 => 'critical',
-      _ => 'unknown',
-    };
+  0 => 'nominal',
+  1 => 'fair',
+  2 => 'serious',
+  3 => 'critical',
+  _ => 'unknown',
+};
 
 /// The process's physical memory footprint in bytes, the value Xcode's memory
 /// gauge shows, or -1 if unknown.
@@ -50,3 +50,18 @@ int memoryFootprintForTesting() => mapTextureMemoryFootprint();
 
 /// Starts a new count for [releasedBuffersForTesting].
 void resetReleasedBuffersForTesting() => mapTextureReleasedBuffersForTesting(1);
+
+/// When maps render without waiting until Flutter has taken the latest frame:
+/// `null` while a frame takes longer than a display refresh interval (the
+/// default), `false` never, `true` always.
+void setRenderAheadForTesting(bool? always) =>
+    mapTextureSetRenderAheadForTesting(switch (always) {
+      null => 0,
+      false => -1,
+      true => 1,
+    });
+
+/// EXPERIMENT: maps created while this is on render directly into the display
+/// buffers instead of copying each frame into them.
+void setZeroCopyForTesting(bool on) =>
+    mapTextureSetZeroCopyForTesting(on ? 1 : 0);

@@ -47,4 +47,4 @@
 - [x] 7.1 Update the README for iOS: prerequisites (iOS SDK, simulator runtime, signing), the build script's presets, the `darwin/` layout, and exact commands for the simulator, the device and the benchmark; verify by following the iOS commands from a clean clone
 - [x] 7.2 Update `limitations.md`: iOS limitations and findings, the pause wait, memory warning results, app size on iOS, and what the Android slice can reuse from the core (pause gate and memory reduction command)
 - [x] 7.3 Before archiving, edit the Purpose of `openspec/specs/map-texture/spec.md` to say that the capability is specified for macOS and iOS
-- [ ] 7.4 Record the Stage 2 decision (continue, adopt an existing solution, or stop) with the measured numbers in the Decision column of the roadmap in `docs/maplibre-native-ffi-flutter-texture-concept.md`
+- [x] 7.4 Record the Stage 2 decision (continue, adopt an existing solution, or stop) with the measured numbers in the Decision column of the roadmap in `docs/maplibre-native-ffi-flutter-texture-concept.md`

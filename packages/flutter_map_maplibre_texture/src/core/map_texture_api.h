@@ -74,6 +74,19 @@ typedef struct map_texture_stats {
   int64_t paused_renders;
   // Calls to mln_render_session_reduce_memory_use() that succeeded.
   int64_t memory_reductions;
+  // Time from one render_update start to the next, counted when the two are
+  // less than 100 ms apart (continuous rendering).
+  int64_t frame_cycle_count;
+  int64_t frame_cycle_total_ns;
+  // Time from publishing a frame until Flutter takes it (Present).
+  int64_t pickup_wait_count;
+  int64_t pickup_wait_total_ns;
+  // Time from Flutter taking a frame until the next render_update starts,
+  // counted when that render waited for Flutter to take the frame.
+  int64_t present_to_render_count;
+  int64_t present_to_render_total_ns;
+  // Renders started before Flutter had taken the latest frame (design D19).
+  int64_t render_ahead_frames;
 } map_texture_stats;
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread.
@@ -98,6 +111,9 @@ MAP_TEXTURE_EXPORT int32_t map_texture_resize(int64_t handle,
                                               double logical_width,
                                               double logical_height,
                                               double pixel_ratio);
+// Sets the refresh rate in Hz of the display that shows the map.
+MAP_TEXTURE_EXPORT int32_t map_texture_set_display_refresh_rate(int64_t handle,
+                                                                double hz);
 MAP_TEXTURE_EXPORT int32_t map_texture_get_stats(int64_t handle,
                                                  map_texture_stats* out_stats);
 // Stops the map thread, releases the map and its resources, and unregisters
@@ -126,6 +142,13 @@ MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_alive_for_testing(
 // resets the count when `reset` is non-zero.
 MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_for_testing(
     int32_t reset);
+// For tests and measurements: 0 renders ahead while a frame takes longer than
+// a display refresh interval (the default), -1 never renders ahead, 1 always
+// renders without waiting until Flutter has taken the latest frame.
+MAP_TEXTURE_EXPORT void map_texture_set_render_ahead_for_testing(int32_t mode);
+// EXPERIMENT: maps created while this is on render directly into the display
+// buffers instead of copying each frame into them (design D20).
+MAP_TEXTURE_EXPORT void map_texture_set_zero_copy_for_testing(int32_t on);
 
 // For tests: pause (non-zero) or resume (zero) rendering of every map, as the
 // platform does when the application enters the background or foreground.
