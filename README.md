@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/mapigrade.svg" alt="Mapigrade logo" width="360">
+</p>
+
 # Mapigrade
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS and iOS, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
