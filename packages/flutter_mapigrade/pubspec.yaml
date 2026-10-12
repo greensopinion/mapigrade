@@ -8,10 +8,12 @@ environment:
   flutter: '>=3.47.0'
 
 dependencies:
+  code_assets: ^2.1.0
   ffi: ^2.1.4
   flutter:
     sdk: flutter
   flutter_map: 8.3.2
+  hooks: ^2.2.0
   latlong2: ^0.10.1
 
 dev_dependencies:
@@ -22,6 +24,9 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
+      android:
+        package: com.greensopinion.flutter_mapigrade
+        pluginClass: MapigradePlugin
       ios:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true

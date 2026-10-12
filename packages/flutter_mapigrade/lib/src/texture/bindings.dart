@@ -1,7 +1,9 @@
 // Bindings for the C ABI in src/core/map_texture_api.h (design D5).
 //
-// The plugin's native code is linked into the app, so the symbols resolve
-// from the process; there is no separate library for Dart to load.
+// On macOS and iOS the plugin's native code is linked into the app, so the
+// symbols resolve from the process. On Android they are in
+// libflutter_mapigrade.so, which hook/build.dart declares as this library's
+// code asset (design D56).
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -86,6 +88,8 @@ final class MapTextureStatsStruct extends Struct {
   external int presentToRenderTotalNs;
   @Int64()
   external int renderAheadFrames;
+  @Int64()
+  external int intervalWaits;
 }
 
 typedef MapTextureEventCallback = Void Function(
@@ -160,3 +164,6 @@ external void mapTextureSetPausedForTesting(int paused);
 
 @Native<Void Function()>(symbol: 'map_texture_reduce_memory_use_for_testing')
 external void mapTextureReduceMemoryUseForTesting();
+
+@Native<Void Function(Int32)>(symbol: 'map_texture_trim_surfaces_for_testing')
+external void mapTextureTrimSurfacesForTesting(int restore);

@@ -1,6 +1,7 @@
 // One map rendered into a Flutter texture: the map thread that owns the
 // MapLibre runtime, map and render session (designs D1 and D2), the command
-// queue from Dart, and the buffer state shared with Flutter's raster thread.
+// queue from Dart, and for a buffer target, the buffer state shared with
+// Flutter's raster thread.
 #pragma once
 
 #include <atomic>
@@ -51,14 +52,32 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // D13). Resuming renders a pending frame with the latest camera.
   void SetPaused(bool paused);
 
+  // Work of a surface target on the map thread: `session` is the render
+  // session (MLN_HANDLE_NULL before the first resize) and `size` the size the
+  // map renders at.
+  using TargetTask =
+      std::function<void(mln_render_session session, const TargetSize& size)>;
+
+  // Any thread except the map thread. Runs `task` on the map thread, ordered
+  // with the other commands, and then renders the pending frame with the
+  // latest camera once the target can present (design D54). With `wait`,
+  // returns after the task has run, or after the map thread has stopped if it
+  // stops first.
+  void RunTargetTask(TargetTask task, bool wait);
+
+  // Any thread. Reports a render error to Dart, for errors of the platform
+  // render target.
+  void ReportRenderError(const std::string& message);
+
   // Stops the map thread after it has destroyed the session, map and
   // runtime, then unregisters the texture. After this returns no events are
   // delivered.
   void Dispose();
 
-  // Flutter's raster thread. Marks the latest frame as presented and returns
-  // its buffer, retained, through RenderTarget::CopyBufferLocked. Reports a
-  // frame-displayed event with the display time when the frame is new.
+  // Flutter's raster thread, for a buffer target. Marks the latest frame as
+  // presented and returns its buffer, retained, through
+  // BufferRenderTarget::CopyBufferLocked. Reports a frame-displayed event with
+  // the display time when the frame is new.
   void* Present();
 
   map_texture_stats stats();
@@ -84,6 +103,16 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void ApplyCamera();
   void DrainEvents();
   void MaybeRender();
+  void RenderIntoBuffer(BufferRenderTarget& target);
+  void RenderIntoSurface(SurfaceRenderTarget& target);
+  // Map thread, for a surface target: the time until the next render may
+  // start, or 0 if it may start now (design D53).
+  int64_t IntervalRemainingNs();
+  // Map thread: runs render_update and records its stats. Returns whether it
+  // rendered a frame.
+  bool RenderUpdate(int64_t start, bool* needs_repaint);
+  // Map thread: the frame just rendered, with the camera it was rendered with.
+  FrameInfo RenderedFrameInfo();
   // Map thread: whether to render without waiting until Flutter has taken the
   // latest frame (design D19).
   bool RenderAhead();
@@ -110,6 +139,11 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Guards wake_ against destruction while another thread signals it.
   std::mutex wake_mutex_;
   mln_wake_source wake_ = MLN_HANDLE_NULL;
+
+  // Guards target_tasks_stopped_, which the map thread sets when it stops, so
+  // that no target task is queued after that.
+  std::mutex target_tasks_mutex_;
+  bool target_tasks_stopped_ = false;
 
   // Guards callback_; cleared at dispose so that no event follows it.
   std::mutex callback_mutex_;
@@ -143,6 +177,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // The display's refresh interval, or 0 if unknown.
   std::atomic<int64_t> display_interval_ns_{0};
   bool render_waited_for_display_ = false;
+  // Map thread, for a surface target: whether the pending render has been
+  // counted in interval_waits.
+  bool interval_wait_counted_ = false;
 
   std::mutex stats_mutex_;
   map_texture_stats stats_{};
@@ -167,5 +204,9 @@ int64_t TotalRenderedFrames();
 // takes longer than a display refresh interval (design D19).
 enum class RenderAheadMode { kAuto, kNever, kAlways };
 void SetRenderAheadModeForTesting(RenderAheadMode mode);
+
+// For tests: the clock the map thread paces renders by and records render
+// starts with, in nanoseconds, or null for the steady clock.
+void SetClockForTesting(int64_t (*now_ns)());
 
 }  // namespace map_texture

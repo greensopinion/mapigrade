@@ -43,9 +43,10 @@ typedef struct map_texture_event {
   int32_t physical_width;
   int32_t physical_height;
   double scale_factor;
-  // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED: the time at which Flutter took
-  // the frame for display, in microseconds on the clock of Flutter's
-  // FrameTiming.
+  // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED. On macOS and iOS: the time at
+  // which Flutter took the frame for display, in microseconds on the clock of
+  // Flutter's FrameTiming. On Android, the event is sent when the frame has
+  // been queued for display, and this is -1 (no display time).
   int64_t display_time_us;
   // Set for MAP_TEXTURE_EVENT_LOADING_FAILED and MAP_TEXTURE_EVENT_RENDER_ERROR;
   // otherwise null. UTF-8, null-terminated.
@@ -91,13 +92,17 @@ typedef struct map_texture_stats {
   int64_t present_to_render_total_ns;
   // Renders started before Flutter had taken the latest frame (design D19).
   int64_t render_ahead_frames;
+  // Renders deferred until one display refresh interval after the start of
+  // the previous render (Android, design D53).
+  int64_t interval_waits;
 } map_texture_stats;
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread.
 // With `copy_free` non-zero (what the Dart API passes by default), MapLibre
 // renders each frame directly into a free display buffer; otherwise it renders
 // into one render texture, and each frame is copied on the GPU into a free
-// display buffer (design D20). Events are
+// display buffer (design D20). On Android every map renders directly into the
+// display buffers, and `copy_free` has no effect. Events are
 // delivered through `callback`, from any thread. Returns a handle (> 0) or a
 // negative MAP_TEXTURE_ERROR_* value.
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
@@ -162,6 +167,12 @@ MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);
 // For tests: ask every map to release cached renderer resources, as the
 // platform does after a memory warning.
 MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
+// For tests, on Android: with `restore` zero, makes Flutter remove the
+// surfaces the maps render into, as it does when the activity stops (it calls
+// onTrimMemory(TRIM_MEMORY_BACKGROUND)); with `restore` non-zero, makes Flutter
+// provide them again, as it does when the activity resumes. Call on the
+// platform thread. Does nothing on macOS and iOS.
+MAP_TEXTURE_EXPORT void map_texture_trim_surfaces_for_testing(int32_t restore);
 
 #ifdef __cplusplus
 }

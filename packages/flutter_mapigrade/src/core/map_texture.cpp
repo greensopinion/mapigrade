@@ -6,16 +6,20 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 
 namespace map_texture {
 
 namespace {
 std::atomic<RenderAheadMode> render_ahead_mode{RenderAheadMode::kAuto};
+std::atomic<int64_t (*)()> test_clock{nullptr};
 }  // namespace
 
 void SetRenderAheadModeForTesting(RenderAheadMode mode) {
   render_ahead_mode.store(mode);
 }
+
+void SetClockForTesting(int64_t (*now_ns)()) { test_clock.store(now_ns); }
 
 namespace {
 
@@ -35,8 +39,12 @@ constexpr int64_t kPumpBudgetMs = 8;
 // is available. Longer than the default maximum texture age (1 s) of a
 // CVMetalTextureCache; see MaybeNotifyAfterResize().
 constexpr int64_t kResizeSettledNs = 1'100'000'000;
+// The refresh interval a surface target paces by until the display's refresh
+// rate is set (design D53): 60 Hz.
+constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 
 int64_t NowNs() {
+  if (auto clock = test_clock.load()) return clock();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
@@ -45,6 +53,38 @@ int64_t NowNs() {
 uint32_t RoundToPixels(double value) {
   return static_cast<uint32_t>(std::max(1.0, std::round(value)));
 }
+
+// The size the map renders at for `viewport`, or false for an empty viewport.
+bool SizeForViewport(const Viewport& viewport, TargetSize* size) {
+  if (!(viewport.logical_width > 0) || !(viewport.logical_height > 0) ||
+      !(viewport.pixel_ratio > 0)) {
+    return false;
+  }
+  size->physical_width =
+      RoundToPixels(viewport.logical_width * viewport.pixel_ratio);
+  size->physical_height =
+      RoundToPixels(viewport.logical_height * viewport.pixel_ratio);
+  size->extent.size = sizeof(mln_render_target_extent);
+  size->extent.width = RoundToPixels(viewport.logical_width);
+  size->extent.height = RoundToPixels(viewport.logical_height);
+  size->extent.scale_factor = viewport.pixel_ratio;
+  return true;
+}
+
+// Completion of a target task that a caller waits for.
+struct TaskDone {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool done = false;
+
+  void Set() {
+    {
+      std::lock_guard lock(mutex);
+      done = true;
+    }
+    cv.notify_all();
+  }
+};
 
 }  // namespace
 
@@ -105,6 +145,8 @@ void MapTexture::SetCamera(const Camera& camera) {
 }
 
 void MapTexture::Resize(const Viewport& viewport) {
+  TargetSize size;
+  if (SizeForViewport(viewport, &size)) target_->WillResize(size);
   commands_.Push(Command::Resize(viewport));
   Signal();
 }
@@ -122,6 +164,38 @@ void MapTexture::ReduceMemoryUse() {
 void MapTexture::SetPaused(bool paused) {
   gate_.SetPaused(paused);
   if (!paused) Signal();
+}
+
+void MapTexture::RunTargetTask(TargetTask task, bool wait) {
+  auto done = wait ? std::make_shared<TaskDone>() : nullptr;
+  // The command runs the task on the map thread. If the map thread stops
+  // first, destroying the command (with the queue, or in Teardown) still
+  // ends the wait.
+  struct Completion {
+    std::shared_ptr<TaskDone> done;
+    ~Completion() {
+      if (done) done->Set();
+    }
+  };
+  auto completion = std::make_shared<Completion>();
+  completion->done = done;
+  {
+    std::lock_guard lock(target_tasks_mutex_);
+    if (target_tasks_stopped_) return;
+    commands_.Push(Command::TargetTask(
+        [this, task = std::move(task), completion = std::move(completion)] {
+          task(session_, size_);
+          if (session_ != MLN_HANDLE_NULL) render_pending_ = true;
+        }));
+  }
+  Signal();
+  if (!done) return;
+  std::unique_lock lock(done->mutex);
+  done->cv.wait(lock, [&] { return done->done; });
+}
+
+void MapTexture::ReportRenderError(const std::string& message) {
+  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, message.c_str());
 }
 
 void MapTexture::Dispose() {
@@ -143,9 +217,11 @@ void MapTexture::Signal() {
 }
 
 void* MapTexture::Present() {
+  auto* target = target_->AsBufferTarget();
+  if (target == nullptr) return nullptr;
   void* buffer = nullptr;
   auto presented = buffers_.Present([&](const BufferState::Presented& p) {
-    buffer = target_->CopyBufferLocked(p.index);
+    buffer = target->CopyBufferLocked(p.index);
   });
   if (presented.is_new) {
     int64_t now = NowNs();
@@ -195,13 +271,29 @@ void MapTexture::Run() {
 }
 
 bool MapTexture::RenderWanted() {
-  return render_pending_ && session_ != MLN_HANDLE_NULL &&
-         !waiting_for_buffer_.load() && !gate_.paused();
+  if (!render_pending_ || session_ == MLN_HANDLE_NULL || gate_.paused()) {
+    return false;
+  }
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    return surface->CanPresent();
+  }
+  return !waiting_for_buffer_.load();
 }
 
 bool MapTexture::RunOnce() {
   bool render_now = RenderWanted();
   int64_t timeout_ms = render_now ? 0 : kIdlePumpTimeoutMs;
+  if (render_now && target_->AsSurfaceTarget() != nullptr) {
+    // A surface target's render waits for the end of the refresh interval
+    // (design D53). The pump parks in whole milliseconds, so the part of the
+    // wait below one millisecond is slept here.
+    int64_t remaining = IntervalRemainingNs();
+    if (remaining > 0 && remaining < 1'000'000) {
+      std::this_thread::sleep_for(std::chrono::nanoseconds(remaining));
+    } else {
+      timeout_ms = remaining / 1'000'000;
+    }
+  }
   if (notify_after_resize_at_ns_ != 0) {
     int64_t until_ms = (notify_after_resize_at_ns_ - NowNs()) / 1'000'000;
     timeout_ms = std::clamp<int64_t>(until_ms, 0, timeout_ms);
@@ -232,7 +324,7 @@ void MapTexture::MaybeNotifyAfterResize() {
     return;
   }
   notify_after_resize_at_ns_ = 0;
-  target_->FrameAvailable();
+  target_->AsBufferTarget()->FrameAvailable();
 }
 
 bool MapTexture::Init() {
@@ -275,13 +367,24 @@ void MapTexture::DestroySession() {
     mln_render_session_destroy(session_);
     session_ = MLN_HANDLE_NULL;
   }
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    surface->ReleaseSurfaces();
+    return;
+  }
   buffers_.WithLock([this](int) {
-    target_->ReleaseBuffersLocked();
+    target_->AsBufferTarget()->ReleaseBuffersLocked();
     buffers_.ResetLocked();
   });
 }
 
 void MapTexture::Teardown() {
+  // Commands queued after the dispose don't run; dropping them ends the wait
+  // of a target task.
+  {
+    std::lock_guard lock(target_tasks_mutex_);
+    target_tasks_stopped_ = true;
+    commands_.TakeAll();
+  }
   DestroySession();
   if (map_ != MLN_HANDLE_NULL) {
     mln_map_destroy(map_);
@@ -322,6 +425,9 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kReduceMemoryUse:
         ApplyReduceMemoryUse();
         break;
+      case Command::Kind::kTargetTask:
+        command.task();
+        break;
       case Command::Kind::kDispose:
         *stop = true;
         return;
@@ -345,19 +451,8 @@ void MapTexture::ApplyReduceMemoryUse() {
 }
 
 void MapTexture::ApplyResize(const Viewport& viewport) {
-  if (!(viewport.logical_width > 0) || !(viewport.logical_height > 0) ||
-      !(viewport.pixel_ratio > 0)) {
-    return;
-  }
   TargetSize size;
-  size.physical_width =
-      RoundToPixels(viewport.logical_width * viewport.pixel_ratio);
-  size.physical_height =
-      RoundToPixels(viewport.logical_height * viewport.pixel_ratio);
-  size.extent.size = sizeof(mln_render_target_extent);
-  size.extent.width = RoundToPixels(viewport.logical_width);
-  size.extent.height = RoundToPixels(viewport.logical_height);
-  size.extent.scale_factor = viewport.pixel_ratio;
+  if (!SizeForViewport(viewport, &size)) return;
   viewport_ = viewport;
   if (session_ != MLN_HANDLE_NULL &&
       size.physical_width == size_.physical_width &&
@@ -366,16 +461,18 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     return;
   }
 
-  if (!target_->PrepareBuffers(size)) {
-    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to allocate texture buffers");
-    return;
+  if (auto* buffer_target = target_->AsBufferTarget()) {
+    if (!buffer_target->PrepareBuffers(size)) {
+      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to allocate texture buffers");
+      return;
+    }
+    buffers_.WithLock([buffer_target, this](int latest) {
+      buffer_target->SwapBuffersLocked(latest);
+      buffers_.ResetLocked();
+    });
+    notify_after_resize_at_ns_ = NowNs() + kResizeSettledNs;
   }
-  buffers_.WithLock([this](int latest) {
-    target_->SwapBuffersLocked(latest);
-    buffers_.ResetLocked();
-  });
   size_ = size;
-  notify_after_resize_at_ns_ = NowNs() + kResizeSettledNs;
 
   mln_status status;
   if (session_ == MLN_HANDLE_NULL) {
@@ -461,6 +558,14 @@ void MapTexture::MaybeRender() {
   }
   RenderGateScope gate_scope(gate_);
 
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    RenderIntoSurface(*surface);
+  } else {
+    RenderIntoBuffer(*target_->AsBufferTarget());
+  }
+}
+
+void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   // Normally the next frame renders only after Flutter has taken the latest
   // one, and Present() signals the wake source to retry this render. While a
   // frame takes longer than a display refresh interval, waiting would cost a
@@ -487,10 +592,8 @@ void MapTexture::MaybeRender() {
     return;
   }
 
-  mln_render_result result = MLN_RENDER_RESULT_NO_UPDATE;
-  bool needs_repaint = false;
-  if (target_->RendersIntoBuffers()) {
-    mln_status select_status = target_->SelectBuffer(session_, index);
+  if (target.RendersIntoBuffers()) {
+    mln_status select_status = target.SelectBuffer(session_, index);
     if (select_status != MLN_STATUS_OK) {
       ReportStatus("select buffer", select_status);
       return;
@@ -501,40 +604,21 @@ void MapTexture::MaybeRender() {
   {
     std::lock_guard lock(stats_mutex_);
     if (render_ahead) ++stats_.render_ahead_frames;
-    if (last_render_start_ns_ != 0 &&
-        start - last_render_start_ns_ < 100'000'000) {
-      ++stats_.frame_cycle_count;
-      stats_.frame_cycle_total_ns += start - last_render_start_ns_;
-    }
     int64_t presented = presented_at_ns_.load();
     if (render_waited_for_display_ && presented != 0 && presented <= start) {
       ++stats_.present_to_render_count;
       stats_.present_to_render_total_ns += start - presented;
     }
   }
-  last_render_start_ns_ = start;
   render_waited_for_display_ = false;
-  render_pending_ = false;
-  mln_status status =
-      mln_render_session_render_update(session_, &result, &needs_repaint);
-  int64_t elapsed = NowNs() - start;
-  {
-    std::lock_guard lock(stats_mutex_);
-    ++stats_.render_update_count;
-    stats_.render_update_total_ns += elapsed;
-    stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
-  }
-  if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_render_session_render_update", status);
-    return;
-  }
-  if (result != MLN_RENDER_RESULT_RENDERED) return;
+  bool needs_repaint = false;
+  if (!RenderUpdate(start, &needs_repaint)) return;
 
-  int64_t cost = elapsed;
-  if (!target_->RendersIntoBuffers()) {
-    start = NowNs();
-    bool copied = target_->CopyToBuffer(index);
-    elapsed = NowNs() - start;
+  int64_t cost = NowNs() - start;
+  if (!target.RendersIntoBuffers()) {
+    int64_t copy_start = NowNs();
+    bool copied = target.CopyToBuffer(index);
+    int64_t elapsed = NowNs() - copy_start;
     cost += elapsed;
     {
       std::lock_guard lock(stats_mutex_);
@@ -553,24 +637,7 @@ void MapTexture::MaybeRender() {
                            ? cost
                            : frame_cost_avg_ns_ + (cost - frame_cost_avg_ns_) / 8;
 
-  FrameInfo info;
-  info.frame_id = next_frame_id_++;
-  info.physical_width = size_.physical_width;
-  info.physical_height = size_.physical_height;
-  info.scale_factor = size_.extent.scale_factor;
-  mln_map_projection projection = MLN_HANDLE_NULL;
-  status = mln_render_session_projection_create(session_, &projection);
-  if (status == MLN_STATUS_OK) {
-    mln_camera_options camera = mln_camera_options_default();
-    if (mln_map_projection_get_camera(projection, &camera) == MLN_STATUS_OK) {
-      info.camera = {camera.latitude, camera.longitude, camera.zoom,
-                     camera.bearing};
-    }
-    mln_map_projection_destroy(projection);
-  } else {
-    ReportStatus("mln_render_session_projection_create", status);
-  }
-
+  FrameInfo info = RenderedFrameInfo();
   buffers_.Publish(index, info);
   published_at_ns_.store(NowNs());
   {
@@ -581,7 +648,91 @@ void MapTexture::MaybeRender() {
   // The map publishes another render update by itself while a transition
   // runs, so needs_repaint needs no action here (see
   // mln_render_session_render_update in render_session.h).
-  target_->FrameAvailable();
+  target.FrameAvailable();
+}
+
+// Queueing a frame on the surface never blocks, so renders are paced to one
+// per display refresh interval (design D53). The frame-displayed event is sent
+// when render_update has queued the frame, and has no display time.
+void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
+  if (!target.CanPresent()) return;
+  if (IntervalRemainingNs() > 0) {
+    if (!interval_wait_counted_) {
+      interval_wait_counted_ = true;
+      std::lock_guard lock(stats_mutex_);
+      ++stats_.interval_waits;
+    }
+    return;
+  }
+  interval_wait_counted_ = false;
+
+  bool needs_repaint = false;
+  if (!RenderUpdate(NowNs(), &needs_repaint)) return;
+
+  FrameInfo info = RenderedFrameInfo();
+  {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.rendered_frames;
+    if (needs_repaint) ++stats_.needs_repaint_frames;
+  }
+  Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &info, -1);
+}
+
+int64_t MapTexture::IntervalRemainingNs() {
+  if (last_render_start_ns_ == 0) return 0;
+  int64_t interval = display_interval_ns_.load();
+  if (interval <= 0) interval = kDefaultIntervalNs;
+  int64_t remaining = last_render_start_ns_ + interval - NowNs();
+  return std::max<int64_t>(remaining, 0);
+}
+
+bool MapTexture::RenderUpdate(int64_t start, bool* needs_repaint) {
+  {
+    std::lock_guard lock(stats_mutex_);
+    if (last_render_start_ns_ != 0 &&
+        start - last_render_start_ns_ < 100'000'000) {
+      ++stats_.frame_cycle_count;
+      stats_.frame_cycle_total_ns += start - last_render_start_ns_;
+    }
+  }
+  last_render_start_ns_ = start;
+  render_pending_ = false;
+  mln_render_result result = MLN_RENDER_RESULT_NO_UPDATE;
+  mln_status status =
+      mln_render_session_render_update(session_, &result, needs_repaint);
+  int64_t elapsed = NowNs() - start;
+  {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.render_update_count;
+    stats_.render_update_total_ns += elapsed;
+    stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
+  }
+  if (status != MLN_STATUS_OK) {
+    ReportStatus("mln_render_session_render_update", status);
+    return false;
+  }
+  return result == MLN_RENDER_RESULT_RENDERED;
+}
+
+FrameInfo MapTexture::RenderedFrameInfo() {
+  FrameInfo info;
+  info.frame_id = next_frame_id_++;
+  info.physical_width = size_.physical_width;
+  info.physical_height = size_.physical_height;
+  info.scale_factor = size_.extent.scale_factor;
+  mln_map_projection projection = MLN_HANDLE_NULL;
+  mln_status status = mln_render_session_projection_create(session_, &projection);
+  if (status == MLN_STATUS_OK) {
+    mln_camera_options camera = mln_camera_options_default();
+    if (mln_map_projection_get_camera(projection, &camera) == MLN_STATUS_OK) {
+      info.camera = {camera.latitude, camera.longitude, camera.zoom,
+                     camera.bearing};
+    }
+    mln_map_projection_destroy(projection);
+  } else {
+    ReportStatus("mln_render_session_projection_create", status);
+  }
+  return info;
 }
 
 bool MapTexture::RenderAhead() {

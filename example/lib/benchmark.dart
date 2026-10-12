@@ -15,6 +15,14 @@
 //   xcrun devicectl device process launch --device <device> --console \
 //     com.greensopinion.mapigradeExample
 //
+// On Android (design D59), run a release build and read the line from logcat;
+// the frame rate counts frames queued for display:
+//
+//   flutter build apk --release --dart-define=BENCHMARK=true
+//   adb install -r build/app/outputs/flutter-apk/app-release.apk
+//   adb shell am start -S -n com.greensopinion.flutter_mapigrade_example/.MainActivity
+//   adb logcat -s flutter | grep BENCHMARK_RESULT
+//
 // With --dart-define=BENCHMARK_SUSTAINED_S=<seconds>, the measured pass
 // instead pans back and forth over the warm-up path for that many seconds,
 // and the result line (BENCHMARK_SUSTAINED_RESULT) has the map frame rate and
@@ -29,6 +37,17 @@ import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/testing.dart';
 
 const benchmarkEnabled = bool.fromEnvironment('BENCHMARK');
+
+/// Writes one line of output. Android discards the process's stdout, so there
+/// the line goes to logcat (tag `flutter`) instead.
+void writeLine(String line) {
+  if (Platform.isAndroid) {
+    // ignore: avoid_print
+    print(line);
+  } else {
+    stdout.writeln(line);
+  }
+}
 
 /// `--dart-define=RENDER_AHEAD=always` or `=never` overrides when the map
 /// renders without waiting until Flutter has taken the latest frame; the
@@ -99,7 +118,7 @@ class Benchmark {
     });
 
     await _waitForIdle(const Duration(seconds: 30));
-    stdout.writeln('benchmark: warm-up pan');
+    writeLine('benchmark: warm-up pan');
     await _pan();
     onCamera(start);
     await _waitForIdle(const Duration(seconds: 10));
@@ -109,14 +128,14 @@ class Benchmark {
       return;
     }
 
-    stdout.writeln('benchmark: measuring');
+    writeLine('benchmark: measuring');
     final before = controller.stats();
     _measureStart = _clock.elapsed;
     _measuring = true;
     await _pan();
     _measuring = false;
     final after = controller.stats();
-    stdout.writeln('BENCHMARK_RESULT ${jsonEncode(_result(before, after))}');
+    writeLine('BENCHMARK_RESULT ${jsonEncode(_result(before, after))}');
     await stdout.flush();
     exit(0);
   }
@@ -125,7 +144,7 @@ class Benchmark {
   /// reports the displayed map frame rate and the thermal state for each
   /// [sustainedInterval].
   Future<void> _runSustained() async {
-    stdout.writeln(
+    writeLine(
       'benchmark: sustained pan for ${sustainedDuration.inSeconds} s',
     );
     final measureStart = _measureStart = _clock.elapsed;
@@ -162,7 +181,7 @@ class Benchmark {
       'map_frames_displayed': _mapFrameIds.length,
       'skipped_renders': after.skippedRenders - before.skippedRenders,
     };
-    stdout.writeln('BENCHMARK_SUSTAINED_RESULT ${jsonEncode(result)}');
+    writeLine('BENCHMARK_SUSTAINED_RESULT ${jsonEncode(result)}');
     await stdout.flush();
     exit(0);
   }
@@ -296,6 +315,7 @@ class Benchmark {
         after.presentToRenderTotal - before.presentToRenderTotal,
         after.presentToRenderCount - before.presentToRenderCount,
       ),
+      'interval_waits': after.intervalWaits - before.intervalWaits,
     };
   }
 }

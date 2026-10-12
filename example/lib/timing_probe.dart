@@ -22,7 +22,7 @@ import 'dart:ui';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
-import 'benchmark.dart' show panSpeed, start;
+import 'benchmark.dart' show panSpeed, start, writeLine;
 
 const timingProbeEnabled = bool.fromEnvironment('TIMING_PROBE');
 const probeDuration = Duration(seconds: 10);
@@ -41,8 +41,14 @@ class TimingProbe {
   bool _collectTimings = false;
 
   Future<void> run() async {
+    if (Platform.isAndroid) {
+      // Android reports no display times (design D58).
+      writeLine('timing probe: needs display times, which Android does not '
+          'report; exiting');
+      exit(1);
+    }
     controller.frames.listen((f) {
-      if (_recording) _displayTimes.add(f.displayTime);
+      if (_recording) _displayTimes.add(f.displayTime!);
     });
     SchedulerBinding.instance.addTimingsCallback((timings) {
       if (_collectTimings) _timings.addAll(timings);

@@ -84,6 +84,9 @@ class _MapScreenState extends State<MapScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_controller != null) return;
+    // Before the window's metrics arrive (on Android), the size is empty and
+    // the device pixel ratio is 1; the map's ratio is fixed at creation.
+    if (MediaQuery.sizeOf(context).isEmpty) return;
     final controller = MapTextureController.create(
         pixelRatio: MediaQuery.devicePixelRatioOf(context),
         copyFree: copyFree);
@@ -158,7 +161,7 @@ class _MapScreenState extends State<MapScreen>
 
   void _setCamera(MapCamera camera) {
     _camera = camera;
-    _controller!.setCamera(camera);
+    _controller?.setCamera(camera);
     setState(() {});
   }
 
@@ -200,7 +203,7 @@ class _MapScreenState extends State<MapScreen>
         longitude: _camera.longitude + degreesPerSecond * dt,
         zoom: _camera.zoom,
         bearing: _camera.bearing);
-    _controller!.setCamera(_camera);
+    _controller?.setCamera(_camera);
   }
 
   void _toggleContinuousPan(bool on) {
@@ -220,14 +223,15 @@ class _MapScreenState extends State<MapScreen>
       _status = 'loading style';
       _error = null;
     });
-    _controller!.loadStyleUrl(styles[index].url);
+    _controller?.loadStyleUrl(styles[index].url);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(children: [
-        Positioned.fill(child: MapTextureView(controller: _controller!)),
+        if (_controller case final controller?)
+          Positioned.fill(child: MapTextureView(controller: controller)),
         // SafeArea keeps the panel clear of the iPhone status bar and
         // Dynamic Island; on macOS the insets are zero.
         Positioned(

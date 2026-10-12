@@ -38,7 +38,7 @@ class MapLibreTextureLayer extends StatefulWidget {
 
   /// Whether the map renders directly into the displayed buffers (the
   /// default); see [MapTextureController.create]. Read when the layer creates
-  /// its map.
+  /// its map. Has no effect on Android.
   final bool copyFree;
 
   /// Called with the layer's controller after it is created, for tests and
@@ -64,6 +64,11 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_controller != null) return;
+    // On Android the first frames can come before the window's metrics, with
+    // an empty size and a device pixel ratio of 1. The map's pixel ratio is
+    // fixed at creation, so the map is created when the metrics have arrived,
+    // which runs this method again.
+    if (MediaQuery.sizeOf(context).isEmpty) return;
     final controller = MapTextureController.create(
       pixelRatio: MediaQuery.devicePixelRatioOf(context),
       copyFree: widget.copyFree,
@@ -107,7 +112,8 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller!;
+    final controller = _controller;
+    if (controller == null) return const SizedBox.shrink();
     final target = viewCameraOf(fm.MapCamera.of(context));
     final lead = widget.alignment.lead;
     var camera = target;

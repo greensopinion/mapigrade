@@ -61,7 +61,7 @@ import 'package:latlong2/latlong.dart';
 
 import 'alignment_mode.dart';
 import 'alignment_motion.dart';
-import 'benchmark.dart' show copyFree, start;
+import 'benchmark.dart' show copyFree, start, writeLine;
 
 const alignmentBenchmarkEnabled = bool.fromEnvironment('ALIGNMENT_BENCHMARK');
 const alignmentPhaseDuration = Duration(
@@ -465,6 +465,13 @@ class AlignmentBenchmark {
   AlignmentRecorder? _recorder;
 
   Future<void> run() async {
+    if (Platform.isAndroid) {
+      // Android reports no display times (design D58); alignment is checked
+      // by hand there.
+      writeLine('alignment benchmark: needs display times, which Android '
+          'does not report; exiting');
+      exit(1);
+    }
     if (alignmentMode == null) {
       stderr.writeln(
         'ALIGNMENT_MODE=$alignmentModeName is not one of '
@@ -478,7 +485,7 @@ class AlignmentBenchmark {
       final r = _recorder;
       if (r != null && r.recording) {
         r.displays.add(
-          DisplayedMapFrame(f.frameId, ViewCamera.ofFrame(f), f.displayTime),
+          DisplayedMapFrame(f.frameId, ViewCamera.ofFrame(f), f.displayTime!),
         );
       }
     });

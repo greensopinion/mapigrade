@@ -1,0 +1,311 @@
+// Tests of MapTexture with a surface render target (design D52) and its
+// pacing by display refresh interval (D53), on the fake FFI in fake_mln.cpp.
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "fake_mln.h"
+#include "map_texture.h"
+#include "map_texture_api.h"
+#include "render_target.h"
+
+using map_texture::MapTexture;
+using map_texture::SurfaceRenderTarget;
+using map_texture::TargetSize;
+
+namespace {
+
+int failures = 0;
+
+#define CHECK(condition)                                                 \
+  do {                                                                   \
+    if (!(condition)) {                                                  \
+      std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__,        \
+                   __LINE__, #condition);                                \
+      ++failures;                                                        \
+    }                                                                    \
+  } while (false)
+
+constexpr int64_t kSessionHandle = 1'000'000;
+
+class FakeSurfaceTarget : public SurfaceRenderTarget {
+ public:
+  int64_t texture_id() const override { return 42; }
+
+  mln_status Attach(mln_map, const TargetSize& size,
+                    mln_render_session* out_session) override {
+    attached_size = size;
+    *out_session = kSessionHandle;
+    return MLN_STATUS_OK;
+  }
+
+  mln_status SetTarget(mln_render_session, const TargetSize& size) override {
+    ++set_targets;
+    attached_size = size;
+    return MLN_STATUS_OK;
+  }
+
+  void WillResize(const TargetSize& size) override {
+    will_resize_width = size.physical_width;
+  }
+
+  bool CanPresent() const override { return can_present.load(); }
+
+  void ReleaseSurfaces() override { surfaces_released = true; }
+
+  void Unregister() override { unregistered = true; }
+
+  // Set when the last target released its surfaces and unregistered; read
+  // after dispose has destroyed the target.
+  static inline std::atomic<bool> surfaces_released{false};
+  static inline std::atomic<bool> unregistered{false};
+
+  std::atomic<bool> can_present{true};
+  std::atomic<int> set_targets{0};
+  std::atomic<uint32_t> will_resize_width{0};
+  TargetSize attached_size{};
+};
+
+// The target and owner of the last map created.
+FakeSurfaceTarget* last_target = nullptr;
+std::weak_ptr<MapTexture> last_owner;
+
+// Events received through the callback.
+struct Event {
+  int32_t type;
+  int64_t frame_id;
+  double zoom;
+  int32_t physical_width;
+  int64_t display_time_us;
+};
+std::mutex events_mutex;
+std::vector<Event> events;
+
+void OnEvent(map_texture_event* event) {
+  {
+    std::lock_guard lock(events_mutex);
+    events.push_back({event->type, event->frame_id, event->zoom,
+                      event->physical_width, event->display_time_us});
+  }
+  map_texture_event_free(event);
+}
+
+std::vector<Event> FrameEvents() {
+  std::lock_guard lock(events_mutex);
+  std::vector<Event> frames;
+  for (const auto& event : events) {
+    if (event.type == MAP_TEXTURE_EVENT_FRAME_DISPLAYED) frames.push_back(event);
+  }
+  return frames;
+}
+
+// Waits up to two seconds for `condition`.
+bool WaitFor(const std::function<bool()>& condition) {
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (condition()) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return condition();
+}
+
+void Sleep(int ms) {
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+map_texture_stats Stats(int64_t handle) {
+  map_texture_stats stats{};
+  map_texture_get_stats(handle, &stats);
+  return stats;
+}
+
+// A clock the test advances.
+std::atomic<int64_t> fake_now{0};
+int64_t FakeNow() { return fake_now.load(); }
+
+int64_t CreateMap() {
+  fake_mln::Reset();
+  {
+    std::lock_guard lock(events_mutex);
+    events.clear();
+  }
+  int64_t handle = map_texture_create(2.0, 1, OnEvent);
+  CHECK(handle > 0);
+  return handle;
+}
+
+void SurfaceFrameIsReportedWithoutDisplayTime() {
+  int64_t handle = CreateMap();
+  map_texture_set_camera(handle, 51.5, -0.1, 12.5, 0);
+  map_texture_resize(handle, 200, 100, 2.0);
+  CHECK(last_target->will_resize_width.load() == 400);
+  CHECK(WaitFor([] { return !FrameEvents().empty(); }));
+  auto frames = FrameEvents();
+  CHECK(frames[0].display_time_us == -1);
+  CHECK(frames[0].physical_width == 400);
+  CHECK(frames[0].zoom == 12.5);
+  CHECK(last_target->attached_size.physical_height == 200);
+  // A surface target has no display buffers for Flutter to take.
+  auto owner = last_owner.lock();
+  CHECK(owner->Present() == nullptr);
+  auto stats = Stats(handle);
+  CHECK(stats.rendered_frames == 1);
+  CHECK(stats.presented_frames == 0);
+  CHECK(stats.waits_for_display == 0);
+  CHECK(stats.copy_count == 0);
+  owner.reset();
+  FakeSurfaceTarget::surfaces_released = false;
+  FakeSurfaceTarget::unregistered = false;
+  map_texture_dispose(handle);
+  CHECK(FakeSurfaceTarget::surfaces_released.load());
+  CHECK(FakeSurfaceTarget::unregistered.load());
+}
+
+void NoRenderWithoutSurface() {
+  int64_t handle = CreateMap();
+  last_target->can_present = false;
+  map_texture_resize(handle, 100, 100, 2.0);
+  Sleep(100);
+  CHECK(fake_mln::RenderCount() == 0);
+  // The surface returns through a target task, which renders the pending
+  // frame.
+  auto owner = last_owner.lock();
+  FakeSurfaceTarget* target = last_target;
+  std::thread::id task_thread;
+  owner->RunTargetTask(
+      [&](mln_render_session session, const TargetSize& size) {
+        task_thread = std::this_thread::get_id();
+        CHECK(session == kSessionHandle);
+        CHECK(size.physical_width == 200);
+        target->can_present = true;
+      },
+      /*wait=*/true);
+  CHECK(task_thread != std::thread::id());
+  CHECK(task_thread != std::this_thread::get_id());
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  // A task after the first frame renders the pending frame again, as after a
+  // new surface.
+  owner->RunTargetTask([](mln_render_session, const TargetSize&) {}, true);
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void TaskWaitEndsAtDispose() {
+  int64_t handle = CreateMap();
+  auto owner = last_owner.lock();
+  map_texture_dispose(handle);
+  // The map thread has stopped, so the task never runs; the wait ends.
+  bool ran = false;
+  owner->RunTargetTask([&](mln_render_session, const TargetSize&) { ran = true; },
+                       true);
+  CHECK(!ran);
+}
+
+void RendersArePacedByRefreshInterval() {
+  fake_now = 1'000'000'000;
+  map_texture::SetClockForTesting(FakeNow);
+  fake_mln::SetClock(FakeNow);
+  int64_t handle = CreateMap();
+  map_texture_set_display_refresh_rate(handle, 120);
+  constexpr int64_t kInterval = 1'000'000'000 / 120;
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+
+  // A render update arrives at once, so the next render waits for the end of
+  // the interval.
+  fake_mln::QueueRenderUpdate();
+  Sleep(50);
+  CHECK(fake_mln::RenderCount() == 1);
+  CHECK(Stats(handle).interval_waits == 1);
+  fake_now += kInterval - 1;
+  fake_mln::QueueRenderUpdate();
+  Sleep(50);
+  CHECK(fake_mln::RenderCount() == 1);
+  // Counted once per deferred render.
+  CHECK(Stats(handle).interval_waits == 1);
+  fake_now += 1;
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
+  auto starts = fake_mln::RenderStarts();
+  CHECK(starts.size() == 2);
+  CHECK(starts[1] - starts[0] >= kInterval);
+
+  // A render update after more than an interval renders at once.
+  fake_now += 5 * kInterval;
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 3; }));
+  CHECK(Stats(handle).interval_waits == 1);
+
+  map_texture_dispose(handle);
+  map_texture::SetClockForTesting(nullptr);
+  fake_mln::SetClock(nullptr);
+}
+
+void IdleMapRendersNothing() {
+  int64_t handle = CreateMap();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  Sleep(600);
+  CHECK(fake_mln::RenderCount() == 1);
+  auto stats = Stats(handle);
+  CHECK(stats.rendered_frames == 1);
+  CHECK(stats.interval_waits == 0);
+  map_texture_dispose(handle);
+}
+
+void NoRenderWhilePaused() {
+  int64_t handle = CreateMap();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  map_texture_set_paused_for_testing(1);
+  map_texture_set_camera(handle, 0, 0, 3, 0);
+  Sleep(300);
+  CHECK(fake_mln::RenderCount() == 1);
+  CHECK(Stats(handle).paused_renders > 0);
+  map_texture_set_paused_for_testing(0);
+  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
+  CHECK(WaitFor([] {
+    auto frames = FrameEvents();
+    return frames.size() == 2 && frames[1].zoom == 3;
+  }));
+  map_texture_dispose(handle);
+}
+
+}  // namespace
+
+namespace map_texture {
+
+std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
+    std::weak_ptr<MapTexture> owner, bool) {
+  auto target = std::make_unique<FakeSurfaceTarget>();
+  last_target = target.get();
+  last_owner = std::move(owner);
+  return target;
+}
+
+std::string PlatformCachePath() { return {}; }
+
+void RunInPlatformScope(const std::function<void()>& work) { work(); }
+
+}  // namespace map_texture
+
+int main() {
+  SurfaceFrameIsReportedWithoutDisplayTime();
+  NoRenderWithoutSurface();
+  TaskWaitEndsAtDispose();
+  RendersArePacedByRefreshInterval();
+  IdleMapRendersNothing();
+  NoRenderWhilePaused();
+  if (failures > 0) {
+    std::fprintf(stderr, "%d check(s) failed\n", failures);
+    return 1;
+  }
+  std::printf("map texture tests passed\n");
+  return 0;
+}

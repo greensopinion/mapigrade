@@ -27,8 +27,9 @@ String thermalStateForTesting() => switch (mapTextureThermalState()) {
   _ => 'unknown',
 };
 
-/// The process's physical memory footprint in bytes, the value Xcode's memory
-/// gauge shows, or -1 if unknown.
+/// The process's memory use in bytes, or -1 if unknown: on macOS and iOS the
+/// physical memory footprint, the value Xcode's memory gauge shows; on Android
+/// the proportional set size (PSS).
 int memoryFootprintForTesting() => mapTextureMemoryFootprint();
 
 /// Display buffers that the plugin released since the last
@@ -47,6 +48,13 @@ int memoryFootprintForTesting() => mapTextureMemoryFootprint();
     calloc.free(bytes);
   }
 }
+
+/// On Android, makes Flutter remove the surfaces the maps render into, as it
+/// does when the activity stops, or with [restore], provide them again, as it
+/// does when the activity resumes. Does nothing on macOS and iOS, where the
+/// plugin owns the display buffers.
+void trimSurfacesForTesting({required bool restore}) =>
+    mapTextureTrimSurfacesForTesting(restore ? 1 : 0);
 
 /// Starts a new count for [releasedBuffersForTesting].
 void resetReleasedBuffersForTesting() => mapTextureReleasedBuffersForTesting(1);

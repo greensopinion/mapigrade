@@ -108,7 +108,7 @@ struct BufferSet {
   }
 };
 
-class MetalRenderTarget : public RenderTarget {
+class MetalRenderTarget : public BufferRenderTarget {
  public:
   MetalRenderTarget(id<MTLDevice> device,
                     NSObject<FlutterTextureRegistry>* registry,
@@ -393,3 +393,7 @@ extern "C" int32_t map_texture_released_buffers_for_testing(int32_t reset) {
   if (reset != 0) gReleased.clear();
   return count;
 }
+
+// The display buffers belong to the plugin on macOS and iOS, and Flutter
+// never removes them.
+extern "C" void map_texture_trim_surfaces_for_testing(int32_t restore) {}

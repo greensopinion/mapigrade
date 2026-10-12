@@ -41,10 +41,14 @@ class FrameCamera {
   final Size physicalSize;
   final double scaleFactor;
 
-  /// The time at which Flutter took the frame for display, in microseconds on
-  /// the clock of [FrameTiming.timestampInMicroseconds], so that the frame can
-  /// be matched to the Flutter frame whose rasterization displayed it.
-  final int displayTime;
+  /// On macOS and iOS, the time at which Flutter took the frame for display,
+  /// in microseconds on the clock of [FrameTiming.timestampInMicroseconds], so
+  /// that the frame can be matched to the Flutter frame whose rasterization
+  /// displayed it.
+  ///
+  /// Null on Android, where Flutter reports no time at which it takes a frame.
+  /// There the frame is reported when it has been queued for display.
+  final int? displayTime;
 
   @override
   String toString() =>
@@ -101,7 +105,8 @@ class MapTextureStats {
         presentToRenderCount = s.presentToRenderCount,
         presentToRenderTotal =
             Duration(microseconds: s.presentToRenderTotalNs ~/ 1000),
-        renderAheadFrames = s.renderAheadFrames;
+        renderAheadFrames = s.renderAheadFrames,
+        intervalWaits = s.intervalWaits;
 
   final int renderedFrames;
 
@@ -155,6 +160,10 @@ class MapTextureStats {
   /// frame took longer than a display refresh interval.
   final int renderAheadFrames;
 
+  /// Renders deferred until one display refresh interval after the start of
+  /// the previous render. Only Android paces renders this way.
+  final int intervalWaits;
+
   @override
   String toString() =>
       'MapTextureStats(rendered: $renderedFrames, presented: $presentedFrames, '
@@ -164,7 +173,8 @@ class MapTextureStats {
       'copy: $copyCount avg ${_avg(copyTotal, copyCount)} max $copyMax, '
       'update_available: '
       '$renderUpdateAvailableEvents, needs_repaint: $needsRepaintFrames, '
-      'paused: $pausedRenders, memory_reductions: $memoryReductions)';
+      'paused: $pausedRenders, memory_reductions: $memoryReductions, '
+      'interval_waits: $intervalWaits)';
 
   static String _avg(Duration total, int count) => count == 0
       ? '-'
@@ -209,6 +219,9 @@ class MapTextureController {
   /// 3.0–5.4% with the copy). On an M2 Max Mac at 3200x2000 physical pixels it
   /// gave no consistent gain, because rendering took longer by more than the
   /// copy it saved.
+  ///
+  /// On Android every map renders directly into the buffers that Flutter
+  /// displays, and [copyFree] has no effect.
   factory MapTextureController.create(
       {required double pixelRatio, bool copyFree = true}) {
     late final MapTextureController controller;
@@ -231,8 +244,8 @@ class MapTextureController {
   /// The id for a `Texture` widget.
   final int textureId;
 
-  /// Whether the map renders directly into the displayed buffers; see
-  /// [MapTextureController.create].
+  /// Whether the map was created to render directly into the displayed
+  /// buffers; see [MapTextureController.create]. On Android every map does.
   final bool copyFree;
 
   final _events = StreamController<MapEvent>.broadcast();
@@ -347,7 +360,7 @@ class MapTextureController {
         physicalSize:
             Size(e.physicalWidth.toDouble(), e.physicalHeight.toDouble()),
         scaleFactor: e.scaleFactor,
-        displayTime: e.displayTimeUs,
+        displayTime: e.displayTimeUs < 0 ? null : e.displayTimeUs,
       );
     }
     mapTextureEventFree(pointer);

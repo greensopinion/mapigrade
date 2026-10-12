@@ -1,7 +1,7 @@
 // Commands from Dart to the map thread (design D5).
 //
-// Style loads, resizes, memory reduction and dispose go into an ordered queue and are never
-// dropped or reordered. Consecutive resizes are coalesced so that a window drag
+// Style loads, resizes, memory reduction, target tasks and dispose go into an
+// ordered queue and are never dropped or reordered. Consecutive resizes are coalesced so that a window drag
 // doesn't allocate a buffer set per intermediate size (D7). Camera updates go
 // into a single slot where the latest update wins.
 //
@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -41,6 +42,8 @@ struct Command {
     kStyleJson,
     kResize,
     kReduceMemoryUse,
+    // Work of the platform render target on the map thread.
+    kTargetTask,
     kDispose,
   };
 
@@ -49,20 +52,25 @@ struct Command {
   std::string text;
   // Set for kResize.
   Viewport viewport;
+  // Set for kTargetTask.
+  std::function<void()> task;
 
   static Command StyleUrl(std::string url) {
-    return {Kind::kStyleUrl, std::move(url), {}};
+    return {Kind::kStyleUrl, std::move(url), {}, {}};
   }
   static Command StyleJson(std::string json) {
-    return {Kind::kStyleJson, std::move(json), {}};
+    return {Kind::kStyleJson, std::move(json), {}, {}};
   }
   static Command Resize(Viewport viewport) {
-    return {Kind::kResize, {}, viewport};
+    return {Kind::kResize, {}, viewport, {}};
   }
   static Command ReduceMemoryUse() {
-    return {Kind::kReduceMemoryUse, {}, {}};
+    return {Kind::kReduceMemoryUse, {}, {}, {}};
   }
-  static Command Dispose() { return {Kind::kDispose, {}, {}}; }
+  static Command TargetTask(std::function<void()> task) {
+    return {Kind::kTargetTask, {}, {}, std::move(task)};
+  }
+  static Command Dispose() { return {Kind::kDispose, {}, {}, {}}; }
 };
 
 class CommandQueue {

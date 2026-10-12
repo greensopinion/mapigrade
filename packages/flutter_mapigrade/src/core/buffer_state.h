@@ -27,10 +27,17 @@ inline constexpr int kMaxBufferCount = 4;
 // The clock of Flutter's FrameTiming on macOS and iOS, in microseconds: the
 // engine reads Dart_TimelineGetTicks, which is CLOCK_MONOTONIC_RAW (design
 // D24). std::chrono::steady_clock is CLOCK_UPTIME_RAW on Apple platforms and
-// differs from it by the time the device has slept.
+// differs from it by the time the device has slept. Android uses no buffer
+// state with display times, so there it is CLOCK_MONOTONIC.
 inline int64_t DisplayClockUs() {
+#if defined(__APPLE__)
   return static_cast<int64_t>(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) /
                               1000);
+#else
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return static_cast<int64_t>(now.tv_sec) * 1'000'000 + now.tv_nsec / 1000;
+#endif
 }
 
 // What a buffer holds: the frame id and the camera and size it was rendered

@@ -1,8 +1,10 @@
 // Integration tests for the map-texture spec scenarios.
 //
 //   cd example && flutter test integration_test -d macos
+//   cd example && flutter test integration_test -d <Android device id>
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -38,6 +40,14 @@ Future<T> waitFor<T>(Stream<Object> stream, bool Function(T) test,
 }
 
 bool near(double a, double b) => (a - b).abs() < 1e-6;
+
+/// Marks the running test as skipped on Android, with [reason], and returns
+/// true there. Tests that return early after it pass on Android.
+bool skipOnAndroid(String reason) {
+  if (!Platform.isAndroid) return false;
+  markTestSkipped(reason);
+  return true;
+}
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -152,6 +162,7 @@ void main() {
   });
 
   testWidgets('display time increases from frame to frame', (tester) async {
+    if (skipOnAndroid('Android reports no display times (design D58)')) return;
     final controller = await showMap(tester);
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleJson(colorStyle('#3366cc'));
@@ -171,7 +182,7 @@ void main() {
     expect(displayed.first.displayTime, greaterThan(0));
     for (var k = 1; k < displayed.length; k++) {
       expect(displayed[k].displayTime,
-          greaterThan(displayed[k - 1].displayTime),
+          greaterThan(displayed[k - 1].displayTime!),
           reason: 'frame ${displayed[k].frameId}');
     }
   });
@@ -212,13 +223,27 @@ void main() {
     expect(displayed.any((f) => near(f.camera.longitude, last)), isTrue,
         reason: 'the last camera was never displayed');
     expect(caughtUp.elapsed, lessThan(const Duration(milliseconds: 500)));
-    // The map renders at most one frame ahead of what Flutter displays, so
-    // camera updates that arrive between frames are coalesced. Renders that
-    // start before Flutter took the latest frame (while frames take longer
-    // than a refresh interval, design D19) can replace an undisplayed frame.
     final stats = controller.stats();
-    expect(stats.renderedFrames,
-        lessThanOrEqualTo(stats.presentedFrames + stats.renderAheadFrames + 1));
+    if (Platform.isAndroid) {
+      // Renders are paced to one per display refresh interval (design D53),
+      // so camera updates that arrive between renders are coalesced.
+      final refreshRate = tester.view.display.refreshRate;
+      final seconds = (stopwatch.elapsedMilliseconds +
+              caughtUp.elapsedMilliseconds) /
+          1000;
+      expect(stats.renderedFrames,
+          lessThanOrEqualTo((seconds * refreshRate).ceil() + 1));
+      expect(stats.intervalWaits, greaterThan(0));
+    } else {
+      // The map renders at most one frame ahead of what Flutter displays, so
+      // camera updates that arrive between frames are coalesced. Renders that
+      // start before Flutter took the latest frame (while frames take longer
+      // than a refresh interval, design D19) can replace an undisplayed
+      // frame.
+      expect(stats.renderedFrames,
+          lessThanOrEqualTo(
+              stats.presentedFrames + stats.renderAheadFrames + 1));
+    }
     // From the first frame that shows a sent camera on, displayed cameras
     // never go backwards: no stale camera is shown after a newer one. Camera
     // updates coalesce, so the first sent camera may never be displayed.
@@ -345,8 +370,13 @@ void main() {
     await waitFor<FrameCamera>(controller.frames, (_) => true);
     final stats = controller.stats();
     expect(stats.renderedFrames, greaterThan(0));
-    // A frame is counted as copied just before it's counted as rendered.
-    expect(stats.copyCount, greaterThanOrEqualTo(stats.renderedFrames));
+    if (Platform.isAndroid) {
+      // Every map renders directly into Flutter's buffers on Android.
+      expect(stats.copyCount, 0);
+    } else {
+      // A frame is counted as copied just before it's counted as rendered.
+      expect(stats.copyCount, greaterThanOrEqualTo(stats.renderedFrames));
+    }
   });
 
   testWidgets('idle map with the copy renders no frames for 10 seconds',
@@ -481,6 +511,49 @@ void main() {
     expect(errors, isEmpty);
   });
 
+  // Flutter removes the surface when the activity stops and provides it again
+  // when the activity resumes. The test hook makes it do both while the
+  // activity runs.
+  testWidgets('surface removal and restore keep the map and its style',
+      (tester) async {
+    if (!Platform.isAndroid) {
+      markTestSkipped('Flutter removes surfaces only on Android');
+      return;
+    }
+    final controller = await showMap(tester);
+    final idle = waitFor<MapIdle>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await idle;
+    final events = <MapEvent>[];
+    final sub = controller.events.listen(events.add);
+
+    trimSurfacesForTesting(restore: false);
+    final removed = controller.stats();
+    // Camera changes while the surface is removed render nothing.
+    const camera = MapCamera(latitude: 20, longitude: 30, zoom: 4);
+    controller.setCamera(camera);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    final whileRemoved = controller.stats();
+
+    final frame = waitFor<FrameCamera>(
+        controller.frames,
+        (f) =>
+            near(f.camera.latitude, camera.latitude) &&
+            near(f.camera.longitude, camera.longitude) &&
+            near(f.camera.zoom, camera.zoom));
+    trimSurfacesForTesting(restore: true);
+    await frame;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await sub.cancel();
+    debugPrint('surface removed: rendered ${removed.renderedFrames} -> '
+        '${whileRemoved.renderedFrames}; events after removal $events');
+
+    expect(whileRemoved.renderedFrames, removed.renderedFrames);
+    expect(events.whereType<RenderError>(), isEmpty);
+    expect(events.whereType<StyleLoaded>(), isEmpty,
+        reason: 'the style must not load again');
+  });
+
   testWidgets('resizing on every frame for 10 seconds', (tester) async {
     final controller = MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
@@ -526,16 +599,30 @@ void main() {
         footprintMax = math.max(footprintMax, memoryFootprintForTesting());
       }
     }
-    // Whole logical pixels, so the physical size is exact.
+    // The core rounds the physical size to whole pixels; with a device pixel
+    // ratio such as 2.625 (Android) whole logical pixels don't give whole
+    // physical pixels.
     final finalSize = Size((view.width * 0.8).floorToDouble(),
         (view.height * 0.6).floorToDouble());
     size.value = finalSize;
+    FrameCamera? lastFrame;
+    final lastFrames = controller.frames.listen((f) => lastFrame = f);
     await tester.pump();
-    final frame = await waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            f.physicalSize.width == finalSize.width * ratio &&
-            f.physicalSize.height == finalSize.height * ratio);
+    final FrameCamera frame;
+    try {
+      frame = await waitFor<FrameCamera>(
+          controller.frames,
+          (f) =>
+              f.physicalSize.width == (finalSize.width * ratio).roundToDouble() &&
+              f.physicalSize.height ==
+                  (finalSize.height * ratio).roundToDouble());
+    } on TimeoutException {
+      debugPrint('resize: no frame of ${finalSize * ratio} (rounded); last frame '
+          '$lastFrame; ${controller.stats()}');
+      rethrow;
+    } finally {
+      await lastFrames.cancel();
+    }
     await Future<void>.delayed(const Duration(seconds: 1));
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
     debugPrint('resize: $i sizes, final frame $frame; ${controller.stats()}; '
@@ -551,6 +638,9 @@ void main() {
   // resizes; the plugin makes it free them after the burst.
   testWidgets('display buffers replaced by resizes are freed afterwards',
       (tester) async {
+    if (skipOnAndroid('the plugin owns no display buffers on Android')) {
+      return;
+    }
     final controller = MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
