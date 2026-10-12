@@ -4,7 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 
 import 'alignment_benchmark.dart';
 import 'benchmark.dart';

@@ -55,8 +55,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
-import 'package:flutter_mapigrade/testing.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'alignment_mode.dart';
@@ -280,7 +279,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
     ),
     children: [
       if (alignmentVideo) ...[
-        MapLibreTextureLayer(
+        MapTextureLayer(
           styleJson: videoStyle(),
           copyFree: copyFree,
           alignment: _mode.alignment,
@@ -293,7 +292,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
           ],
         ),
       ] else ...[
-        MapLibreTextureLayer(
+        MapTextureLayer(
           styleUrl: libertyStyleUrl,
           copyFree: copyFree,
           alignment: _mode.alignment,

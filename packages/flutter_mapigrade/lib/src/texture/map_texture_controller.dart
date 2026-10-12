@@ -8,6 +8,7 @@ import 'bindings.dart';
 
 /// A map camera: center, zoom and bearing in degrees.
 class MapCamera {
+  /// A camera at [latitude], [longitude] and [zoom], turned by [bearing].
   const MapCamera({
     required this.latitude,
     required this.longitude,
@@ -15,9 +16,13 @@ class MapCamera {
     this.bearing = 0,
   });
 
+  /// The latitude of the center, in degrees.
   final double latitude;
+  /// The longitude of the center, in degrees.
   final double longitude;
+  /// The MapLibre zoom level.
   final double zoom;
+  /// The bearing in degrees.
   final double bearing;
 
   @override
@@ -27,6 +32,7 @@ class MapCamera {
 
 /// The camera and viewport size a displayed frame was rendered with.
 class FrameCamera {
+  /// The camera and viewport size of the frame [frameId].
   const FrameCamera({
     required this.frameId,
     required this.camera,
@@ -37,8 +43,11 @@ class FrameCamera {
 
   /// Increases by one for each frame the map renders.
   final int frameId;
+  /// The camera the frame was rendered with.
   final MapCamera camera;
+  /// The size of the frame in physical pixels.
   final Size physicalSize;
+  /// Physical pixels per logical pixel of the frame.
   final double scaleFactor;
 
   /// On macOS and iOS, the time at which Flutter took the frame for display,
@@ -60,24 +69,32 @@ sealed class MapEvent {
   const MapEvent();
 }
 
+/// The style has loaded.
 class StyleLoaded extends MapEvent {
+  /// A style-loaded event.
   const StyleLoaded();
 }
 
 /// Loading the style (or a resource it needs) failed.
 class LoadingFailed extends MapEvent {
+  /// A loading failure with [message].
   const LoadingFailed(this.message);
+  /// Describes the cause of the failure.
   final String message;
 }
 
+/// Rendering failed.
 class RenderError extends MapEvent {
+  /// A render error with [message].
   const RenderError(this.message);
+  /// Describes the cause of the error.
   final String message;
 }
 
 /// The map has loaded all resources for the current camera and stopped
 /// rendering.
 class MapIdle extends MapEvent {
+  /// An idle event.
   const MapIdle();
 }
 
@@ -108,6 +125,7 @@ class MapTextureStats {
         renderAheadFrames = s.renderAheadFrames,
         intervalWaits = s.intervalWaits;
 
+  /// Frames the map rendered.
   final int renderedFrames;
 
   /// Renders deferred because no buffer was free.
@@ -115,14 +133,19 @@ class MapTextureStats {
 
   /// Renders deferred because Flutter hadn't taken the latest frame yet.
   final int waitsForDisplay;
+  /// Calls of `mln_render_session_render_update`.
   final int renderUpdateCount;
+  /// The total time of the calls counted by [renderUpdateCount].
   final Duration renderUpdateTotal;
+  /// The longest of the calls counted by [renderUpdateCount].
   final Duration renderUpdateMax;
 
   /// GPU copies of the rendered frame into a display buffer, including the
   /// wait for completion. Always 0 for a copy-free map.
   final int copyCount;
+  /// The total time of the copies counted by [copyCount].
   final Duration copyTotal;
+  /// The longest of the copies counted by [copyCount].
   final Duration copyMax;
 
   /// Frames Flutter took for display.
@@ -145,15 +168,18 @@ class MapTextureStats {
   /// Time from one render to the start of the next, while rendering
   /// continuously.
   final int frameCycleCount;
+  /// The total of the times counted by [frameCycleCount].
   final Duration frameCycleTotal;
 
   /// Time from publishing a frame until Flutter takes it.
   final int pickupWaitCount;
+  /// The total of the times counted by [pickupWaitCount].
   final Duration pickupWaitTotal;
 
   /// Time from Flutter taking a frame until the next render starts, for
   /// renders that waited for Flutter to take the latest frame.
   final int presentToRenderCount;
+  /// The total of the times counted by [presentToRenderCount].
   final Duration presentToRenderTotal;
 
   /// Renders started before Flutter had taken the latest frame, because a
@@ -183,6 +209,7 @@ class MapTextureStats {
 
 /// Thrown by calls on a disposed [MapTextureController].
 class MapTextureDisposedException implements Exception {
+  /// The exception for a call on a disposed controller.
   const MapTextureDisposedException();
   @override
   String toString() => 'MapTextureDisposedException: the map was disposed';
@@ -190,7 +217,9 @@ class MapTextureDisposedException implements Exception {
 
 /// Thrown when a native call fails.
 class MapTextureException implements Exception {
+  /// A failure with [message].
   const MapTextureException(this.message);
+  /// Describes the failure.
   final String message;
   @override
   String toString() => 'MapTextureException: $message';
@@ -263,11 +292,14 @@ class MapTextureController {
   FrameCamera? get displayedFrame => _displayedFrame;
   FrameCamera? _displayedFrame;
 
+  /// Whether [dispose] has been called.
   bool get isDisposed => _disposed;
 
+  /// Loads the style at [url], replacing the current style.
   void loadStyleUrl(String url) =>
       _withString(url, (p) => mapTextureLoadStyleUrl(_handle, p));
 
+  /// Loads the style [json], replacing the current style.
   void loadStyleJson(String json) =>
       _withString(json, (p) => mapTextureLoadStyleJson(_handle, p));
 
@@ -303,6 +335,7 @@ class MapTextureController {
     _refreshRate = hz;
   }
 
+  /// The counters of the map thread at the time of the call.
   MapTextureStats stats() {
     final out = calloc<MapTextureStatsStruct>();
     try {
@@ -381,6 +414,3 @@ class MapTextureController {
     }
   }
 }
-
-/// The number of threads in this process, for lifecycle tests.
-int processThreadCount() => mapTextureProcessThreadCount();

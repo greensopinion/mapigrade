@@ -10,6 +10,8 @@ import 'camera_projection.dart';
 /// center, between where the overlays draw a coordinate and where the map, as
 /// the layer draws it, draws it.
 class AlignmentError {
+  /// An error of [error] logical pixels, with the map center offset by
+  /// [center].
   const AlignmentError({required this.error, this.center = Offset.zero});
 
   /// The largest distance over the viewport corners and center.

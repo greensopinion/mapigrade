@@ -1,7 +1,7 @@
 // Unit tests for the alignment error computation (design D26).
 import 'dart:ui';
 
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_mapigrade/src/layer/alignment_error.dart';
 import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
 import 'package:flutter_test/flutter_test.dart';

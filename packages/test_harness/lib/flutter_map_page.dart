@@ -3,7 +3,7 @@
 // control panel, or at launch with `--dart-define=FLUTTER_MAP_PAGE=true`.
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'alignment_mode.dart';
@@ -62,7 +62,7 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
               ),
             ),
             children: [
-              MapLibreTextureLayer(
+              MapTextureLayer(
                 styleUrl: widget.styleUrl,
                 copyFree: copyFree,
                 alignment: _mode.alignment,

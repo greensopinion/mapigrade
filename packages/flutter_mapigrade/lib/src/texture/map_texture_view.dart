@@ -9,8 +9,10 @@ import 'map_texture_controller.dart';
 /// controller, so the map renders one pixel per physical pixel, and the
 /// display's refresh rate, which decides when the map renders ahead.
 class MapTextureView extends StatelessWidget {
+  /// A view of the map of [controller].
   const MapTextureView({super.key, required this.controller});
 
+  /// The controller of the map that the view displays.
   final MapTextureController controller;
 
   @override

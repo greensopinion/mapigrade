@@ -20,7 +20,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/scheduler.dart';
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 
 import 'benchmark.dart' show panSpeed, start, writeLine;
 

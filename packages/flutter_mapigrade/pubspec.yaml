@@ -14,14 +14,16 @@ dependencies:
   ffi: ^2.1.4
   flutter:
     sdk: flutter
-  flutter_map: 8.3.2
+  flutter_map: ^8.3.2
   hooks: ^2.2.0
   latlong2: ^0.10.1
 
 dev_dependencies:
+  analyzer: ^14.5.0
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
+  path: ^1.9.1
 
 flutter:
   plugin:

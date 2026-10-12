@@ -12,7 +12,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -147,7 +147,7 @@ void main() {
                   initialRotation: c.rotation,
                 ),
                 children: [
-                  MapLibreTextureLayer(
+                  MapTextureLayer(
                     styleJson: style,
                     onController: (x) => controller = x,
                   ),

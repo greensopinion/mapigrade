@@ -2,7 +2,7 @@
 // camera-prediction change).
 import 'dart:ui';
 
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_mapigrade/src/layer/camera_prediction.dart';
 import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
 import 'package:flutter_test/flutter_test.dart';

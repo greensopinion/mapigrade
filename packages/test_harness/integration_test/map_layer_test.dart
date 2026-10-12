@@ -1,6 +1,8 @@
-// Integration tests for the flutter_map layer (map-layer spec, design D21).
+// Integration tests for the flutter_map layer (map-layer spec, design D21 of
+// the flutter-map-layer change, D67 of the public-api change).
 //
 //   cd packages/test_harness && flutter test integration_test/map_layer_test.dart -d macos
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -8,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
-import 'package:flutter_mapigrade/testing.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -27,6 +29,10 @@ final redStyle = jsonEncode({
 
 const markerColor = Color(0xff0000ff);
 const center = LatLng(51.5, -0.12);
+
+const demoStyleUrl = 'https://demotiles.maplibre.org/style.json';
+const libertyStyleUrl = 'https://tiles.openfreemap.org/styles/liberty';
+const unreachableStyleUrl = 'https://invalid.example.invalid/style.json';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -49,7 +55,7 @@ void main() {
             options: const MapOptions(initialCenter: center, initialZoom: 12),
             children: [
               if (withLayer)
-                MapLibreTextureLayer(
+                MapTextureLayer(
                   styleJson: redStyle,
                   onController: onController,
                 ),
@@ -92,7 +98,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(FlutterMap),
-        matching: find.byType(MapLibreTextureLayer),
+        matching: find.byType(MapTextureLayer),
       ),
       findsOneWidget,
     );
@@ -128,7 +134,7 @@ void main() {
             mapController: mapController,
             options: const MapOptions(initialCenter: center, initialZoom: 12),
             children: [
-              MapLibreTextureLayer(
+              MapTextureLayer(
                   styleJson: redStyle, onController: (c) => controller = c),
             ],
           ),
@@ -156,7 +162,7 @@ void main() {
   /// or, if null, the layer's default.
   Widget layerApp(
     MapController mapController, {
-    CameraAlignment? alignment,
+    LayerAlignment? alignment,
     required void Function(MapTextureController) onController,
   }) => MaterialApp(
     home: Center(
@@ -168,12 +174,12 @@ void main() {
           options: const MapOptions(initialCenter: center, initialZoom: 12),
           children: [
             if (alignment == null)
-              MapLibreTextureLayer(
+              MapTextureLayer(
                 styleJson: redStyle,
                 onController: onController,
               )
             else
-              MapLibreTextureLayer(
+              MapTextureLayer(
                 styleJson: redStyle,
                 alignment: alignment,
                 onController: onController,
@@ -185,14 +191,14 @@ void main() {
   );
 
   final transformInLayer = find.descendant(
-    of: find.byType(MapLibreTextureLayer),
+    of: find.byType(MapTextureLayer),
     matching: find.byType(Transform),
   );
 
   for (final (name, alignment) in const [
     ('the default layer (prediction, lead 1)', null),
-    ('the layer with no alignment', CameraAlignment.none),
-    ('the layer with prediction, lead 2', CameraAlignment.prediction(lead: 2)),
+    ('the layer with no alignment', LayerAlignment.none),
+    ('the layer with prediction, lead 2', LayerAlignment.prediction(lead: 2)),
   ]) {
     testWidgets('$name has no Transform while the camera moves', (
       tester,
@@ -325,5 +331,129 @@ void main() {
         '${[for (final i in [9, 19, 29, 39, 49]) mib(footprints[i])]}');
     expect(threadsAfter, lessThanOrEqualTo(threadsBefore));
     expect(footprintAfter - footprintBefore, lessThan(100 * 1024 * 1024));
+  });
+
+  /// A 400x300 FlutterMap at [center] with [layer] as its only child.
+  Widget appWith(Widget layer) => MaterialApp(
+    home: Center(
+      child: SizedBox(
+        width: 400,
+        height: 300,
+        child: FlutterMap(
+          options: const MapOptions(initialCenter: center, initialZoom: 12),
+          children: [layer],
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('onStyleLoaded is called once after the style has loaded', (
+    tester,
+  ) async {
+    var loads = 0;
+    final loaded = Completer<void>();
+    await tester.pumpWidget(
+      appWith(
+        MapigradeLayer(
+          styleUrl: demoStyleUrl,
+          onStyleLoaded: () {
+            loads++;
+            if (!loaded.isCompleted) loaded.complete();
+          },
+          onError: (e) => fail('unexpected failure $e'),
+        ),
+      ),
+    );
+    await loaded.future.timeout(const Duration(seconds: 20));
+    // Later events, such as MapIdle, don't call the handler again.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(loads, 1);
+  });
+
+  testWidgets('changing the style URL loads it into the same map', (
+    tester,
+  ) async {
+    final controllers = <MapTextureController>[];
+    var loads = 0;
+    var loaded = Completer<void>();
+    Widget app(String styleUrl) => appWith(
+      MapTextureLayer(
+        styleUrl: styleUrl,
+        onController: controllers.add,
+        onStyleLoaded: () {
+          loads++;
+          if (!loaded.isCompleted) loaded.complete();
+        },
+        onError: (e) => fail('unexpected failure $e'),
+      ),
+    );
+
+    await tester.pumpWidget(app(demoStyleUrl));
+    await loaded.future.timeout(const Duration(seconds: 20));
+    final controller = controllers.single;
+    await controller.frames.first.timeout(const Duration(seconds: 20));
+
+    // As when the platform switches between light and dark mode.
+    loaded = Completer<void>();
+    await tester.pumpWidget(app(libertyStyleUrl));
+    await loaded.future.timeout(const Duration(seconds: 20));
+    final frame = await controller.frames.first.timeout(
+      const Duration(seconds: 20),
+    );
+
+    expect(loads, 2);
+    expect(controllers, [controller], reason: 'no other map was created');
+    expect(controller.isDisposed, isFalse);
+    expect(frame.frameId, greaterThan(1));
+  });
+
+  testWidgets('a style that fails to load is reported to onError', (
+    tester,
+  ) async {
+    final failed = Completer<LayerException>();
+    await tester.pumpWidget(
+      appWith(
+        MapigradeLayer(
+          styleUrl: unreachableStyleUrl,
+          onError: (e) {
+            if (!failed.isCompleted) failed.complete(e);
+          },
+        ),
+      ),
+    );
+    final exception = await failed.future.timeout(const Duration(seconds: 20));
+    expect(exception, isA<LayerLoadException>());
+    expect(exception.message, isNotEmpty);
+    // The application continues to run.
+    await tester.pump();
+    expect(find.byType(MapigradeLayer), findsOneWidget);
+  });
+
+  testWidgets('without onError a load failure goes to FlutterError once', (
+    tester,
+  ) async {
+    final reports = <FlutterErrorDetails>[];
+    final reported = Completer<void>();
+    final previous = FlutterError.onError;
+    FlutterError.onError = (details) {
+      reports.add(details);
+      if (!reported.isCompleted) reported.complete();
+    };
+    try {
+      await tester.pumpWidget(
+        appWith(const MapigradeLayer(styleUrl: unreachableStyleUrl)),
+      );
+      await reported.future.timeout(const Duration(seconds: 20));
+      // MapLibre retries after 1 s and 3 s more, with the same message, and
+      // the layer reports only the first.
+      await Future<void>.delayed(const Duration(seconds: 5));
+      await tester.pump();
+    } finally {
+      FlutterError.onError = previous;
+    }
+    expect(reports, hasLength(1), reason: '$reports');
+    expect(reports.single.exception, isA<LayerLoadException>());
+    expect(reports.single.library, 'flutter_mapigrade');
+    expect(find.byType(MapigradeLayer), findsOneWidget);
   });
 }

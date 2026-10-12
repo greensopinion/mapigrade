@@ -17,12 +17,17 @@ typedef CameraRecord = ({Duration time, ViewCamera camera});
 /// The rate of change of a camera, per second: the center in normalized
 /// Mercator coordinates, the zoom, and the bearing in degrees.
 class CameraVelocity {
+  /// A velocity with these rates of change.
   const CameraVelocity(this.center, this.zoom, this.bearing);
 
+  /// No change.
   static const zero = CameraVelocity(Offset.zero, 0, 0);
 
+  /// The rate of change of the center, in normalized Mercator coordinates.
   final Offset center;
+  /// The rate of change of the zoom.
   final double zoom;
+  /// The rate of change of the bearing, in degrees.
   final double bearing;
 
   @override

@@ -6,10 +6,10 @@
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
 enum AlignmentMode {
-  none('none', CameraAlignment.none),
-  predict1('predict1', CameraAlignment.prediction(lead: 1)),
-  predict2('predict2', CameraAlignment.prediction(lead: 2)),
-  predict3('predict3', CameraAlignment.prediction(lead: 3));
+  none('none', LayerAlignment.none),
+  predict1('predict1', LayerAlignment.prediction(lead: 1)),
+  predict2('predict2', LayerAlignment.prediction(lead: 2)),
+  predict3('predict3', LayerAlignment.prediction(lead: 3));
 
   const AlignmentMode(this.label, this.alignment);
 
@@ -17,7 +17,7 @@ enum AlignmentMode {
   final String label;
 
   /// The layer's alignment in this mode.
-  final CameraAlignment alignment;
+  final LayerAlignment alignment;
 
   /// The mode named [label], or null if there is none.
   static AlignmentMode? byLabel(String label) {

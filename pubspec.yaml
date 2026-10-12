@@ -6,4 +6,5 @@ environment:
 
 workspace:
   - packages/flutter_mapigrade
+  - packages/flutter_mapigrade/example
   - packages/test_harness

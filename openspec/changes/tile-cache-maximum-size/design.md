@@ -57,23 +57,28 @@ When no value has been set, `Init()` doesn't call the function, so the default s
 
 If `mln_runtime_set_maximum_ambient_cache_size_start()` returns a status other than `MLN_STATUS_OK`, `Init()` calls `ReportStatus()`, which Dart receives as `RenderError`, and continues. The map then uses the 50 MiB default. `Init()` doesn't fail, because the map can render without the limit.
 
-### D64. Dart: a static function that validates its argument
+### D64. Dart: a static property on the public layer, and an internal function that validates its argument
+
+The public API is a static property of `MapigradeLayer`, the only widget that applications use (design D66 of the change `public-api`):
 
 ```dart
-/// Sets the maximum size in bytes of the tile cache for maps created after
-/// this call, in the whole process. ...
-static void setMaximumCacheSize(int bytes)
+/// The maximum size in bytes of the tile cache for maps created after it is
+/// set, in the whole process. ...
+static int get maximumCacheSizeBytes
+static set maximumCacheSizeBytes(int bytes)
 ```
 
-It throws `ArgumentError` for a negative `bytes` without calling native code, and throws `MapTextureException` if the native function returns an error. It is declared on `MapTextureController`, next to `create`, so that applications find it where they create maps. The documentation states the default (50 MiB), that 0 keeps no cache, that maps created before the call keep their limit, and that maps that share the file each evict to their own limit.
+The getter returns the last value set, or 50 MiB (52,428,800 bytes, MapLibre's `DEFAULT_MAX_CACHE_SIZE`) when none has been set. It is not nullable, because a Dart getter's type must be assignable to its setter's parameter type, and the setter takes no null: the native core can't return to "no value". The setter calls the internal static function `MapTextureController.setMaximumCacheSize(int bytes)`, which throws `ArgumentError` for a negative `bytes` without calling native code, and throws `MapTextureException` if the native function returns an error; the setter lets both propagate, and stores the value only when the call succeeded. The property's documentation states the default (50 MiB), that 0 keeps no cache, that maps created before the call keep their limit, and that maps that share the file each evict to their own limit.
 
 *Alternatives:*
-- A top-level function or a separate `TileCache` class. Neither has any other members, so a static function on the class that creates maps is easier to find.
+- A top-level function or a separate `TileCache` class. Neither has any other members, and either adds an exported name, which `public-api` keeps to the layer and its supporting types.
+- The function on `MapTextureController`, as first proposed. `public-api` made the controller internal.
 
 ## Risks / Trade-offs
 
 - [Two maps created with different limits share one file, and each connection evicts to its own limit. The smaller limit wins whenever that map writes.] → D61 makes one application-wide value the common case; the Dart documentation states the behaviour.
 - [A later FFI or MapLibre version creates separate database file sources for the size operation and the resource loader, and the limit no longer applies to the connection that stores tiles.] → The check that more than 50 MiB stays in the cache across a restart (tasks.md, section 4) shows it.
+- [The layer reports a failure to apply the limit (D63) as a `LayerRenderException`, although rendering didn't fail.] → Accepted for now; `public-api` (D68) allows a subclass of `LayerException` to be added later if applications need to tell the two apart.
 - [An asynchronous failure of the size operation isn't reported.] → The map uses the 50 MiB default, which is today's behaviour.
 - [A limit of 0 means every downloaded resource is evicted when the next is written, so the map downloads tiles again after each pan back.] → This is the meaning of 0; the documentation states it.
 

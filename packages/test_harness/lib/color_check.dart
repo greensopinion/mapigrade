@@ -7,7 +7,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:flutter_mapigrade/src/testing.dart';
 
 const backgroundColor = Color(0xFF3366CC);
 const fillColor = Color(0xFFE6B31A);

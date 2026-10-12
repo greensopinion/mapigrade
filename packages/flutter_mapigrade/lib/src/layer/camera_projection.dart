@@ -12,6 +12,7 @@ const double maxMercatorLatitude = 85.051128779806604;
 
 /// A MapLibre camera and the logical size of the viewport that shows it.
 class ViewCamera {
+  /// [camera] shown in a viewport of logical size [viewport].
   const ViewCamera(this.camera, this.viewport);
 
   /// The camera and logical viewport size that [frame] was rendered with.
@@ -19,7 +20,9 @@ class ViewCamera {
     : camera = frame.camera,
       viewport = frame.physicalSize / frame.scaleFactor;
 
+  /// The MapLibre camera.
   final MapCamera camera;
+  /// The logical size of the viewport.
   final Size viewport;
 
   @override

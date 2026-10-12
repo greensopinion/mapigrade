@@ -6,6 +6,9 @@
 //
 // On macOS and iOS the plugin is linked into the app, and @Native resolves the
 // symbols from the process, so no asset is declared there.
+//
+// The asset id is `package:flutter_mapigrade/native`, which bindings.dart names
+// with @DefaultAsset (design D71 of the public-api change).
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
@@ -16,7 +19,7 @@ void main(List<String> args) async {
     output.assets.code.add(
       CodeAsset(
         package: input.packageName,
-        name: 'src/texture/bindings.dart',
+        name: 'native',
         linkMode: DynamicLoadingSystem(Uri.file('libflutter_mapigrade.so')),
       ),
     );
