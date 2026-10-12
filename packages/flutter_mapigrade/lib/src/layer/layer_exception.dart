@@ -2,16 +2,13 @@
 // change). The subclasses are in this file because a subclass of an
 // `abstract final` class must be in the same library.
 
-/// A failure of the map of a `MapigradeLayer`, which the layer passes to its
-/// `onError` handler.
-///
-/// The layer doesn't throw it. Later versions may add subclasses, so code that
-/// switches over the type must handle other types.
+/// A failure of a `MapigradeLayer`'s map, passed to its `onError`. Later
+/// versions may add subclasses.
 abstract final class LayerException implements Exception {
   /// A failure with [message].
   const LayerException(this.message);
 
-  /// Describes the cause of the failure.
+  /// The cause of the failure.
   final String message;
 
   @override
