@@ -152,6 +152,130 @@ void main() {
     expect(shown.camera.longitude, closeTo(target.longitude, 1e-9));
   });
 
+  /// A 400x300 FlutterMap at [center] with only the layer, configured as
+  /// given.
+  Widget layerApp(
+    MapController mapController, {
+    bool compensatingTransform = true,
+    double? cameraPrediction,
+    required void Function(MapTextureController) onController,
+  }) => MaterialApp(
+    home: Center(
+      child: SizedBox(
+        width: 400,
+        height: 300,
+        child: FlutterMap(
+          mapController: mapController,
+          options: const MapOptions(initialCenter: center, initialZoom: 12),
+          children: [
+            MapLibreTextureLayer(
+              styleJson: redStyle,
+              compensatingTransform: compensatingTransform,
+              cameraPrediction: cameraPrediction,
+              onController: onController,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  final transformInLayer = find.descendant(
+    of: find.byType(MapLibreTextureLayer),
+    matching: find.byType(Transform),
+  );
+
+  for (final (name, transformOn, prediction) in const [
+    ('the default layer', true, null),
+    ('the layer without the transform', false, null),
+    ('the layer with prediction', true, 2.0),
+  ]) {
+    testWidgets('$name ${transformOn && prediction == null ? 'has' : 'has no'} '
+        'Transform while the camera moves', (tester) async {
+      final mapController = MapController();
+      MapTextureController? controller;
+      await tester.pumpWidget(
+        layerApp(
+          mapController,
+          compensatingTransform: transformOn,
+          cameraPrediction: prediction,
+          onController: (c) => controller = c,
+        ),
+      );
+      await controller!.frames.first.timeout(const Duration(seconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+
+      // Each step builds the layer with a camera that no displayed frame has
+      // yet, because the layer sets the camera during the build.
+      for (var i = 1; i <= 10; i++) {
+        mapController.move(
+          LatLng(center.latitude, center.longitude + 0.002 * i),
+          12,
+        );
+        await tester.pump();
+        expect(controller!.displayedFrame, isNotNull);
+        expect(
+          transformInLayer,
+          transformOn && prediction == null ? findsOneWidget : findsNothing,
+          reason: 'step $i',
+        );
+      }
+    });
+  }
+
+  testWidgets('with prediction, the map shows the converted camera after a '
+      'camera move stops', (tester) async {
+    final mapController = MapController();
+    MapTextureController? controller;
+    await tester.pumpWidget(
+      layerApp(
+        mapController,
+        cameraPrediction: 2,
+        onController: (c) => controller = c,
+      ),
+    );
+    await controller!.frames.first.timeout(const Duration(seconds: 20));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+
+    final displayed = <double>[];
+    final subscription = controller!.frames.listen(
+      (f) => displayed.add(f.camera.longitude),
+    );
+    final steps = [for (var i = 1; i <= 20; i++) center.longitude + 0.01 * i];
+    for (final longitude in steps) {
+      mapController.move(LatLng(center.latitude, longitude), 12);
+      await tester.pump();
+    }
+    final last = LatLng(center.latitude, steps.last);
+    final shown = await controller!.frames
+        .firstWhere(
+          (f) =>
+              (f.camera.longitude - last.longitude).abs() < 1e-9 &&
+              (f.camera.latitude - last.latitude).abs() < 1e-9,
+        )
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail(
+            'no frame with the converted camera was '
+            'displayed; last ${controller!.displayedFrame}',
+          ),
+        );
+    await subscription.cancel();
+    expect(shown.camera.zoom, closeTo(11, 1e-9));
+    // During the move the map rendered predicted cameras, which lie between
+    // or beyond the steps.
+    expect(
+      displayed.where(
+        (lon) =>
+            !steps.any((step) => (lon - step).abs() < 1e-9) &&
+            lon > center.longitude + 1e-9,
+      ),
+      isNotEmpty,
+      reason: 'displayed longitudes $displayed',
+    );
+  });
+
   testWidgets('removing the layer disposes its map', (tester) async {
     final boundaryKey = GlobalKey();
     MapTextureController? controller;

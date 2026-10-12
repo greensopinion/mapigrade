@@ -14,6 +14,8 @@ class AlignmentError {
   const AlignmentError({
     required this.withTransform,
     required this.withoutTransform,
+    this.centerWithTransform = Offset.zero,
+    this.centerWithoutTransform = Offset.zero,
   });
 
   /// With the transform the layer applied (the last-reported-frame transform,
@@ -22,6 +24,13 @@ class AlignmentError {
 
   /// If the layer had drawn the texture without a transform.
   final double withoutTransform;
+
+  /// Where the map draws the coordinate that the overlays draw at the
+  /// viewport center, relative to the center, with the transform.
+  final Offset centerWithTransform;
+
+  /// The same as [centerWithTransform], without a transform.
+  final Offset centerWithoutTransform;
 
   @override
   String toString() =>
@@ -44,12 +53,14 @@ AlignmentError alignmentError({
   );
   final size = target.viewport;
   var withT = 0.0, withoutT = 0.0;
+  var centerWithT = Offset.zero, centerWithoutT = Offset.zero;
+  final center = size.center(Offset.zero);
   for (final q in [
     Offset.zero,
     Offset(size.width, 0),
     Offset(0, size.height),
     Offset(size.width, size.height),
-    size.center(Offset.zero),
+    center,
   ]) {
     final g = worldPosition(target, q);
     // Where the texture widget draws g: the frame's own position, stretched
@@ -61,6 +72,15 @@ AlignmentError alignmentError({
         ? drawn
         : MatrixUtils.transformPoint(transform, drawn);
     withT = math.max(withT, (moved - q).distance);
+    if (q == center) {
+      centerWithT = moved - q;
+      centerWithoutT = drawn - q;
+    }
   }
-  return AlignmentError(withTransform: withT, withoutTransform: withoutT);
+  return AlignmentError(
+    withTransform: withT,
+    withoutTransform: withoutT,
+    centerWithTransform: centerWithT,
+    centerWithoutTransform: centerWithoutT,
+  );
 }

@@ -310,6 +310,153 @@ The pan at 500 px/s gave the same p50 and p95 errors in both variants on both de
 - On the iPhone, copy-free displayed 12–21 more map frames per second in the pans and the rotation, and Flutter showed a newer frame than the transform used more often (86–93% against 69–91%). Without the transform it reduced the p50 error in the zoom phase (3.0 against 5.95 px) and the rotation (13.44 against 20.14 px); in the pans it stayed two Flutter frames of movement.
 - Every phase on the Mac and in the runs with the copy on the iPhone ended at the nominal thermal state. The third copy-free iPhone run, the last of six consecutive runs (about 18 minutes), ended its phases from the pan at 500 px/s on at the fair thermal state; its errors match the other two copy-free runs.
 
+## Alignment with camera prediction (camera-prediction change)
+
+The alignment benchmark (Stage 3, above) measures the layer in five configurations, selected with `--dart-define=ALIGNMENT_MODE=` (camera-prediction change, design D34):
+- `transform` is the default: the compensating transform, without prediction.
+- `none` uses neither the transform nor prediction.
+- `predict1`, `predict2` and `predict3` set the camera predicted 1, 2 or 3 refresh intervals ahead, without the transform.
+
+The drawn error is the alignment error of what the layer draws: with the transform in `transform` mode, without it in the other modes. In pan phases, the mean offset along the pan is the mean signed distance at the viewport center between the drawn map and the overlays: positive when the map shows a camera further along the pan than the overlays, negative when it lags behind them.
+
+Three phases pan at 1,000 px/s and change the motion (design D35):
+- `stop` pans for 1 s, then rests for 1 s: 10 stops in 20 s.
+- `fling` pans for 1 s, then moves as `flutter_map`'s fling after a release at 1,000 px/s, then rests until the 3 s cycle ends: 10 flings in 30 s. At 1600x1000 the fling starts at 1,000 px/s, reaches 3,079 px/s after 13.6 ms, and stops after 1.447 s and 1,000 px.
+- `reverse` reverses the direction every 1 s: 19 reversals in 20 s.
+
+For each change, the overshoot is the largest drawn error over the Flutter frames from the change until 0.5 s after the camera is at rest or at constant speed again. The overshoot ahead is the largest distance at the viewport center by which the map is ahead of the overlays in the direction of motion before the change, or 0 if the map isn't ahead in any of those frames. The tables give p50 / p95 / max over the changes in the phase.
+
+### macOS (task 4.1)
+
+Measured 2026-10-11, release builds, 2 runs per mode. All five modes ran once, then all five again. The phases were 20 s, the fling 30 s.
+
+| Phase | Mode | Drawn error p50 / p95 / max | Mean offset along the pan | Map fps |
+| --- | --- | --- | --- | --- |
+| pan 100 px/s | `transform` | 0.83 / 1.67 / 2.5–4.17 | 0.85 | 100.0–101.9 |
+| pan 100 px/s | `none` | 1.67 / 2.5 / 3.33–4.17 | −1.41 to −1.39 | 101.4–101.6 |
+| pan 100 px/s | `predict1` | 0.83 / 1.67 / 3.33–6.67 | −0.6 to −0.56 | 101.2–101.5 |
+| pan 100 px/s | `predict2` | 0.83 / 0.83 / 2.5–3.33 | 0.23–0.3 | 101.3–101.8 |
+| pan 100 px/s | `predict3` | 0.83 / 1.67 / 1.67–2.5 | 1.06–1.12 | 101.6–102.0 |
+| pan 500 px/s | `transform` | 4.17 / 8.33 / 12.5 | 4.24 | 103.0–105.7 |
+| pan 500 px/s | `none` | 4.17–8.33 / 12.5 / 16.59–16.67 | −6.9 to −6.29 | 102.1–104.9 |
+| pan 500 px/s | `predict1` | 0–4.17 / 8.33 / 12.56–16.59 | −2.75 to −2.61 | 102.0–104.5 |
+| pan 500 px/s | `predict2` | 4.17 / 4.17 / 12.62–16.63 | 1.64–1.9 | 103.3–105.5 |
+| pan 500 px/s | `predict3` | 4.17–8.33 / 8.33 / 20.75–20.79 | 5.64–6.05 | 103.7–105.0 |
+| pan 1,000 px/s | `transform` | 8.33 / 16.67 / 25 | 8.04–8.47 | 102.9–105.5 |
+| pan 1,000 px/s | `none` | 16.67 / 25 / 33.33 | −14.26 to −14.07 | 100.4–103.5 |
+| pan 1,000 px/s | `predict1` | 0–8.33 / 16.67 / 24.84–33.29 | −5.51 to −4.17 | 102.9–105.2 |
+| pan 1,000 px/s | `predict2` | 8.33 / 8.33 / 33.29–41.59 | 2.43–4.14 | 102.3–105.8 |
+| pan 1,000 px/s | `predict3` | 8.33 / 16.67 / 41.63 | 10.45–10.72 | 101.4–102.5 |
+| pan 2,000 px/s | `transform` | 16.67 / 33.33 / 50–66.67 | 16.33–16.35 | 102.0–104.8 |
+| pan 2,000 px/s | `none` | 16.67–33.33 / 50 / 66.67 | −27.73 to −26.55 | 101.7–102.0 |
+| pan 2,000 px/s | `predict1` | 0–16.67 / 33.33 / 50–66.63 | −12.25 to −8.73 | 102.2–105.2 |
+| pan 2,000 px/s | `predict2` | 16.67 / 16.67 / 66.25–66.51 | 3.89–6.83 | 101.4–104.3 |
+| pan 2,000 px/s | `predict3` | 16.67 / 33.33 / 99.96 | 18.68–19.82 | 100.7–102.2 |
+| zoom 1 level/s | `transform` | 5.46 / 5.47 / 16.21–16.49 | — | 115.8–116.6 |
+| zoom 1 level/s | `none` | 5.46 / 10.96 / 16.49–21.55 | — | 114.7–115.0 |
+| zoom 1 level/s | `predict1` | 0 / 5.47 / 16.11–16.21 | — | 114.5–115.3 |
+| zoom 1 level/s | `predict2` | 5.43 / 5.47 / 16.48 | — | 115.3–115.8 |
+| zoom 1 level/s | `predict3` | 10.84 / 10.96 / 22.04–37.33 | — | 114.5–115.6 |
+| rotate 90°/s | `transform` | 12.35 / 24.7 / 37.04 | — | 97.1–97.8 |
+| rotate 90°/s | `none` | 24.7 / 37.04 / 37.05–49.39 | — | 96.8–97.5 |
+| rotate 90°/s | `predict1` | 12.35 / 24.7 / 24.7–37.04 | — | 96.7–97.6 |
+| rotate 90°/s | `predict2` | 0 / 12.35 / 24.7 | — | 95.7–98.0 |
+| rotate 90°/s | `predict3` | 12.35 / 24.7 / 24.7 | — | 96.5–98.5 |
+
+| Phase | Mode | Changes | Overshoot ahead p50 / p95 / max | Overshoot p50 / p95 / max | Drawn error p50 / p95 / max | Map fps |
+| --- | --- | --- | --- | --- | --- | --- |
+| stop | `transform` | 10 | 8.35–8.41 / 16.67 / 16.67 | 8.35–8.41 / 16.67 / 16.67 | 0 / 16.67 / 25 | 81.3–84.2 |
+| stop | `none` | 10 | 0 / 0 / 0 | 8.4–8.41 / 16.78 / 16.78 | 0.02–0.03 / 25 / 41.67 | 82.1–82.2 |
+| stop | `predict1` | 10 | 8.25–8.27 / 8.33 / 8.33 | 8.25–8.33 / 8.35–8.46 / 8.35–8.46 | 0 / 16.67 / 33.33 | 81.0–83.2 |
+| stop | `predict2` | 10 | 16.58–16.59 / 16.66 / 16.66 | 16.58–16.59 / 16.66 / 16.66 | 0 / 8.33 / 33.33 | 82.1–83.0 |
+| stop | `predict3` | 10 | 24.92–24.94 / 24.99–25 / 24.99–25 | 24.92–24.94 / 24.99–25 / 24.99–25 | 0 / 16.67 / 33.33 | 80.5–80.8 |
+| fling | `transform` | 10 | 49.98–49.99 / 50.83–75.5 / 50.83–75.5 | 49.98–49.99 / 50.83–75.5 / 50.83–75.5 | 1.59–1.68 / 17.46–18.68 / 50.83–75.5 | 93.0–95.7 |
+| fling | `none` | 10 | 0 / 0 / 0 | 72.1–74.03 / 75.51 / 75.51 | 8.17–8.19 / 29.18–31.81 / 75.51 | 93.5–94.2 |
+| fling | `predict1` | 10 | 0.84–0.96 / 0.96 / 0.96 | 37.51–61.42 / 61.33–62.5 / 61.33–62.5 | 0.42–0.62 / 16.67–16.73 / 61.33–62.5 | 94.8–95.3 |
+| fling | `predict2` | 10 | 25.95 / 26.16 / 26.16 | 28.79–47.41 / 53.92–54.17 / 53.92–54.17 | 0.38–0.49 / 12.18–14.47 / 53.92–54.17 | 95.9–97.8 |
+| fling | `predict3` | 10 | 48.35–49.68 / 51.57 / 51.57 | 48.35–49.68 / 51.57 / 51.57 | 4.06–4.41 / 23.57 / 51.57 | 96.2–98.1 |
+| reverse | `transform` | 19 | 8.33–16.67 / 16.67 / 16.67–25 | 16.67 / 25 / 25 | 8.33 / 16.67 / 25 | 98.1–98.8 |
+| reverse | `none` | 19 | 25 / 25 / 25–33.33 | 25 / 25 / 25–33.33 | 16.67 / 25 / 33.33 | 98.5–99.0 |
+| reverse | `predict1` | 19 | 24.85–24.95 / 25.13–33.17 / 33.27–33.28 | 24.85–24.95 / 25.13–33.17 / 33.27–33.28 | 8.33 / 16.67 / 33.27–33.28 | 97.5–99.3 |
+| reverse | `predict2` | 19 | 33.18–33.2 / 41.42–41.56 / 41.46–41.6 | 33.18–33.2 / 41.42–41.56 / 41.46–41.6 | 0–8.33 / 8.33 / 41.46–41.6 | 97.5–99.1 |
+| reverse | `predict3` | 19 | 41.43–41.53 / 41.63–49.9 / 49.75–49.97 | 41.43–41.53 / 41.63–49.9 / 49.75–49.97 | 8.33 / 16.67 / 49.75–49.97 | 97.8–100.0 |
+
+Where the two runs agree, the tables give one value; otherwise they give the range.
+
+- In pans and in the stop and reverse phases, the errors are whole multiples of one Flutter frame's movement (speed / 120 Hz, 8.33 px at 1,000 px/s), so a p50 is either 0 or a multiple of 8.33 px. In pan1000, `predict1` had p50 0 in one run and 8.33 px in the other, so about half of its frames were exact.
+- The mean offset along the pan increases with the lead: in pan1000, from about −14 px with `none`, through −4 to −6 px with `predict1`, to +2 to +4 px with `predict2` and +10.5 px with `predict3`. The transform is +8 px, ahead: Flutter often displays a newer map frame than the one the transform was built for, and the transform then moves the map too far.
+- Without the transform, the map is behind the overlays after a stop or a fling (overshoot ahead 0). Prediction runs ahead after a change by about the lead: after a stop, 8.3, 16.6 and 24.9 px at p50 for leads 1, 2 and 3. In the fling, `predict1` was ahead by at most 0.96 px, `predict2` by 26 px and `predict3` by 52 px.
+- In the fling, the transform's overshoot ahead (50 px at p50) comes from its movement during the fling's peak speed, not from prediction.
+- The map frame rate didn't depend on the mode.
+
+Conditions: the Setup's macOS device, OS, Xcode and Flutter versions and style; MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3` (`scripts/maplibre_ffi.lock`); copy-free rendering; AC power. The built-in display was the only display, scaled to 1800x1169 logical pixels ("More Space"), at 120 Hz. The window had 1600x1000 logical pixels, and all 90 result lines reported a 1600x1000 viewport. The thermal state was nominal at the start of every run and at the end of every phase. Each phase included 2,432 to 3,643 Flutter frames. Every build was matched to a frame timing and had a displayed map frame, and no display time fell outside a raster interval. Between 31 and 87 frames per phase were rasterized without a build.
+
+Procedure, per mode:
+
+```sh
+cd example
+flutter build macos --release --dart-define=ALIGNMENT_BENCHMARK=true --dart-define=ALIGNMENT_MODE=predict2
+MLT_WINDOW_SIZE=1600x1000 \
+  build/macos/Build/Products/Release/flutter_mapigrade_example.app/Contents/MacOS/flutter_mapigrade_example
+```
+
+### iPhone (task 4.2)
+
+Measured 2026-10-11, release builds, 2 runs per mode, with the same phases as on macOS. Task 4.2 called for `transform`, `none` and the best lead from macOS (`predict1`); at the user's request `predict2` was also measured. The order was `transform`, `none`, `predict1`, then the same again, then `predict2` twice. The viewport was 430 px wide, so the fling started at 430 px/s, reached 1,324 px/s after 13.6 ms and stopped after 430 px.
+
+| Phase | Mode | Drawn error p50 / p95 / max | Mean offset along the pan | Map fps |
+| --- | --- | --- | --- | --- |
+| pan 100 px/s | `transform` | 0.83 / 1.67 / 2.5–2.51 | 0.83 | 110.8–111.7 |
+| pan 100 px/s | `none` | 1.67 / 2.5 / 4.17–5 | −1.65 to −1.6 | 108.0–108.4 |
+| pan 100 px/s | `predict1` | 0.83 / 1.67 / 4.17 | −0.85 to −0.74 | 108.8–110.3 |
+| pan 100 px/s | `predict2` | 0 / 0.84 / 4.16–4.17 | 0.08–0.13 | 109.8–111.7 |
+| pan 500 px/s | `transform` | 4.17 / 8.35 / 12.53–12.54 | 4.04–4.16 | 108.6–109.3 |
+| pan 500 px/s | `none` | 8.33 / 12.51 / 16.68–16.69 | −7.98 to −7.46 | 107.0–108.5 |
+| pan 500 px/s | `predict1` | 4.17 / 8.34–8.35 / 12.52–12.53 | −3.77 to −3.71 | 109.2–110.1 |
+| pan 500 px/s | `predict2` | 0.01 / 4.19 / 13.98–14.09 | 0.32–0.49 | 109.9–110.5 |
+| pan 1,000 px/s | `transform` | 8.33 / 16.7 / 25.05–25.06 | 8.28–8.53 | 106.7–107.2 |
+| pan 1,000 px/s | `none` | 16.67 / 25.02 / 25.08–33.37 | −16.45 to −15.55 | 107.2–107.4 |
+| pan 1,000 px/s | `predict1` | 8.33 / 16.69 / 25.03–32.17 | −7.93 to −7.86 | 106.7–107.9 |
+| pan 1,000 px/s | `predict2` | 0.02 / 8.37 / 33.7–36.41 | 0.35–0.58 | 107.3–109.0 |
+| pan 2,000 px/s | `transform` | 16.67 / 33.39–33.4 / 50.12–50.14 | 16.87–16.97 | 108.5–109.0 |
+| pan 2,000 px/s | `none` | 33.33 / 50.05–50.06 / 66.74–66.78 | −31.78 to −30.19 | 106.9–109.2 |
+| pan 2,000 px/s | `predict1` | 16.67 / 33.39 / 61.53–62.78 | −16.37 to −14.85 | 107.8–108.5 |
+| pan 2,000 px/s | `predict2` | 0.05 / 16.74–16.75 / 64.06–80.7 | 1.08–2.32 | 109.0–109.5 |
+| zoom 1 level/s | `transform` | 2.96 / 5.96–5.98 / 8.99 | — | 102.5–103.5 |
+| zoom 1 level/s | `none` | 2.98–2.99 / 8.97 / 14.6–14.62 | — | 102.7–103.2 |
+| zoom 1 level/s | `predict1` | 0.02 / 5.96 / 11.71–11.92 | — | 102.8–103.3 |
+| zoom 1 level/s | `predict2` | 2.95–2.96 / 2.99 / 11.17–13.54 | — | 102.8–104.2 |
+| rotate 90°/s | `transform` | 6.72 / 13.46 / 20.19 | — | 102.5–102.8 |
+| rotate 90°/s | `none` | 13.44 / 20.18 / 26.89–26.9 | — | 103.6 |
+| rotate 90°/s | `predict1` | 6.72 / 13.47 / 20.16–20.18 | — | 101.8–103.7 |
+| rotate 90°/s | `predict2` | 0.02 / 6.75 / 13.45–13.46 | — | 103.2–104.3 |
+
+| Phase | Mode | Changes | Overshoot ahead p50 / p95 / max | Overshoot p50 / p95 / max | Drawn error p50 / p95 / max | Map fps |
+| --- | --- | --- | --- | --- | --- | --- |
+| stop | `transform` | 10 | 8.34–8.35 / 16.7–16.71 / 16.7–16.71 | 8.34–8.35 / 16.7–16.71 / 16.7–16.71 | 0 / 16.68 / 25.04–25.05 | 84.7–85.5 |
+| stop | `none` | 10 | 0 / 0 / 0 | 14.67–14.71 / 16.49–22.58 / 16.49–22.58 | 2.67–3.16 / 25.02–25.03 / 41.68–41.7 | 83.3–85.0 |
+| stop | `predict1` | 10 | 6.69–6.9 / 7.99–8.03 / 7.99–8.03 | 7.12–7.36 / 8.18–16.01 / 8.18–16.01 | 0.01–0.03 / 16.7 / 41.68–41.7 | 83.0–84.3 |
+| stop | `predict2` | 10 | 14.67–14.7 / 16.5–16.52 / 16.5–16.52 | 14.67–14.7 / 16.5–16.52 / 16.5–16.52 | 0 / 8.37 / 41.71–41.74 | 81.8–85.9 |
+| fling | `transform` | 10 | 21.2–21.25 / 30.68–31.23 / 30.68–31.23 | 21.2–21.25 / 30.68–31.23 / 30.68–31.23 | 1.11–1.15 / 16.65 / 30.68–31.23 | 105.1–105.8 |
+| fling | `none` | 10 | 0 / 0 / 0 | 21.79–31.86 / 32.47 / 32.47 | 4.16–4.63 / 19.63–25.01 / 33.39–41.69 | 106.2–107.6 |
+| fling | `predict1` | 10 | 0.12 / 0.43–0.46 / 0.43–0.46 | 21.38 / 24.3–24.31 / 24.3–24.31 | 1.67–1.94 / 16.67–16.68 / 32.67–33.32 | 104.2–106.2 |
+| fling | `predict2` | 10 | 4.04–5.49 / 11.04–11.32 / 11.04–11.32 | 11.32–13.06 / 16.29–24.93 / 16.29–24.93 | 0.04 / 8.36 / 33.34–33.35 | 104.5–105.4 |
+| reverse | `transform` | 19 | 8.34–12.77 / 16.71 / 16.72–25.01 | 16.73–25 / 25.04 / 25.04 | 8.33 / 16.7 / 25.05–25.09 | 107.5–108.5 |
+| reverse | `none` | 19 | 25.03–25.06 / 25.06–25.09 / 25.07–25.1 | 25.03–25.06 / 25.06–25.09 / 25.07–25.1 | 16.67 / 25–25.04 / 33.31–33.36 | 107.9–108.0 |
+| reverse | `predict1` | 19 | 22.33–22.58 / 24.59–25.06 / 25.22–30.59 | 22.33–22.58 / 24.59–25.06 / 25.22–30.59 | 8.34 / 16.71 / 25.22–30.59 | 107.2–107.8 |
+| reverse | `predict2` | 19 | 27.99–29.31 / 36.41–38.31 / 38.91–39.93 | 27.99–29.31 / 36.41–38.31 / 38.91–39.93 | 0.02 / 8.38 / 38.91–39.93 | 106.9–109.0 |
+
+Where the two runs agree, the tables give one value; otherwise they give the range.
+
+- Unlike on macOS, `predict2` was closest to the overlays on the iPhone. In pan1000 its drawn error was 0.02 / 8.37 px (p50 / p95), and its mean offset along the pan was +0.35 to +0.58 px. `predict1` stayed about one frame behind, at −7.9 px, and its p50 of 8.33 px equaled the transform's.
+- `predict2` was ahead after stops (14.7 px at p50), flings (4.0 to 5.5 px) and reversals (28 to 29 px).
+- The transform's fling overshoot ahead was 21.2 px at p50, against 50 px on macOS, because the iPhone's fling is slower.
+- The map frame rate didn't depend on the mode.
+
+Conditions: the Setup's iPhone, OS, Xcode and Flutter versions and style; MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6329b58e77e3`; copy-free rendering. The phone was connected over Wi-Fi. Full screen, portrait, 430x932 logical pixels at pixel ratio 3; all 72 result lines reported a 430x932 viewport. Auto-Lock was off, and the app was launched with `MLT_KEEP_AWAKE=1`. The thermal state was nominal at the start of the `transform`, `none` and `predict1` runs, and at the end of each of their phases, except the fling and reverse phases of the second `predict1` run, which ended at fair. Both `predict2` runs started right after it and were at fair at their start and at the end of every phase. Their map frame rates matched the other modes. Each phase included 2,405 to 3,651 Flutter frames. Every build was matched to a frame timing and had a displayed map frame, and no display time fell outside a raster interval. Between 5 and 81 frames per phase were rasterized without a build.
+
+Procedure: as for `benchmark.dart` (Setup), with `--dart-define=ALIGNMENT_BENCHMARK=true --dart-define=ALIGNMENT_MODE=<mode>` in the iOS build.
+
 ## No CPU readback on the frame path
 
 ### macOS (Stage 1, task 7.3)

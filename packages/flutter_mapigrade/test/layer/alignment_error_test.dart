@@ -84,4 +84,21 @@ void main() {
           lessThan(1e-6));
     }
   });
+
+  test(
+    'the center offsets point where the map draws the center coordinate',
+    () {
+      // The shown frame is 10 px west of C, so it draws C's center coordinate
+      // 10 px east of the center. The transform shifts it by 30 px westwards.
+      final error = alignmentError(
+        target: panned(0),
+        used: panned(-30),
+        shown: panned(-10),
+      );
+      expect(error.centerWithoutTransform.dx, closeTo(10, 1e-6));
+      expect(error.centerWithoutTransform.dy, closeTo(0, 1e-6));
+      expect(error.centerWithTransform.dx, closeTo(-20, 1e-6));
+      expect(error.centerWithTransform.dy, closeTo(0, 1e-6));
+    },
+  );
 }

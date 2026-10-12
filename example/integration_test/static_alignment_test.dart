@@ -116,80 +116,86 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
-  for (final c in cases) {
-    testWidgets('alignment at rest: ${c.name}', (tester) async {
-      final camera = fm.MapCamera(
-        crs: const fm.Epsg3857(),
-        center: c.center,
-        zoom: c.zoom,
-        rotation: c.rotation,
-        nonRotatedSize: c.finalSize,
-      );
-      final point = c.point ?? camera.screenOffsetToLatLng(c.pointAt);
-      final style = styleWithPoint(point);
+  for (final (mode, prediction) in const [
+    ('', null),
+    (', prediction 2', 2.0),
+  ]) {
+    for (final c in cases) {
+      testWidgets('alignment at rest: ${c.name}$mode', (tester) async {
+        final camera = fm.MapCamera(
+          crs: const fm.Epsg3857(),
+          center: c.center,
+          zoom: c.zoom,
+          rotation: c.rotation,
+          nonRotatedSize: c.finalSize,
+        );
+        final point = c.point ?? camera.screenOffsetToLatLng(c.pointAt);
+        final style = styleWithPoint(point);
 
-      final boundaryKey = GlobalKey();
-      MapTextureController? controller;
-      Widget app(Size size, {required bool overlay}) => MaterialApp(
-        home: Align(
-          alignment: Alignment.topLeft,
-          child: RepaintBoundary(
-            key: boundaryKey,
-            child: SizedBox.fromSize(
-              size: size,
-              child: fm.FlutterMap(
-                options: fm.MapOptions(
-                  initialCenter: c.center,
-                  initialZoom: c.zoom,
-                  initialRotation: c.rotation,
-                ),
-                children: [
-                  MapLibreTextureLayer(
-                    styleJson: style,
-                    onController: (x) => controller = x,
+        final boundaryKey = GlobalKey();
+        MapTextureController? controller;
+        Widget app(Size size, {required bool overlay}) => MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: RepaintBoundary(
+              key: boundaryKey,
+              child: SizedBox.fromSize(
+                size: size,
+                child: fm.FlutterMap(
+                  options: fm.MapOptions(
+                    initialCenter: c.center,
+                    initialZoom: c.zoom,
+                    initialRotation: c.rotation,
                   ),
-                  if (overlay)
-                    fm.CircleLayer(
-                      circles: [
-                        fm.CircleMarker(
-                          point: point,
-                          radius: radius,
-                          color: const Color(0xff0000ff),
-                        ),
-                      ],
+                  children: [
+                    MapLibreTextureLayer(
+                      styleJson: style,
+                      cameraPrediction: prediction,
+                      onController: (x) => controller = x,
                     ),
-                ],
+                    if (overlay)
+                      fm.CircleLayer(
+                        circles: [
+                          fm.CircleMarker(
+                            point: point,
+                            radius: radius,
+                            color: const Color(0xff0000ff),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      await tester.pumpWidget(app(c.size, overlay: false));
-      final idle = controller!.events
-          .firstWhere((e) => e is MapIdle)
-          .timeout(const Duration(seconds: 20));
-      if (c.resizeTo != null) {
-        await controller!.frames.first.timeout(const Duration(seconds: 20));
-        await tester.pumpWidget(app(c.finalSize, overlay: false));
-      }
-      await idle;
-      await _waitForDisplayedCamera(tester, controller!, camera, c.finalSize);
+        await tester.pumpWidget(app(c.size, overlay: false));
+        final idle = controller!.events
+            .firstWhere((e) => e is MapIdle)
+            .timeout(const Duration(seconds: 20));
+        if (c.resizeTo != null) {
+          await controller!.frames.first.timeout(const Duration(seconds: 20));
+          await tester.pumpWidget(app(c.finalSize, overlay: false));
+        }
+        await idle;
+        await _waitForDisplayedCamera(tester, controller!, camera, c.finalSize);
 
-      final green = await _centroid(boundaryKey, _isGreen);
-      await tester.pumpWidget(app(c.finalSize, overlay: true));
-      await tester.pump();
-      final blue = await _centroid(boundaryKey, _isBlue);
+        final green = await _centroid(boundaryKey, _isGreen);
+        await tester.pumpWidget(app(c.finalSize, overlay: true));
+        await tester.pump();
+        final blue = await _centroid(boundaryKey, _isBlue);
 
-      expect(green, isNotNull, reason: 'no style circle in the capture');
-      expect(blue, isNotNull, reason: 'no overlay circle in the capture');
-      final distance = (green! - blue!).distance;
-      debugPrint(
-        'ALIGNMENT ${c.name}: style $green, overlay $blue, '
-        'distance ${distance.toStringAsFixed(3)} logical px',
-      );
-      expect(distance, lessThanOrEqualTo(1.0));
-    });
+        expect(green, isNotNull, reason: 'no style circle in the capture');
+        expect(blue, isNotNull, reason: 'no overlay circle in the capture');
+        final distance = (green! - blue!).distance;
+        debugPrint(
+          'ALIGNMENT ${c.name}$mode: style $green, overlay $blue, '
+          'distance ${distance.toStringAsFixed(3)} logical px',
+        );
+        expect(distance, lessThanOrEqualTo(1.0));
+      });
+    }
   }
 }
 

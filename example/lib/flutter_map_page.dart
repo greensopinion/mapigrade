@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'alignment_mode.dart';
 import 'benchmark.dart' show copyFree;
 
 const flutterMapPageAtLaunch = bool.fromEnvironment('FLUTTER_MAP_PAGE');
@@ -30,6 +31,7 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
   final _mapController = MapController();
   String _camera = '';
   FrameCamera? _frame;
+  AlignmentMode _mode = AlignmentMode.transform;
 
   void _onController(MapTextureController controller) {
     controller.frames.listen((f) {
@@ -63,6 +65,8 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
               MapLibreTextureLayer(
                 styleUrl: widget.styleUrl,
                 copyFree: copyFree,
+                compensatingTransform: _mode.compensatingTransform,
+                cameraPrediction: _mode.cameraPrediction,
                 onController: _onController,
               ),
               PolylineLayer(
@@ -124,6 +128,22 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
                             onPressed: () => _mapController.rotate(0),
                           ),
                         ],
+                      ),
+                      SegmentedButton<AlignmentMode>(
+                        key: const Key('flutter-map-mode'),
+                        showSelectedIcon: false,
+                        segments: [
+                          for (final mode in const [
+                            AlignmentMode.transform,
+                            AlignmentMode.none,
+                            AlignmentMode.predict1,
+                            AlignmentMode.predict2,
+                          ])
+                            ButtonSegment(value: mode, label: Text(mode.label)),
+                        ],
+                        selected: {_mode},
+                        onSelectionChanged: (s) =>
+                            setState(() => _mode = s.single),
                       ),
                       Text('flutter_map: $_camera'),
                       Text(

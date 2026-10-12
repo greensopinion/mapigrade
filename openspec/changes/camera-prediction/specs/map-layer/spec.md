@@ -48,7 +48,7 @@ Unless the layer is configured without the compensating transform, while the cam
 - **THEN** the displayed map frame is drawn where the layer is, without a transform, and no strips are uncovered at the viewport edges
 
 ### Requirement: Alignment measurement
-The system SHALL provide a measurement mode that records, for each Flutter frame during camera changes, the map frame whose camera the transform used, the map frame that Flutter displayed, and the `flutter_map` camera. From these it SHALL compute the alignment error in logical pixels, the largest distance at the viewport corners and center between where the displayed map frame draws a coordinate and where the overlays draw it, both with the transform and without it. The measurement mode SHALL run with the layer configured as the default, without the transform, or with camera prediction at a stated lead, and SHALL report the configuration. It SHALL include phases in which the pan stops abruptly, decelerates as a `flutter_map` fling does, and reverses direction, and for these SHALL report the overshoot: the largest alignment error of the drawn map from the moment the camera's motion changes (an abrupt stop, the start of a deceleration, or a reversal) until half a second after the camera is at rest or moves at constant speed again.
+The system SHALL provide a measurement mode that records, for each Flutter frame during camera changes, the map frame whose camera the transform used, the map frame that Flutter displayed, and the `flutter_map` camera. From these it SHALL compute the alignment error in logical pixels, the largest distance at the viewport corners and center between where the displayed map frame draws a coordinate and where the overlays draw it, both with the transform and without it. The measurement mode SHALL run with the layer configured as the default, without the transform, or with camera prediction at a stated lead, and SHALL report the configuration. It SHALL include phases in which the pan stops abruptly, decelerates as a `flutter_map` fling does, and reverses direction, and for these SHALL report the overshoot: the largest alignment error of the drawn map from the moment the camera's motion changes (an abrupt stop, the start of a deceleration, or a reversal) until half a second after the camera is at rest or moves at constant speed again, and the overshoot ahead: over the same time, the largest distance at the viewport center by which the drawn map is ahead of the overlays in the direction of motion before the change, or 0 if it isn't ahead.
 
 #### Scenario: Pan at a stated speed
 - **WHEN** the alignment benchmark pans at a constant stated speed in logical pixels per second
@@ -56,8 +56,8 @@ The system SHALL provide a measurement mode that records, for each Flutter frame
 
 #### Scenario: Pan that stops
 - **WHEN** the alignment benchmark pans at 1,000 logical px/s and stops abruptly, or decelerates to rest as a `flutter_map` fling does
-- **THEN** the report states the layer configuration and the overshoot of each stop, as p50 and largest over the stops in the phase
+- **THEN** the report states the layer configuration, and the overshoot and the overshoot ahead of each stop, as p50 and largest over the stops in the phase
 
 #### Scenario: Pan that reverses
 - **WHEN** the alignment benchmark pans at 1,000 logical px/s and reverses direction abruptly
-- **THEN** the report states the layer configuration and the overshoot after each reversal, as p50 and largest over the reversals in the phase
+- **THEN** the report states the layer configuration, and the overshoot and the overshoot ahead after each reversal, as p50 and largest over the reversals in the phase

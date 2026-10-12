@@ -78,7 +78,8 @@ Send MapLibre the camera that `flutter_map` is expected to have when the map fra
 - Offset: during steady pans, rotations and zooms, close to 0 if the prediction matches the lag. When the gesture accelerates, stops or reverses, the prediction is wrong for a few frames, and the map overshoots and returns.
 - Strips: depend on whether the transform stays, and how far it then moves the frame.
 - Work: small. The alignment benchmark measures the result directly.
-- Not measured. The lag varies between frames (about 79% of frames show a newer map frame than expected), so the achievable error is unknown until measured.
+- Measured (camera-prediction change, 2026-10-11), without the transform, with leads of 1 to 3 refresh intervals. With a lead of 1, pans at 1,000 px/s had a p50 error of 0 or 8.33 px on the Mac and 8.33 px on the iPhone, with the map lagging by 4.2–7.9 px on average and no strips; after abrupt stops and reversals the map ran ahead by 7–8 px and 22–25 px. A lead of 2 had a p50 error of 0.02 px on the iPhone but felt worse in a manual check. In the manual check on both devices a lead of 1 felt best; the overlays floated only while a fling decelerated.
+- Decision (2026-10-11): make a lead of 1 the default, in a separate change. Results in `benchmarks.md`; the decision in the camera-prediction change's design.
 
 ### 6. One Flutter texture per display buffer
 
@@ -107,6 +108,6 @@ MapLibre handles gestures and camera animation, and the Flutter overlays follow 
 | 2. Overscan | unchanged | covered up to the margin | none | moderate | no |
 | 3. No transform | 16.7 px | none | none | removes code | yes |
 | 4. Overlays follow the texture | 8.33 px alone; close to 0 with 6 | none | 1–2 frames | small | no |
-| 5. Predict the camera | unknown; close to 0 in steady motion | depends | none | small | no |
+| 5. Predict the camera | lead 1: 0 or 8.33 px (Mac), 8.33 px (iPhone); 4.2–7.9 px behind on average | none | none | small | yes |
 | 6. One texture per buffer | expected close to 0 | wider than now; needs 2 | none | large | no |
 | 7. Model B | depends | depends | depends | very large | no |

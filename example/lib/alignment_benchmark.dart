@@ -10,13 +10,33 @@
 // Shows the map as the base layer of a FlutterMap over central London, warms
 // up the tile cache, then runs each phase: pans at 100, 500, 1,000 and 2,000
 // logical px/s, zoom at 1 level per second, rotation at 90 degrees per
-// second. The camera moves through the MapController on every Flutter frame,
+// second, and the motions of design D35 of the camera-prediction change:
+// `stop` (pan for 1 s, rest for 1 s), `fling` (pan for 1 s, then
+// flutter_map's fling, in 3 s cycles, over 1.5 times the phase duration) and
+// `reverse` (reversing every 1 s), at 1,000 px/s. For these, the result line
+// gives `motion_changes` and `overshoot_px`, the p50 and largest over the
+// motion changes of the largest drawn error in each change's window, and
+// `overshoot_ahead_px`, the same for the largest distance at the viewport
+// center by which the map is ahead of the overlays in the direction of
+// motion before the change (0 if it isn't ahead). The
+// camera moves through the MapController on every Flutter frame,
 // as a gesture would. Each phase prints one line starting with
 // ALIGNMENT_RESULT; then the app exits.
 //
 // `--dart-define=ALIGNMENT_PHASE_S=<seconds>` sets the phase duration
 // (default 20), `--dart-define=ALIGNMENT_PHASES=pan100,zoom` runs only the
 // named phases.
+//
+// `--dart-define=ALIGNMENT_MODE=<mode>` configures the layer (design D34 of
+// the camera-prediction change): `transform` (the default), `none` (no
+// transform, no prediction), or `predict1`, `predict2`, `predict3` (camera
+// prediction with a lead of that many refresh intervals). Each result line
+// states the mode and gives `error_drawn_px`, the error of what the layer
+// draws: with the transform in `transform` mode, without it otherwise. Pan
+// phases also give `offset_along_pan_px`, the mean signed distance at the
+// viewport center between the drawn map and the overlays along the pan:
+// positive when the map shows the camera further along the pan than the
+// overlays, negative when it lags behind them.
 //
 // `--dart-define=ALIGNMENT_VIDEO=true` is the screen capture check (design
 // D29): a JSON style draws a grid of red discs, a CircleLayer draws a blue
@@ -37,6 +57,8 @@ import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/testing.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'alignment_mode.dart';
+import 'alignment_motion.dart';
 import 'benchmark.dart' show copyFree, start;
 
 const alignmentBenchmarkEnabled = bool.fromEnvironment('ALIGNMENT_BENCHMARK');
@@ -45,6 +67,13 @@ const alignmentPhaseDuration = Duration(
 );
 const alignmentPhases = String.fromEnvironment('ALIGNMENT_PHASES');
 const alignmentVideo = bool.fromEnvironment('ALIGNMENT_VIDEO');
+const alignmentModeName = String.fromEnvironment(
+  'ALIGNMENT_MODE',
+  defaultValue: 'transform',
+);
+
+/// The layer configuration, or null if ALIGNMENT_MODE names none.
+final alignmentMode = AlignmentMode.byLabel(alignmentModeName);
 
 /// The flutter_map version in pubspec.yaml, for the result lines.
 const flutterMapVersion = '8.3.2';
@@ -63,7 +92,14 @@ const panPathPx = 3000.0;
 /// One phase of the benchmark: the camera as a function of the time since
 /// the phase started.
 class Phase {
-  const Phase(this.name, this.kind, this.speed, this.camera, {this.duration});
+  const Phase(
+    this.name,
+    this.kind,
+    this.speed,
+    this.camera, {
+    this.duration,
+    this.changes,
+  });
   final String name;
   final String kind;
 
@@ -74,6 +110,10 @@ class Phase {
   final double speed;
   final ({LatLng center, double zoom, double rotation}) Function(double t)
   camera;
+
+  /// The motion changes whose windows end within a phase of the given
+  /// duration in seconds, for the phases that report overshoot.
+  final List<MotionChange> Function(double duration)? changes;
 }
 
 /// A triangle wave from 0 up to [amplitude] and back, moving at [speed].
@@ -82,19 +122,47 @@ double triangle(double t, double speed, double amplitude) {
   return d <= amplitude ? d : 2 * amplitude - d;
 }
 
-Phase pan(double pxPerSecond) =>
-    Phase('pan${pxPerSecond.round()}', 'pan', pxPerSecond, (t) {
-      final pxPerDegree = 256 * math.pow(2, startZoom) / 360;
-      final east = triangle(t, pxPerSecond, panPathPx);
-      return (
-        center: LatLng(
-          startCenter.latitude,
-          startCenter.longitude + east / pxPerDegree,
-        ),
-        zoom: startZoom,
-        rotation: 0.0,
-      );
-    });
+/// The camera [east] logical pixels east of the start, on the pan path.
+({LatLng center, double zoom, double rotation}) panCamera(double east) {
+  final pxPerDegree = 256 * math.pow(2, startZoom) / 360;
+  return (
+    center: LatLng(
+      startCenter.latitude,
+      startCenter.longitude + east / pxPerDegree,
+    ),
+    zoom: startZoom,
+    rotation: 0.0,
+  );
+}
+
+Phase pan(double pxPerSecond) => Phase(
+  'pan${pxPerSecond.round()}',
+  'pan',
+  pxPerSecond,
+  (t) => panCamera(triangle(t, pxPerSecond, panPathPx)),
+);
+
+/// The phases with motion changes, for a viewport whose shorter side is
+/// [shorterSide] logical pixels, which a fling covers.
+List<Phase> motionPhases(double shorterSide) {
+  Phase phase(String name, Motion motion, {Duration? duration}) => Phase(
+    name,
+    name,
+    motionSpeed,
+    (t) => panCamera(motion.east(t)),
+    duration: duration,
+    changes: motion.changes,
+  );
+  return [
+    phase('stop', stopMotion()),
+    phase(
+      'fling',
+      flingMotion(Fling(shorterSide)),
+      duration: alignmentPhaseDuration * 1.5,
+    ),
+    phase('reverse', reverseMotion()),
+  ];
+}
 
 final phases = [
   pan(100),
@@ -191,6 +259,7 @@ class AlignmentBenchmarkPage extends StatefulWidget {
 
 class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
   final _mapController = MapController();
+  final _mode = alignmentMode ?? AlignmentMode.transform;
 
   void _onController(MapTextureController controller) {
     // Start after the first build, when the MapController is attached.
@@ -212,6 +281,8 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
         MapLibreTextureLayer(
           styleJson: videoStyle(),
           copyFree: copyFree,
+          compensatingTransform: _mode.compensatingTransform,
+          cameraPrediction: _mode.cameraPrediction,
           onController: _onController,
         ),
         CircleLayer(
@@ -224,6 +295,8 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
         MapLibreTextureLayer(
           styleUrl: libertyStyleUrl,
           copyFree: copyFree,
+          compensatingTransform: _mode.compensatingTransform,
+          cameraPrediction: _mode.cameraPrediction,
           onController: _onController,
         ),
         MarkerLayer(
@@ -246,12 +319,29 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
   );
 }
 
+/// The p50, p95 and largest of [values], rounded to 0.01, or null if
+/// [values] is empty. Sorts [values].
+Map<String, double>? percentiles(List<double> values) {
+  if (values.isEmpty) return null;
+  values.sort();
+  double p(double q) => values[((values.length - 1) * q).round()];
+  double r(double v) => (v * 100).round() / 100;
+  return {'p50': r(p(0.5)), 'p95': r(p(0.95)), 'max': r(p(1))};
+}
+
 /// What the layer used in one Flutter frame build.
 class _Build {
-  const _Build(this.target, this.usedId, this.used);
+  const _Build(this.target, this.usedId, this.used, this.time, this.east);
   final ViewCamera target;
   final int? usedId;
   final ViewCamera? used;
+
+  /// The frame's vsync target time since the phase started, in seconds.
+  final double time;
+
+  /// The sign of the target's longitude change since the previous build:
+  /// 1 eastwards, -1 westwards, 0 unchanged.
+  final double east;
 }
 
 /// A map frame that Flutter took for display.
@@ -271,6 +361,15 @@ class AlignmentRecorder {
   /// until it takes a newer one.
   final DisplayedMapFrame? initiallyShown;
   final builds = <int, _Build>{};
+
+  /// The vsync target time of the phase's first frame.
+  Duration? start;
+
+  /// The target of the last recorded build.
+  ViewCamera? lastTarget;
+
+  /// The per-frame drawn errors from the last [analyze].
+  final frameErrors = <FrameError>[];
   final timings = <FrameTiming>[];
   final displays = <DisplayedMapFrame>[];
   bool recording = false;
@@ -278,7 +377,11 @@ class AlignmentRecorder {
 
   /// Matches the records and computes the error of every Flutter frame that
   /// showed a map frame.
-  Map<String, Object?> analyze(Duration duration) {
+  Map<String, Object?> analyze(
+    Duration duration, {
+    required bool transformDrawn,
+    required bool pan,
+  }) {
     final sorted = [...timings]
       ..sort((a, b) => a.frameNumber.compareTo(b.frameNumber));
     final events = [...displays]..sort((a, b) => a.time.compareTo(b.time));
@@ -292,6 +395,9 @@ class AlignmentRecorder {
     var mismatched = 0;
     final withT = <double>[];
     final withoutT = <double>[];
+    final drawn = <double>[];
+    final alongPan = <double>[];
+    frameErrors.clear();
     final timingNumbers = <int>{};
     for (final t in sorted) {
       timingNumbers.add(t.frameNumber);
@@ -325,18 +431,25 @@ class AlignmentRecorder {
       );
       withT.add(error.withTransform);
       withoutT.add(error.withoutTransform);
+      final drawnError = transformDrawn
+          ? error.withTransform
+          : error.withoutTransform;
+      drawn.add(drawnError);
+      final center = transformDrawn
+          ? error.centerWithTransform
+          : error.centerWithoutTransform;
+      frameErrors.add((
+        time: lastBuild.time,
+        error: drawnError,
+        centerDx: center.dx,
+      ));
+      // The pans move east or west at bearing 0. A map behind the overlays
+      // draws their center coordinate on the side the camera moves to.
+      if (pan && lastBuild.east != 0) alongPan.add(-center.dx * lastBuild.east);
     }
     final buildsWithoutTiming = builds.keys
         .where((n) => !timingNumbers.contains(n))
         .length;
-
-    Map<String, double>? percentiles(List<double> values) {
-      if (values.isEmpty) return null;
-      values.sort();
-      double p(double q) => values[((values.length - 1) * q).round()];
-      double r(double v) => (v * 100).round() / 100;
-      return {'p50': r(p(0.5)), 'p95': r(p(0.95)), 'max': r(p(1))};
-    }
 
     final frames = withT.length;
     return {
@@ -354,6 +467,13 @@ class AlignmentRecorder {
       'display_events_outside_raster': displaysOutsideRaster,
       'error_with_transform_px': percentiles(withT),
       'error_without_transform_px': percentiles(withoutT),
+      'error_drawn_px': percentiles(drawn),
+      if (pan)
+        'offset_along_pan_px': alongPan.isEmpty
+            ? null
+            : (alongPan.reduce((a, b) => a + b) / alongPan.length * 100)
+                      .round() /
+                  100,
     };
   }
 }
@@ -366,6 +486,15 @@ class AlignmentBenchmark {
   AlignmentRecorder? _recorder;
 
   Future<void> run() async {
+    if (alignmentMode == null) {
+      stderr.writeln(
+        'ALIGNMENT_MODE=$alignmentModeName is not one of '
+        '${AlignmentMode.values.map((m) => m.label).join(', ')}',
+      );
+      await stderr.flush();
+      exit(2);
+    }
+    final mode = alignmentMode!;
     controller.frames.listen((f) {
       final r = _recorder;
       if (r != null && r.recording) {
@@ -384,23 +513,36 @@ class AlignmentBenchmark {
       final r = _recorder;
       if (r == null || !r.recording) return;
       final used = controller.displayedFrame;
+      final target = viewCameraOf(mapController.camera);
+      final now = SchedulerBinding.instance.currentSystemFrameTimeStamp;
+      final start = r.start ??= now;
+      final previous = r.lastTarget;
+      r.lastTarget = target;
       r.builds[PlatformDispatcher.instance.frameData.frameNumber] = _Build(
-        viewCameraOf(mapController.camera),
+        target,
         used?.frameId,
         used == null ? null : ViewCamera.ofFrame(used),
+        (now - start).inMicroseconds / 1e6,
+        previous == null
+            ? 0
+            : _wrapDegrees(target.camera.longitude - previous.camera.longitude)
+                  .sign,
       );
     });
 
     final selected = alignmentVideo
         ? videoPhases
         : [
-            for (final p in phases)
+            for (final p in [
+              ...phases,
+              ...motionPhases(mapController.camera.nonRotatedSize.shortestSide),
+            ])
               if (alignmentPhases.isEmpty ||
                   alignmentPhases.split(',').contains(p.name))
                 p,
           ];
     stdout.writeln(
-      'ALIGNMENT_CONDITIONS ${jsonEncode({'platform': Platform.operatingSystem, 'flutter_map': flutterMapVersion, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
+      'ALIGNMENT_CONDITIONS ${jsonEncode({'mode': mode.label, 'platform': Platform.operatingSystem, 'flutter_map': flutterMapVersion, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
           '${mapController.camera.nonRotatedSize.height.round()}', 'phase_s': alignmentPhaseDuration.inSeconds, 'copy_free': copyFree, 'thermal_state': thermalStateForTesting()})}',
     );
 
@@ -435,14 +577,38 @@ class AlignmentBenchmark {
       await Future<void>.delayed(const Duration(milliseconds: 1500));
       recorder.collectingTimings = false;
       _recorder = null;
+      final result = recorder.analyze(
+        duration,
+        transformDrawn: mode == AlignmentMode.transform,
+        pan: phase.kind == 'pan',
+      );
+      final changes = phase.changes?.call(duration.inMicroseconds / 1e6);
+      final overshoot = changes == null
+          ? null
+          : overshoots(recorder.frameErrors, changes);
+      final ahead = changes == null
+          ? null
+          : overshootsAhead(recorder.frameErrors, changes);
       stdout.writeln(
-        'ALIGNMENT_RESULT ${jsonEncode({'phase': phase.name, 'kind': phase.kind, 'speed': phase.speed, 'speed_unit': switch (phase.kind) {
-          'pan' => 'logical px/s',
-          'zoom' => 'zoom levels/s',
-          'rotate' => 'degrees/s',
-          _ => 'none',
-        }, 'duration_s': duration.inMicroseconds / 1e6, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
-            '${mapController.camera.nonRotatedSize.height.round()}', ...recorder.analyze(duration), 'thermal_state_end': thermalStateForTesting()})}',
+        'ALIGNMENT_RESULT ${jsonEncode({
+          'mode': mode.label,
+          'phase': phase.name,
+          'kind': phase.kind,
+          'speed': phase.speed,
+          'speed_unit': switch (phase.kind) {
+            'pan' => 'logical px/s',
+            'zoom' => 'zoom levels/s',
+            'rotate' => 'degrees/s',
+            'stop' || 'fling' || 'reverse' => 'logical px/s',
+            _ => 'none',
+          },
+          'duration_s': duration.inMicroseconds / 1e6,
+          'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
+              '${mapController.camera.nonRotatedSize.height.round()}',
+          ...result,
+          if (overshoot != null) ...{'motion_changes': overshoot.length, 'overshoot_px': percentiles(overshoot), 'overshoot_ahead_px': percentiles(ahead!)},
+          'thermal_state_end': thermalStateForTesting(),
+        })}',
       );
     }
     await stdout.flush();
@@ -471,6 +637,10 @@ class AlignmentBenchmark {
     Duration? first;
     void tick(Duration timestamp) {
       first ??= timestamp;
+      // The phase's time 0, in the clock of the recorded builds; frame
+      // callbacks get the timestamp relative to an epoch instead.
+      _recorder?.start ??=
+          SchedulerBinding.instance.currentSystemFrameTimeStamp;
       final elapsed = timestamp - first!;
       _moveTo(phase.camera(elapsed.inMicroseconds / 1e6));
       if (elapsed < duration) {
@@ -483,6 +653,9 @@ class AlignmentBenchmark {
     SchedulerBinding.instance.scheduleFrameCallback(tick);
     return done.future;
   }
+
+  /// [degrees] moved into [-180, 180) by whole turns.
+  static double _wrapDegrees(double degrees) => (degrees + 180) % 360 - 180;
 
   Future<void> _waitForIdle(Duration timeout) => controller.events
       .firstWhere((e) => e is MapIdle)
