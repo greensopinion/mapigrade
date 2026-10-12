@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -24,6 +25,9 @@ int64_t next_handle = 1;
 // Whether rendering is paused for the whole process; guarded by
 // registry_mutex.
 bool all_paused = false;
+// The maximum size in bytes of the tile cache for maps created next, or -1 if
+// Dart hasn't set one; guarded by registry_mutex (design D61).
+int64_t maximum_cache_size = -1;
 
 std::shared_ptr<MapTexture> Find(int64_t handle) {
   std::lock_guard lock(registry_mutex);
@@ -63,12 +67,14 @@ int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
                            map_texture_event_callback callback) {
   if (callback == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   int64_t handle;
+  std::optional<uint64_t> cache_size;
   {
     std::lock_guard lock(registry_mutex);
     handle = next_handle++;
+    if (maximum_cache_size >= 0) cache_size = maximum_cache_size;
   }
-  auto texture =
-      MapTexture::Create(handle, pixel_ratio, copy_free != 0, callback);
+  auto texture = MapTexture::Create(handle, pixel_ratio, copy_free != 0,
+                                    cache_size, callback);
   if (!texture) return MAP_TEXTURE_ERROR_CREATE_FAILED;
   std::lock_guard lock(registry_mutex);
   // The map can't have rendered yet: its render session is attached by the
@@ -76,6 +82,13 @@ int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
   if (all_paused) texture->SetPaused(true);
   Registry()[handle] = std::move(texture);
   return handle;
+}
+
+int32_t map_texture_set_maximum_cache_size(int64_t bytes) {
+  if (bytes < 0) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  std::lock_guard lock(registry_mutex);
+  maximum_cache_size = bytes;
+  return MAP_TEXTURE_OK;
 }
 
 int64_t map_texture_texture_id(int64_t handle) {

@@ -1,11 +1,13 @@
-// Tests of MapTexture with a surface render target (design D52) and its
-// pacing by display refresh interval (D53), on the fake FFI in fake_mln.cpp.
+// Tests of MapTexture with a surface render target (design D52), its pacing by
+// display refresh interval (D53), and the maximum size of the tile cache
+// (D61-D63), on the fake FFI in fake_mln.cpp.
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -277,6 +279,101 @@ void NoRenderWhilePaused() {
   map_texture_dispose(handle);
 }
 
+constexpr const char* kSetCacheSize =
+    "mln_runtime_set_maximum_ambient_cache_size_start";
+
+// The names of the calls recorded since the last map was created.
+std::vector<std::string> CallNames() {
+  std::vector<std::string> names;
+  for (const auto& call : fake_mln::Calls()) names.push_back(call.name);
+  return names;
+}
+
+// The sizes passed to mln_runtime_set_maximum_ambient_cache_size_start since
+// the last map was created.
+std::vector<uint64_t> CacheSizes() {
+  std::vector<uint64_t> sizes;
+  for (const auto& call : fake_mln::Calls()) {
+    if (call.name == kSetCacheSize) sizes.push_back(call.size);
+  }
+  return sizes;
+}
+
+bool StyleLoaded() {
+  auto names = CallNames();
+  return !names.empty() && names.back() == "mln_map_set_style_url";
+}
+
+// Run this test before any test sets a maximum size, because the maximum size
+// is process-wide.
+void NoCacheSizeWithoutValue() {
+  int64_t handle = CreateMap();
+  map_texture_load_style_url(handle, "https://example.com/style.json");
+  CHECK(WaitFor(StyleLoaded));
+  CHECK(CacheSizes().empty());
+  map_texture_dispose(handle);
+}
+
+void CacheSizeIsSetBeforeMapAndStyle() {
+  CHECK(map_texture_set_maximum_cache_size(200 << 20) == MAP_TEXTURE_OK);
+  int64_t handle = CreateMap();
+  map_texture_load_style_url(handle, "https://example.com/style.json");
+  CHECK(WaitFor(StyleLoaded));
+  CHECK((CallNames() == std::vector<std::string>{
+                            "mln_runtime_create", kSetCacheSize,
+                            "mln_runtime_offline_operation_discard",
+                            "mln_map_create", "mln_map_set_style_url"}));
+  CHECK((CacheSizes() == std::vector<uint64_t>{200 << 20}));
+  map_texture_dispose(handle);
+}
+
+void CacheSizeAppliesToMapsCreatedAfterIt() {
+  CHECK(map_texture_set_maximum_cache_size(200 << 20) == MAP_TEXTURE_OK);
+  int64_t first = CreateMap();
+  CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
+  map_texture_load_style_url(first, "https://example.com/style.json");
+  CHECK(WaitFor(StyleLoaded));
+  CHECK((CacheSizes() == std::vector<uint64_t>{200 << 20}));
+  int64_t second = CreateMap();
+  CHECK((CacheSizes() == std::vector<uint64_t>{10 << 20}));
+  map_texture_dispose(first);
+  map_texture_dispose(second);
+}
+
+void NegativeCacheSizeIsRejected() {
+  CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
+  CHECK(map_texture_set_maximum_cache_size(-1) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  int64_t handle = CreateMap();
+  CHECK((CacheSizes() == std::vector<uint64_t>{10 << 20}));
+  map_texture_dispose(handle);
+}
+
+void ZeroCacheSizeIsApplied() {
+  CHECK(map_texture_set_maximum_cache_size(0) == MAP_TEXTURE_OK);
+  int64_t handle = CreateMap();
+  CHECK((CacheSizes() == std::vector<uint64_t>{0}));
+  map_texture_dispose(handle);
+}
+
+void CacheSizeFailureIsReportedAndMapRenders() {
+  CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
+  fake_mln::SetMaximumCacheSizeStatus(MLN_STATUS_NATIVE_ERROR);
+  int64_t handle = CreateMap();
+  fake_mln::SetMaximumCacheSizeStatus(MLN_STATUS_OK);
+  {
+    std::lock_guard lock(events_mutex);
+    CHECK(events.size() == 1 &&
+          events[0].type == MAP_TEXTURE_EVENT_RENDER_ERROR);
+  }
+  CHECK((CallNames() == std::vector<std::string>{
+                            "mln_runtime_create", kSetCacheSize,
+                            "mln_map_create"}));
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return FrameEvents().size() == 1; }));
+  map_texture_dispose(handle);
+}
+
 }  // namespace
 
 namespace map_texture {
@@ -302,6 +399,12 @@ int main() {
   RendersArePacedByRefreshInterval();
   IdleMapRendersNothing();
   NoRenderWhilePaused();
+  NoCacheSizeWithoutValue();
+  CacheSizeIsSetBeforeMapAndStyle();
+  CacheSizeAppliesToMapsCreatedAfterIt();
+  NegativeCacheSizeIsRejected();
+  ZeroCacheSizeIsApplied();
+  CacheSizeFailureIsReportedAndMapRenders();
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

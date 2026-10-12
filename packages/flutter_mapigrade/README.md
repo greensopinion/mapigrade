@@ -69,6 +69,21 @@ The layer doesn't throw failures of its map into your code. It calls `onError` w
 
 When `onError` is null, the layer reports the failure through `FlutterError.reportError`, with `flutter_mapigrade` as the library. Later versions may add subclasses of `LayerException`, so handle other types when you switch over the type.
 
+## Tile cache
+
+MapLibre keeps downloaded tiles, styles, glyphs and sprites in a cache file on the device, and evicts the least recently used resources when the cache would exceed its maximum size. The maximum size is 50 MiB until you set `MapigradeLayer.maximumCacheSizeBytes`:
+
+```dart
+void main() {
+  MapigradeLayer.maximumCacheSizeBytes = 200 * 1024 * 1024;
+  runApp(const MyApp());
+}
+```
+
+The maximum size applies to maps created after you set it; maps that already exist keep the maximum size they were created with, so set it before the first layer is built. All maps share the cache file, and each map evicts to its own maximum size, so a map created with a smaller maximum size evicts resources down to that size each time it stores a resource. With 0 the cache keeps no resources. A negative value throws an `ArgumentError`.
+
+MapLibre treats a cached resource as fresh for as long as the server's `Cache-Control` and `Expires` headers allow; the maximum size doesn't change that.
+
 ## Limitations
 
 - The API covers the style and the alignment. There is no API for style layers, sources, queries or pitch.

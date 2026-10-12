@@ -109,6 +109,12 @@ MAP_TEXTURE_EXPORT int64_t map_texture_create(
     double pixel_ratio, int32_t copy_free,
     map_texture_event_callback callback);
 
+// Sets the maximum size in bytes of the tile cache for maps created after the
+// call. Maps that already exist keep their maximum size. Without a call, maps
+// use MapLibre's default of 50 MiB. Returns 0, or
+// MAP_TEXTURE_ERROR_INVALID_ARGUMENT for a negative size.
+MAP_TEXTURE_EXPORT int32_t map_texture_set_maximum_cache_size(int64_t bytes);
+
 // Returns the Flutter texture id, or a negative error.
 MAP_TEXTURE_EXPORT int64_t map_texture_texture_id(int64_t handle);
 

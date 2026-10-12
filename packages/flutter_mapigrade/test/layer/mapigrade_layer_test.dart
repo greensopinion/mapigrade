@@ -59,4 +59,16 @@ void main() {
       throwsAssertionError,
     );
   });
+
+  test('maximumCacheSizeBytes is 50 MiB until set', () {
+    expect(MapigradeLayer.maximumCacheSizeBytes, 52428800);
+  });
+
+  test('a negative maximumCacheSizeBytes throws and is not stored', () {
+    expect(
+      () => MapigradeLayer.maximumCacheSizeBytes = -1,
+      throwsArgumentError,
+    );
+    expect(MapigradeLayer.maximumCacheSizeBytes, 52428800);
+  });
 }

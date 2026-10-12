@@ -267,6 +267,24 @@ class MapTextureController {
     return controller;
   }
 
+  /// Sets the maximum size in [bytes] of the tile cache for maps created after
+  /// the call, in the whole process (design D61 of the
+  /// tile-cache-maximum-size change). Maps that already exist keep their
+  /// maximum size.
+  ///
+  /// Throws [ArgumentError] for a negative [bytes] without calling native
+  /// code, and [MapTextureException] if the native call fails.
+  static void setMaximumCacheSize(int bytes) {
+    if (bytes < 0) {
+      throw ArgumentError.value(bytes, 'bytes', 'must not be negative');
+    }
+    final status = mapTextureSetMaximumCacheSize(bytes);
+    if (status != mapTextureOk) {
+      throw MapTextureException(
+          'map_texture_set_maximum_cache_size failed with $status');
+    }
+  }
+
   final int _handle;
   final NativeCallable<MapTextureEventCallback> _callable;
 

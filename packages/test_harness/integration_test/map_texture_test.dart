@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_mapigrade/flutter_mapigrade.dart' show MapigradeLayer;
 import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:test_harness/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
@@ -551,6 +552,67 @@ void main() {
     expect(events.whereType<RenderError>(), isEmpty);
     expect(events.whereType<StyleLoaded>(), isEmpty,
         reason: 'the style must not load again');
+  });
+
+  // The maximum cache size is process-wide, so these tests set the default
+  // again when they end. They set values above 50 MiB so that they don't
+  // evict the resources that the other tests use.
+  testWidgets('a map with a maximum cache size loads its style',
+      (tester) async {
+    addTearDown(() => MapigradeLayer.maximumCacheSizeBytes = 50 << 20);
+    MapigradeLayer.maximumCacheSizeBytes = 100 << 20;
+    final controller = await showMap(tester);
+    final errors = <RenderError>[];
+    final sub = controller.events
+        .where((e) => e is RenderError)
+        .cast<RenderError>()
+        .listen(errors.add);
+    final idle = waitFor<MapIdle>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await idle;
+    await sub.cancel();
+    expect(errors, isEmpty);
+  });
+
+  testWidgets('a maximum cache size set while a map exists', (tester) async {
+    addTearDown(() => MapigradeLayer.maximumCacheSizeBytes = 50 << 20);
+    MapigradeLayer.maximumCacheSizeBytes = 100 << 20;
+    final first = await showMap(tester);
+    var idle = waitFor<MapIdle>(first.events, (_) => true);
+    first.loadStyleUrl(demoStyleUrl);
+    await idle;
+
+    MapigradeLayer.maximumCacheSizeBytes = 80 << 20;
+    final second = MapTextureController.create(
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+    controllers.add(second);
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Row(children: [
+        SizedBox(
+            width: 200, height: 300, child: MapTextureView(controller: first)),
+        SizedBox(
+            width: 200, height: 300, child: MapTextureView(controller: second)),
+      ]),
+    ));
+    final errors = <RenderError>[];
+    final subs = [
+      for (final c in [first, second])
+        c.events
+            .where((e) => e is RenderError)
+            .cast<RenderError>()
+            .listen(errors.add),
+    ];
+    final firstIdle = waitFor<MapIdle>(first.events, (_) => true);
+    idle = waitFor<MapIdle>(second.events, (_) => true);
+    first.setCamera(const MapCamera(latitude: 20, longitude: 30, zoom: 3));
+    second.loadStyleUrl(demoStyleUrl);
+    await Future.wait([firstIdle, idle]);
+    for (final sub in subs) {
+      await sub.cancel();
+    }
+    expect(errors, isEmpty);
+    expect(MapigradeLayer.maximumCacheSizeBytes, 80 << 20);
   });
 
   testWidgets('resizing on every frame for 10 seconds', (tester) async {

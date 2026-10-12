@@ -6,13 +6,14 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "mln.h"
 
 namespace fake_mln {
 
-// Resets the counters and recorded render starts.
+// Resets the counters, recorded render starts and recorded calls.
 void Reset();
 
 // Queues a MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE event and wakes the
@@ -28,5 +29,20 @@ std::vector<int64_t> RenderStarts();
 
 // The clock RenderStarts() reads; null for the steady clock.
 void SetClock(int64_t (*now_ns)());
+
+// A recorded call of mln_runtime_create, mln_map_create, the style loads, or
+// the cache size functions, in the order the core made them.
+struct Call {
+  std::string name;
+  // The size, for mln_runtime_set_maximum_ambient_cache_size_start.
+  uint64_t size = 0;
+};
+
+// The calls recorded since the last Reset().
+std::vector<Call> Calls();
+
+// The status that mln_runtime_set_maximum_ambient_cache_size_start returns;
+// MLN_STATUS_OK until set. Not reset by Reset().
+void SetMaximumCacheSizeStatus(mln_status status);
 
 }  // namespace fake_mln

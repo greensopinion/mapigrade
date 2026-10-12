@@ -17,6 +17,13 @@ std::vector<int64_t> render_starts;
 std::atomic<int64_t (*)()> clock_fn{nullptr};
 std::atomic<uint64_t> next_handle{1};
 mln_camera_options camera{};
+std::vector<fake_mln::Call> calls;
+std::atomic<mln_status> cache_size_status{MLN_STATUS_OK};
+
+void Record(const char* name, uint64_t size = 0) {
+  std::lock_guard lock(mutex);
+  calls.push_back({name, size});
+}
 
 int64_t Now() {
   if (auto clock = clock_fn.load()) return clock();
@@ -42,6 +49,7 @@ void Reset() {
   pending_render_updates = 0;
   render_count = 0;
   render_starts.clear();
+  calls.clear();
 }
 
 void QueueRenderUpdate() {
@@ -64,6 +72,15 @@ std::vector<int64_t> RenderStarts() {
 
 void SetClock(int64_t (*now_ns)()) { clock_fn.store(now_ns); }
 
+std::vector<Call> Calls() {
+  std::lock_guard lock(mutex);
+  return calls;
+}
+
+void SetMaximumCacheSizeStatus(mln_status status) {
+  cache_size_status.store(status);
+}
+
 }  // namespace fake_mln
 
 extern "C" {
@@ -77,6 +94,23 @@ mln_runtime_options mln_runtime_options_default(void) MLN_NOEXCEPT {
 mln_status mln_runtime_create(const mln_runtime_options*,
                               mln_runtime* out_runtime) MLN_NOEXCEPT {
   *out_runtime = next_handle++;
+  Record("mln_runtime_create");
+  return MLN_STATUS_OK;
+}
+
+mln_status mln_runtime_set_maximum_ambient_cache_size_start(
+    mln_runtime, uint64_t size,
+    mln_offline_operation_id* out_operation_id) MLN_NOEXCEPT {
+  Record("mln_runtime_set_maximum_ambient_cache_size_start", size);
+  mln_status status = cache_size_status.load();
+  if (status == MLN_STATUS_OK) *out_operation_id = next_handle++;
+  return status;
+}
+
+mln_status mln_runtime_offline_operation_discard(mln_runtime,
+                                                 mln_offline_operation_id)
+    MLN_NOEXCEPT {
+  Record("mln_runtime_offline_operation_discard");
   return MLN_STATUS_OK;
 }
 
@@ -139,16 +173,19 @@ mln_map_options mln_map_options_default(void) MLN_NOEXCEPT {
 mln_status mln_map_create(mln_runtime, const mln_map_options*,
                           mln_map* out_map) MLN_NOEXCEPT {
   *out_map = next_handle++;
+  Record("mln_map_create");
   return MLN_STATUS_OK;
 }
 
 mln_status mln_map_destroy(mln_map) MLN_NOEXCEPT { return MLN_STATUS_OK; }
 
 mln_status mln_map_set_style_url(mln_map, const char*) MLN_NOEXCEPT {
+  Record("mln_map_set_style_url");
   return MLN_STATUS_OK;
 }
 
 mln_status mln_map_set_style_json(mln_map, mln_buffer_view) MLN_NOEXCEPT {
+  Record("mln_map_set_style_json");
   return MLN_STATUS_OK;
 }
 

@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -26,10 +27,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
  public:
   // Creates the platform render target, starts the map thread, and waits
   // until the thread has created the runtime and map. With `copy_free`, the
-  // session renders directly into the display buffers (design D20). Returns
-  // null on failure.
+  // session renders directly into the display buffers (design D20). With
+  // `maximum_cache_size`, the maximum size in bytes of the runtime's tile
+  // cache is that value; otherwise it is MapLibre's default (design D61).
+  // Returns null on failure.
   static std::shared_ptr<MapTexture> Create(
       int64_t handle, double pixel_ratio, bool copy_free,
+      std::optional<uint64_t> maximum_cache_size,
       map_texture_event_callback callback);
 
   ~MapTexture();
@@ -84,6 +88,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
  private:
   MapTexture(int64_t handle, double pixel_ratio,
+             std::optional<uint64_t> maximum_cache_size,
              map_texture_event_callback callback);
 
   bool Start(bool copy_free);
@@ -124,6 +129,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   const int64_t handle_;
   const double initial_pixel_ratio_;
+  const std::optional<uint64_t> maximum_cache_size_;
 
   std::unique_ptr<RenderTarget> target_;
   CommandQueue commands_;

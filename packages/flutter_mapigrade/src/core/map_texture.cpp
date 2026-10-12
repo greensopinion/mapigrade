@@ -90,18 +90,21 @@ struct TaskDone {
 
 std::shared_ptr<MapTexture> MapTexture::Create(
     int64_t handle, double pixel_ratio, bool copy_free,
+    std::optional<uint64_t> maximum_cache_size,
     map_texture_event_callback callback) {
   if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) return nullptr;
   std::shared_ptr<MapTexture> texture(
-      new MapTexture(handle, pixel_ratio, callback));
+      new MapTexture(handle, pixel_ratio, maximum_cache_size, callback));
   if (!texture->Start(copy_free)) return nullptr;
   return texture;
 }
 
 MapTexture::MapTexture(int64_t handle, double pixel_ratio,
+                       std::optional<uint64_t> maximum_cache_size,
                        map_texture_event_callback callback)
     : handle_(handle),
       initial_pixel_ratio_(pixel_ratio),
+      maximum_cache_size_(maximum_cache_size),
       callback_(callback) {}
 
 MapTexture::~MapTexture() {
@@ -336,6 +339,21 @@ bool MapTexture::Init() {
   if (status != MLN_STATUS_OK) {
     ReportStatus("mln_runtime_create", status);
     return false;
+  }
+
+  // The database thread runs its messages in order, so the maximum size is in
+  // effect before the first resource request or write of the style load
+  // (design D62). If the call fails, the map uses MapLibre's default and
+  // continues to render (D63).
+  if (maximum_cache_size_) {
+    mln_offline_operation_id operation = 0;
+    status = mln_runtime_set_maximum_ambient_cache_size_start(
+        runtime_, *maximum_cache_size_, &operation);
+    if (status == MLN_STATUS_OK) {
+      mln_runtime_offline_operation_discard(runtime_, operation);
+    } else {
+      ReportStatus("mln_runtime_set_maximum_ambient_cache_size_start", status);
+    }
   }
 
   mln_wake_source wake = MLN_HANDLE_NULL;
