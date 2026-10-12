@@ -7,14 +7,7 @@ void main() {
   test('prediction defaults to a lead of 1', () {
     expect(const CameraAlignment.prediction().lead, 1);
     expect(const CameraAlignment.prediction(lead: 2.5).lead, 2.5);
-    expect(CameraAlignment.transform.lead, isNull);
     expect(CameraAlignment.none.lead, isNull);
-  });
-
-  test('only transform is the transform', () {
-    expect(CameraAlignment.transform.isTransform, isTrue);
-    expect(CameraAlignment.none.isTransform, isFalse);
-    expect(const CameraAlignment.prediction().isTransform, isFalse);
   });
 
   test('values are equal by kind and lead', () {
@@ -32,11 +25,7 @@ void main() {
       const CameraAlignment.prediction(lead: 2),
       isNot(const CameraAlignment.prediction()),
     );
-    expect(CameraAlignment.transform, isNot(CameraAlignment.none));
-    expect(
-      CameraAlignment.transform,
-      isNot(const CameraAlignment.prediction()),
-    );
+    expect(CameraAlignment.none, isNot(const CameraAlignment.prediction()));
     expect(CameraAlignment.none, CameraAlignment.none);
   });
 

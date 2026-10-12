@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import '../texture/map_texture_controller.dart';
-import 'camera_transform.dart';
+import 'camera_projection.dart';
 
 /// Records older than this are not used for the velocity, so a pause between
 /// gestures starts from zero velocity (design D32).

@@ -183,6 +183,8 @@ Per frame, the best available bound for MapLibre's GPU time on that path was the
 
 ## Alignment during camera changes (Stage 3)
 
+The remove-camera-transform change (2026-10-12) removed the compensating transform and the benchmark's `transform` mode. Since then the benchmark reports only the error of the drawn map (`error_drawn_px`), no longer reports `error_with_transform_px`, `error_without_transform_px` and `mismatch_fraction`, and runs `predict1` when `ALIGNMENT_MODE` isn't set. The results below were measured before that change.
+
 The alignment benchmark (`example/lib/alignment_benchmark.dart`, flutter-map-layer change, designs D25, D26 and D28) shows the map as the base layer of a `FlutterMap` (`flutter_map` 8.3.2) and moves the `flutter_map` camera through its `MapController` on every Flutter frame. For each Flutter frame it records the map frame whose camera the layer's transform used (k_used) and the map frame that Flutter displayed (k_shown). From these it computes the alignment error: the largest distance, over the viewport corners and center, between where the displayed map frame draws a coordinate and where the overlays draw it. It computes the error both with the compensating transform (the last-reported-frame transform) and without it. All errors are in logical pixels.
 
 ### macOS (task 6.1)
@@ -313,7 +315,7 @@ The pan at 500 px/s gave the same p50 and p95 errors in both variants on both de
 ## Alignment with camera prediction (camera-prediction change)
 
 The alignment benchmark (Stage 3, above) measures the layer in five configurations, selected with `--dart-define=ALIGNMENT_MODE=` (camera-prediction change, design D34):
-- `transform` is the default: the compensating transform, without prediction.
+- `transform` was the default until the remove-camera-transform change: the compensating transform, without prediction. The mode no longer exists.
 - `none` uses neither the transform nor prediction.
 - `predict1`, `predict2` and `predict3` set the camera predicted 1, 2 or 3 refresh intervals ahead, without the transform.
 

@@ -1,8 +1,8 @@
-// Camera conversion (design D22) and the compensating transform (design D23).
+// Camera conversion (design D22) and the Web Mercator projection that camera
+// prediction and the alignment error use.
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flutter/widgets.dart' show Matrix4, MatrixUtils;
 import 'package:flutter_map/flutter_map.dart' as fm;
 
 import '../texture/map_texture_controller.dart';
@@ -81,102 +81,6 @@ Offset screenPosition(ViewCamera view, Offset world) {
       view.viewport.center(Offset.zero);
 }
 
-/// The transform T(from -> to) that moves a frame rendered at [from] so that
-/// each coordinate in it appears where [to] places it (design D23).
-///
-/// The longitude difference between the two centers is taken the short way
-/// round, so a frame on the other side of the antimeridian isn't shifted by a
-/// world width.
-Matrix4 frameTransform(ViewCamera from, ViewCamera to) {
-  final scale = math.pow(2, to.camera.zoom - from.camera.zoom).toDouble();
-  final angle = _radians(from.camera.bearing - to.camera.bearing);
-  final cos = scale * math.cos(angle);
-  final sin = scale * math.sin(angle);
-  // The linear part, scale * rotate(angle).
-  Offset linear(Offset p) =>
-      Offset(cos * p.dx - sin * p.dy, sin * p.dx + cos * p.dy);
-
-  final d =
-      _wrap(
-        mercator(from.camera.latitude, from.camera.longitude) -
-            mercator(to.camera.latitude, to.camera.longitude),
-      ) *
-      worldSize(from.camera.zoom);
-  final t =
-      to.viewport.center(Offset.zero) +
-      _rotate(d, -_radians(to.camera.bearing)) * scale -
-      linear(from.viewport.center(Offset.zero));
-  // Column-major: x' = cos x - sin y + t.dx, y' = sin x + cos y + t.dy.
-  return Matrix4(
-    cos,
-    sin,
-    0,
-    0, //
-    -sin,
-    cos,
-    0,
-    0, //
-    0,
-    0,
-    1,
-    0, //
-    t.dx,
-    t.dy,
-    0,
-    1,
-  );
-}
-
-/// The transform the layer draws its texture with while the frame rendered
-/// at [from] is displayed for the camera [to]: [frameTransform] after
-/// undoing the stretch of the `Texture` widget, which scales the frame from
-/// its own size to the viewport of [to].
-///
-/// Returns null, meaning no transform, if the transform would move the frame
-/// entirely outside the viewport. Flutter doesn't draw a texture outside its
-/// clip, and then never takes a newer frame that would update the transform
-/// (design D23).
-Matrix4? layerTransform(ViewCamera from, ViewCamera to) {
-  final transform = frameTransform(from, to)
-    ..multiply(
-      Matrix4.diagonal3Values(
-        from.viewport.width / to.viewport.width,
-        from.viewport.height / to.viewport.height,
-        1,
-      ),
-    );
-  final size = to.viewport;
-  final corners = [
-    Offset.zero,
-    Offset(size.width, 0),
-    Offset(size.width, size.height),
-    Offset(0, size.height),
-  ];
-  final frame = [
-    for (final c in corners) MatrixUtils.transformPoint(transform, c),
-  ];
-  return _quadsOverlap(frame, corners) ? transform : null;
-}
-
-/// True if the convex quadrilaterals [a] and [b], each given by its corners
-/// in order, share an area: no edge normal of either separates them.
-bool _quadsOverlap(List<Offset> a, List<Offset> b) {
-  for (final quad in [a, b]) {
-    for (var i = 0; i < 4; i++) {
-      final edge = quad[(i + 1) % 4] - quad[i];
-      final normal = Offset(-edge.dy, edge.dx);
-      double dot(Offset p) => p.dx * normal.dx + p.dy * normal.dy;
-      final pa = a.map(dot);
-      final pb = b.map(dot);
-      if (pa.reduce(math.max) <= pb.reduce(math.min) ||
-          pb.reduce(math.max) <= pa.reduce(math.min)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 /// The normalized Mercator coordinates of the point that MapLibre draws at
 /// the logical position [screen] in the viewport of [view]; the inverse of
 /// [screenPosition].
@@ -197,6 +101,3 @@ Offset _rotate(Offset p, double angle) {
   final s = math.sin(angle);
   return Offset(c * p.dx - s * p.dy, s * p.dx + c * p.dy);
 }
-
-/// Moves the x of [d] into [-0.5, 0.5) by whole worlds.
-Offset _wrap(Offset d) => Offset(d.dx - (d.dx + 0.5).floorToDouble(), d.dy);

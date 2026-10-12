@@ -1,12 +1,11 @@
 // Layer configurations for the alignment benchmark and the flutter_map page
 // (design D34 of the camera-prediction change, D45 of the
-// camera-prediction-default change): the compensating transform, neither
-// transform nor prediction, or camera prediction with a lead of 1, 2 or 3
+// camera-prediction-default change, D50 of the remove-camera-transform
+// change): no prediction, or camera prediction with a lead of 1, 2 or 3
 // refresh intervals.
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
 enum AlignmentMode {
-  transform('transform', CameraAlignment.transform),
   none('none', CameraAlignment.none),
   predict1('predict1', CameraAlignment.prediction(lead: 1)),
   predict2('predict2', CameraAlignment.prediction(lead: 2)),

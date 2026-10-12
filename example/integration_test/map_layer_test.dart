@@ -189,18 +189,14 @@ void main() {
     matching: find.byType(Transform),
   );
 
-  for (final (name, alignment, transformDrawn) in const [
-    ('the default layer (prediction, lead 1)', null, false),
-    ('the layer with the transform', CameraAlignment.transform, true),
-    ('the layer with neither', CameraAlignment.none, false),
-    (
-      'the layer with prediction, lead 2',
-      CameraAlignment.prediction(lead: 2),
-      false,
-    ),
+  for (final (name, alignment) in const [
+    ('the default layer (prediction, lead 1)', null),
+    ('the layer with no alignment', CameraAlignment.none),
+    ('the layer with prediction, lead 2', CameraAlignment.prediction(lead: 2)),
   ]) {
-    testWidgets('$name ${transformDrawn ? 'has' : 'has no'} '
-        'Transform while the camera moves', (tester) async {
+    testWidgets('$name has no Transform while the camera moves', (
+      tester,
+    ) async {
       final mapController = MapController();
       MapTextureController? controller;
       await tester.pumpWidget(
@@ -225,7 +221,7 @@ void main() {
         expect(controller!.displayedFrame, isNotNull);
         expect(
           transformInLayer,
-          transformDrawn ? findsOneWidget : findsNothing,
+          findsNothing,
           reason: 'step $i',
         );
       }

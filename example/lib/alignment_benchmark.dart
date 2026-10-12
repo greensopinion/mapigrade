@@ -28,13 +28,13 @@
 // named phases.
 //
 // `--dart-define=ALIGNMENT_MODE=<mode>` configures the layer (design D34 of
-// the camera-prediction change): `transform` (the default here, so that
-// earlier procedures still measure the transform; the layer's own default is
-// `predict1`), `none` (no transform, no prediction), or `predict1`,
+// the camera-prediction change, D49 of the remove-camera-transform change):
+// `predict1` (the default, as in the layer), `none` (no prediction), or
 // `predict2`, `predict3` (camera prediction with a lead of that many refresh
-// intervals). Each result line
-// states the mode and gives `error_drawn_px`, the error of what the layer
-// draws: with the transform in `transform` mode, without it otherwise. Pan
+// intervals). The `transform` mode was removed with the transform; results
+// recorded before that change without ALIGNMENT_MODE measured it. Each result
+// line states the mode and gives `error_drawn_px`, the error of what the layer
+// draws. Pan
 // phases also give `offset_along_pan_px`, the mean signed distance at the
 // viewport center between the drawn map and the overlays along the pan:
 // positive when the map shows the camera further along the pan than the
@@ -71,7 +71,7 @@ const alignmentPhases = String.fromEnvironment('ALIGNMENT_PHASES');
 const alignmentVideo = bool.fromEnvironment('ALIGNMENT_VIDEO');
 const alignmentModeName = String.fromEnvironment(
   'ALIGNMENT_MODE',
-  defaultValue: 'transform',
+  defaultValue: 'predict1',
 );
 
 /// The layer configuration, or null if ALIGNMENT_MODE names none.
@@ -261,7 +261,7 @@ class AlignmentBenchmarkPage extends StatefulWidget {
 
 class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
   final _mapController = MapController();
-  final _mode = alignmentMode ?? AlignmentMode.transform;
+  final _mode = alignmentMode ?? AlignmentMode.predict1;
 
   void _onController(MapTextureController controller) {
     // Start after the first build, when the MapController is attached.
@@ -329,12 +329,10 @@ Map<String, double>? percentiles(List<double> values) {
   return {'p50': r(p(0.5)), 'p95': r(p(0.95)), 'max': r(p(1))};
 }
 
-/// What the layer used in one Flutter frame build.
+/// The overlays' camera in one Flutter frame build.
 class _Build {
-  const _Build(this.target, this.usedId, this.used, this.time, this.east);
+  const _Build(this.target, this.time, this.east);
   final ViewCamera target;
-  final int? usedId;
-  final ViewCamera? used;
 
   /// The frame's vsync target time since the phase started, in seconds.
   final double time;
@@ -377,11 +375,7 @@ class AlignmentRecorder {
 
   /// Matches the records and computes the error of every Flutter frame that
   /// showed a map frame.
-  Map<String, Object?> analyze(
-    Duration duration, {
-    required bool transformDrawn,
-    required bool pan,
-  }) {
+  Map<String, Object?> analyze(Duration duration, {required bool pan}) {
     final sorted = [...timings]
       ..sort((a, b) => a.frameNumber.compareTo(b.frameNumber));
     final events = [...displays]..sort((a, b) => a.time.compareTo(b.time));
@@ -392,9 +386,6 @@ class AlignmentRecorder {
     var rasterOnly = 0;
     var noShownFrame = 0;
     var displaysOutsideRaster = 0;
-    var mismatched = 0;
-    final withT = <double>[];
-    final withoutT = <double>[];
     final drawn = <double>[];
     final alongPan = <double>[];
     frameErrors.clear();
@@ -413,8 +404,8 @@ class AlignmentRecorder {
         lastBuild = build;
       } else {
         // Flutter rasterized the last layer tree again, for example because
-        // only the texture changed. The screen shows the last build's camera
-        // and transform.
+        // only the texture changed. The screen shows the last build's
+        // overlays.
         if (lastBuild == null) continue;
         rasterOnly++;
       }
@@ -423,24 +414,15 @@ class AlignmentRecorder {
         continue;
       }
       if (build != null) matchedBuilds++;
-      if (lastBuild.usedId != shown.id) mismatched++;
       final error = alignmentError(
         target: lastBuild.target,
-        used: lastBuild.used,
         shown: shown.view,
       );
-      withT.add(error.withTransform);
-      withoutT.add(error.withoutTransform);
-      final drawnError = transformDrawn
-          ? error.withTransform
-          : error.withoutTransform;
-      drawn.add(drawnError);
-      final center = transformDrawn
-          ? error.centerWithTransform
-          : error.centerWithoutTransform;
+      drawn.add(error.error);
+      final center = error.center;
       frameErrors.add((
         time: lastBuild.time,
-        error: drawnError,
+        error: error.error,
         centerDx: center.dx,
       ));
       // The pans move east or west at bearing 0. A map behind the overlays
@@ -451,7 +433,7 @@ class AlignmentRecorder {
         .where((n) => !timingNumbers.contains(n))
         .length;
 
-    final frames = withT.length;
+    final frames = drawn.length;
     return {
       'builds': builds.length,
       'matched_builds': matchedBuilds,
@@ -460,13 +442,10 @@ class AlignmentRecorder {
       'builds_without_shown_frame': noShownFrame,
       'raster_only_frames': rasterOnly,
       'frames': frames,
-      'mismatch_fraction': frames == 0 ? 0 : mismatched / frames,
       'display_events': displays.length,
       // Each display event is a new map frame that Flutter took.
       'map_fps': displays.length / (duration.inMicroseconds / 1e6),
       'display_events_outside_raster': displaysOutsideRaster,
-      'error_with_transform_px': percentiles(withT),
-      'error_without_transform_px': percentiles(withoutT),
       'error_drawn_px': percentiles(drawn),
       if (pan)
         'offset_along_pan_px': alongPan.isEmpty
@@ -507,12 +486,11 @@ class AlignmentBenchmark {
       final r = _recorder;
       if (r != null && r.collectingTimings) r.timings.addAll(timings);
     });
-    // Runs after the build of every frame, so the layer has set its
-    // transform from displayedFrame, and the overlays have used the camera.
+    // Runs after the build of every frame, so the overlays have used the
+    // camera.
     SchedulerBinding.instance.addPersistentFrameCallback((_) {
       final r = _recorder;
       if (r == null || !r.recording) return;
-      final used = controller.displayedFrame;
       final target = viewCameraOf(mapController.camera);
       final now = SchedulerBinding.instance.currentSystemFrameTimeStamp;
       final start = r.start ??= now;
@@ -520,8 +498,6 @@ class AlignmentBenchmark {
       r.lastTarget = target;
       r.builds[PlatformDispatcher.instance.frameData.frameNumber] = _Build(
         target,
-        used?.frameId,
-        used == null ? null : ViewCamera.ofFrame(used),
         (now - start).inMicroseconds / 1e6,
         previous == null
             ? 0
@@ -577,11 +553,7 @@ class AlignmentBenchmark {
       await Future<void>.delayed(const Duration(milliseconds: 1500));
       recorder.collectingTimings = false;
       _recorder = null;
-      final result = recorder.analyze(
-        duration,
-        transformDrawn: mode == AlignmentMode.transform,
-        pan: phase.kind == 'pan',
-      );
+      final result = recorder.analyze(duration, pan: phase.kind == 'pan');
       final changes = phase.changes?.call(duration.inMicroseconds / 1e6);
       final overshoot = changes == null
           ? null

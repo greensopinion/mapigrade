@@ -133,7 +133,6 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
                         showSelectedIcon: false,
                         segments: [
                           for (final mode in const [
-                            AlignmentMode.transform,
                             AlignmentMode.none,
                             AlignmentMode.predict1,
                             AlignmentMode.predict2,

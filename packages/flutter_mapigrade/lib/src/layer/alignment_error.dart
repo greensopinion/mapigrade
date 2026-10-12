@@ -1,59 +1,41 @@
-// Alignment error of one Flutter frame (design D26).
+// Alignment error of one Flutter frame (design D26 of the flutter-map-layer
+// change, D49 of the remove-camera-transform change).
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flutter/widgets.dart' show MatrixUtils;
-
-import 'camera_transform.dart';
+import 'camera_projection.dart';
 
 /// How far the displayed map is from the overlays in one Flutter frame, in
 /// logical pixels: the largest distance, over the viewport corners and
-/// center, between where the overlays draw a coordinate and where the map
-/// draws it.
+/// center, between where the overlays draw a coordinate and where the map, as
+/// the layer draws it, draws it.
 class AlignmentError {
-  const AlignmentError({
-    required this.withTransform,
-    required this.withoutTransform,
-    this.centerWithTransform = Offset.zero,
-    this.centerWithoutTransform = Offset.zero,
-  });
+  const AlignmentError({required this.error, this.center = Offset.zero});
 
-  /// With the transform the layer applied (the last-reported-frame transform,
-  /// design D23).
-  final double withTransform;
-
-  /// If the layer had drawn the texture without a transform.
-  final double withoutTransform;
+  /// The largest distance over the viewport corners and center.
+  final double error;
 
   /// Where the map draws the coordinate that the overlays draw at the
-  /// viewport center, relative to the center, with the transform.
-  final Offset centerWithTransform;
-
-  /// The same as [centerWithTransform], without a transform.
-  final Offset centerWithoutTransform;
+  /// viewport center, relative to the center.
+  final Offset center;
 
   @override
-  String toString() =>
-      'AlignmentError(with: $withTransform, without: $withoutTransform)';
+  String toString() => 'AlignmentError($error, center: $center)';
 }
 
-/// The alignment error of a Flutter frame whose overlays use [target] (C_N),
-/// whose layer built its transform from the frame [used] (k_used, or null if
-/// no frame had been displayed), and in which
-/// Flutter displayed the frame [shown] (k_shown).
+/// The alignment error of a Flutter frame whose overlays use [target] (C_N)
+/// and in which Flutter displayed the frame [shown] (k_shown).
 AlignmentError alignmentError({
   required ViewCamera target,
-  required ViewCamera? used,
   required ViewCamera shown,
 }) {
-  final transform = used == null ? null : layerTransform(used, target);
   final stretch = Offset(
     target.viewport.width / shown.viewport.width,
     target.viewport.height / shown.viewport.height,
   );
   final size = target.viewport;
-  var withT = 0.0, withoutT = 0.0;
-  var centerWithT = Offset.zero, centerWithoutT = Offset.zero;
+  var error = 0.0;
+  var centerOffset = Offset.zero;
   final center = size.center(Offset.zero);
   for (final q in [
     Offset.zero,
@@ -67,20 +49,8 @@ AlignmentError alignmentError({
     // to the widget's size.
     final p = screenPosition(shown, g);
     final drawn = Offset(p.dx * stretch.dx, p.dy * stretch.dy);
-    withoutT = math.max(withoutT, (drawn - q).distance);
-    final moved = transform == null
-        ? drawn
-        : MatrixUtils.transformPoint(transform, drawn);
-    withT = math.max(withT, (moved - q).distance);
-    if (q == center) {
-      centerWithT = moved - q;
-      centerWithoutT = drawn - q;
-    }
+    error = math.max(error, (drawn - q).distance);
+    if (q == center) centerOffset = drawn - q;
   }
-  return AlignmentError(
-    withTransform: withT,
-    withoutTransform: withoutT,
-    centerWithTransform: centerWithT,
-    centerWithoutTransform: centerWithoutT,
-  );
+  return AlignmentError(error: error, center: centerOffset);
 }

@@ -4,7 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/src/layer/camera_prediction.dart';
-import 'package:flutter_mapigrade/src/layer/camera_transform.dart';
+import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const viewport = Size(400, 300);

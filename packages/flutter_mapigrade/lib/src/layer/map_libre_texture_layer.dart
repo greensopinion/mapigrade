@@ -9,7 +9,7 @@ import '../texture/map_texture_controller.dart';
 import '../texture/map_texture_view.dart';
 import 'camera_alignment.dart';
 import 'camera_prediction.dart';
-import 'camera_transform.dart';
+import 'camera_projection.dart';
 
 /// Displays a MapLibre map as the base layer of a `FlutterMap`, at the
 /// `FlutterMap` camera. Place it first among the map's children, so that the
@@ -69,9 +69,9 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
       copyFree: widget.copyFree,
     );
     _controller = controller;
-    // A new displayed frame changes the transform. With camera prediction,
-    // the rebuild after the camera stops finds the camera unchanged and sets
-    // the converted camera instead of the last predicted one (design D32).
+    // With camera prediction, the rebuild after a new displayed frame, once
+    // the camera has stopped, finds the camera unchanged and sets the
+    // converted camera instead of the last predicted one (design D32).
     _frames = controller.frames.listen((_) => setState(() {}));
     _loadStyle();
     widget.onController?.call(controller);
@@ -127,17 +127,9 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
       _sentCamera = camera;
     }
 
-    Widget texture = MapTextureView(controller: controller);
-    final frame = controller.displayedFrame;
-    final transform = frame == null || !widget.alignment.isTransform
-        ? null
-        : layerTransform(ViewCamera.ofFrame(frame), target);
-    if (transform != null) {
-      texture = Transform(transform: transform, child: texture);
-    }
     return SizedBox.fromSize(
       size: target.viewport,
-      child: ClipRect(child: texture),
+      child: ClipRect(child: MapTextureView(controller: controller)),
     );
   }
 }

@@ -2,5 +2,5 @@
 library;
 
 export 'src/layer/alignment_error.dart';
-export 'src/layer/camera_transform.dart' show ViewCamera, viewCameraOf;
+export 'src/layer/camera_projection.dart' show ViewCamera, viewCameraOf;
 export 'src/texture/testing.dart';

@@ -4,6 +4,8 @@ This document describes the alignment problem that Stage 3 measured (flutter-map
 
 Decision (2026-10-11): option 1, accept the current behavior, with option 5, camera prediction, as the next experiment. The reasons and the criteria for the experiment are in the change's design (`openspec/changes/archive/2026-10-11-flutter-map-layer/design.md`, Results and decision).
 
+Since then, camera prediction (option 5) became the layer's default (2026-10-11), and on 2026-10-12 we removed the compensating transform (remove-camera-transform change). The layer now offers camera prediction and no alignment (option 3). The sections below describe the options as they were at the Stage 3 decision.
+
 ## Problem
 
 In integration model A, `flutter_map` controls the camera and draws the overlays, and MapLibre renders the base map into a Flutter texture on its own thread. When the camera changes in Flutter frame N, the overlays are drawn at the new camera in frame N. The map frame for that camera is rendered on the map thread and reaches the screen one or more Flutter frames later. Until then the screen shows an older map frame below the new overlays.
@@ -52,6 +54,7 @@ Render each map frame larger than the viewport by a margin on every side, and dr
 - Strips: removed while the transform moves the frame by less than the margin. A margin of 16 px covers pans up to about 1,000 px/s with the current transform. Rotation needs more at the corners, and zooming out needs more on every edge.
 - Cost: more pixels to render. A margin of 10% on each side is 1.44 times the pixels. On the iPhone a frame already takes about 8.2 ms against a refresh interval of 8.33 ms, so a margin lowers the frame rate, and a lower frame rate increases the offset and the strip width.
 - Work: moderate. The transform already places a frame by its own center and size, so the alignment math hardly changes.
+- Not applicable since the remove-camera-transform change: without the transform the layer uncovers no strips.
 
 ### 3. Remove the compensating transform
 
@@ -61,6 +64,7 @@ Draw the texture where the layer is, without a transform.
 - Strips: none, because the texture isn't moved.
 - Work: removes code. It also removes the case in which the transform would move the frame out of view, which the layer now has to detect.
 - This option makes the floating look worse and is listed for completeness.
+- Done in the remove-camera-transform change (2026-10-12), together with camera prediction (option 5) as the default. `CameraAlignment.none` selects this option alone.
 
 ### 4. Overlays follow the texture
 
@@ -79,7 +83,7 @@ Send MapLibre the camera that `flutter_map` is expected to have when the map fra
 - Strips: depend on whether the transform stays, and how far it then moves the frame.
 - Work: small. The alignment benchmark measures the result directly.
 - Measured (camera-prediction change, 2026-10-11), without the transform, with leads of 1 to 3 refresh intervals. With a lead of 1, pans at 1,000 px/s had a p50 error of 0 or 8.33 px on the Mac and 8.33 px on the iPhone, with the map lagging by 4.2–7.9 px on average and no strips; after abrupt stops and reversals the map ran ahead by 7–8 px and 22–25 px. A lead of 2 had a p50 error of 0.02 px on the iPhone but felt worse in a manual check. In the manual check on both devices a lead of 1 felt best; the overlays floated only while a fling decelerated.
-- Decision (2026-10-11): make a lead of 1 the default. Results in `benchmarks.md`; the decision in the camera-prediction change's design. The camera-prediction-default change made `CameraAlignment.prediction()` the layer's default; `CameraAlignment.transform` selects the behavior of option 1, and `CameraAlignment.none` that of option 3.
+- Decision (2026-10-11): make a lead of 1 the default. Results in `benchmarks.md`; the decision in the camera-prediction change's design. The camera-prediction-default change made `CameraAlignment.prediction()` the layer's default, and the remove-camera-transform change removed `CameraAlignment.transform`, which selected the behavior of option 1. `CameraAlignment.none` selects that of option 3.
 
 ### 6. One Flutter texture per display buffer
 
