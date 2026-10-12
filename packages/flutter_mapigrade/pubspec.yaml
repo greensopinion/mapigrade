@@ -3,6 +3,8 @@ description: "Displays a MapLibre Native map in a Flutter Texture widget, render
 version: 0.0.1
 publish_to: none
 
+resolution: workspace
+
 environment:
   sdk: ^3.13.4
   flutter: '>=3.47.0'

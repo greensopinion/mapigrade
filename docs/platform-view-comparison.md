@@ -73,7 +73,7 @@ What Mapigrade has that a move to textures doesn't give automatically is the wor
 
 ## Test plan
 
-Build one test page in the example app with two variants, Mapigrade and `MapLibreMap`, and run both on an iPhone and an Android device. On Android, run `MapLibreMap` with the default mode and with `androidTextureMode: false`.
+Build one test page in the test harness with two variants, Mapigrade and `MapLibreMap`, and run both on an iPhone and an Android device. On Android, run `MapLibreMap` with the default mode and with `androidTextureMode: false`.
 
 1. A map with several animated Flutter overlays, a bottom sheet with a `BackdropFilter`, and a switch that applies `ColorFiltered` to the map. Record Flutter frame times, and record which effects render.
 2. `RepaintBoundary.toImage` of the screen. Check whether the map is in the image.

@@ -33,7 +33,7 @@ Only a maximum age of 0 combined with a flush after each texture frees the IOSur
 
 ### Effect in the plugin
 
-`example/integration_test/memory_measurement.dart` resizes a map 300 times (about 10 s) and counts the plugin's released display buffers that are still alive. With the plugin-side fixes below and the workaround:
+`packages/test_harness/integration_test/memory_measurement.dart` resizes a map 300 times (about 10 s) and counts the plugin's released display buffers that are still alive. With the plugin-side fixes below and the workaround:
 
 | | macOS | iOS simulator (iPhone 16 Pro, iOS 18.1) | iPhone 15 Pro Max (iOS 26.7.1) |
 | --- | --- | --- | --- |

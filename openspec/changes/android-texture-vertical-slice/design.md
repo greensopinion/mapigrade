@@ -97,14 +97,14 @@ Each option is verified in a release build on the emulator, which also checks th
 
 ### D59. Example, tests and benchmarks
 
-- `example/android/` is created with `flutter create --platforms android`, with `minSdk` 29 and `arm64-v8a`.
+- `example/android/` (now `packages/test_harness/android/`, repo-layout change) is created with `flutter create --platforms android`, with `minSdk` 29 and `arm64-v8a`.
 - The integration tests run on the emulator. Tests that need display times (the display-time scenario, the timing probe) or plugin-owned buffers (the released-buffer test) are skipped on Android, and the reason is stated in the skip. The lifecycle tests use `map_texture_set_paused_for_testing` and `map_texture_reduce_memory_use_for_testing`, as on iOS. A test of the new requirement "Surface replacement and removal on Android" drives `onTrimMemory(TRIM_MEMORY_BACKGROUND)` through a test hook in the plugin.
-- `example/lib/benchmark.dart` runs on Android unchanged in procedure. Its frame rate counts the frame events, which on Android are queued frames. `alignment_benchmark.dart` and `timing_probe.dart` print one line that they need display times and exit on Android.
+- `example/lib/benchmark.dart` (now in `packages/test_harness/lib/`) runs on Android unchanged in procedure. Its frame rate counts the frame events, which on Android are queued frames. `alignment_benchmark.dart` and `timing_probe.dart` print one line that they need display times and exit on Android.
 - The emulator's GPU forwards to the Mac's, so frame rates from it are not recorded as measurements.
 
 ### D60. Stage 4 procedure on the reference device
 
-When the Pixel is connected: record model, Android version, refresh rate, Flutter version and renderer (Impeller with Vulkan or OpenGL ES, from the `flutter run` log), FFI commit and build mode. Run the continuous pan (30 s, portrait, release) and the 5-minute run over central London, as on the iPhone. Measure the memory and the app size increase. Check alignment by hand on the `flutter_map` page with the default alignment, at the device's refresh rate. Prediction was only measured at 120 Hz. Record the results in `benchmarks.md` and the decision in roadmap row 4.
+When the Pixel is connected: record model, Android version, refresh rate, Flutter version and renderer (Impeller with Vulkan or OpenGL ES, from the `flutter run` log), FFI commit and build mode. Run the continuous pan (30 s, portrait, release) and the 5-minute run over central London, as on the iPhone. Measure the memory and the app size increase. Check alignment by hand on the `flutter_map` page with the default alignment, at the device's refresh rate. Prediction was only measured at 120 Hz. Record the results in `docs/benchmarks.md` and the decision in roadmap row 4.
 
 ## Risks / Trade-offs
 

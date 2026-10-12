@@ -12,7 +12,7 @@ The directory `example/` at the repository root holds the app we use for integra
 - Update references to `example/` and to the moved documents in the specs, the documents in `docs/`, the README, scripts, and the in-flight changes. Archived changes keep their references, because they describe the repository as it was when they were archived.
 - The plugin's code and its Dart API don't change. The test harness keeps importing `package:flutter_mapigrade/testing.dart`.
 
-This change starts after `android-texture-vertical-slice` is committed and archived, because that change adds `example/android/` and modifies files under `example/`.
+This change is implemented after the work of `android-texture-vertical-slice` is committed, and before that change's remaining tasks (the emulator integration tests and the Pixel measurements) are done. Those tasks and that change's design are updated to the new paths. This change is archived after `android-texture-vertical-slice`, because its spec delta starts from that change's versions of the same requirements.
 
 ## Capabilities
 

@@ -2,7 +2,7 @@
 
 See proposal.md for motivation and scope, and specs/map-texture/spec.md for the changed scenarios. The change `public-api` uses decisions D65 to D74; decisions here are numbered from D75.
 
-This change starts after `android-texture-vertical-slice` is archived. The delta in specs/map-texture/spec.md copies that change's versions of "Supported platforms" and "Copy-free rendering by default" and changes only the names of the app and the path of the color check. If that change modifies these requirements again before it is archived, the delta is rewritten from its final version.
+This change is implemented while `android-texture-vertical-slice` has open tasks (6.1 and 7.1 to 7.4), after that change's work was committed (24fc20f) and with a clean working tree. It is archived after that change. The delta in specs/map-texture/spec.md copies that change's versions of "Supported platforms" and "Copy-free rendering by default" and changes only the names of the app and the path of the color check. If that change modifies these requirements again before it is archived, the delta is rewritten from its final version.
 
 Current state, as checked in this repository on 2026-10-12:
 
@@ -73,7 +73,8 @@ The root `analysis_options.yaml` includes `package:flutter_lints/flutter.yaml` a
 - [The Flutter tool, Gradle or Xcode may read `.flutter-plugins-dependencies` or `package_config.json` from the app directory, which a workspace moves to the root] → Build and run the test harness on macOS, on the iPhone and on the Android device, in debug and release mode, before the change is complete. The Android build also runs the plugin's build hook, which has to find the code asset.
 - [An installed app with the old identifier stays on the reference devices, and Instruments or `devicectl` scripts may start the wrong app] → Remove the old app from the iPhone and the Android device after the first install of the renamed app, and update the commands in the README.
 - [A path reference is missed] → After the move, search the repository, excluding `openspec/changes/archive/`, for `example/`, `flutter_mapigrade_example`, `mapigradeExample`, `benchmarks.md` and `limitations.md`, and check each result.
-- [Moving the directory while another change edits files in it produces conflicts] → Start after `android-texture-vertical-slice` is archived and the working tree is clean, and make the move its own commit, without content edits, so that Git detects the renames.
+- [Moving the directory while another change edits files in it produces conflicts] → Start with a clean working tree, after the work of `android-texture-vertical-slice` was committed. Update that change's open tasks and design to the new paths in this change.
+- [Archiving this change before `android-texture-vertical-slice` would apply the Android versions of two `map-texture` requirements to the main spec, and archiving the Android change afterwards would replace the test harness wording] → Archive `android-texture-vertical-slice` first.
 
 ## Migration Plan
 

@@ -1,0 +1,9 @@
+name: mapigrade_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+
+workspace:
+  - packages/flutter_mapigrade
+  - packages/test_harness

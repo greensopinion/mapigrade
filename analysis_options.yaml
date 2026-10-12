@@ -1,0 +1,7 @@
+# Shared by the Dart packages of the workspace. Each package includes this file
+# and adds its own excludes and rules.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/build/**"

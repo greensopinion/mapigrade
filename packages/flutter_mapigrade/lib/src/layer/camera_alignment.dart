@@ -9,7 +9,7 @@ enum _Kind { prediction, none }
 /// a transform in both cases.
 ///
 /// The figures below were measured at 1,000 logical px/s on the 120 Hz
-/// reference Mac and iPhone (`benchmarks.md`, "Alignment with camera
+/// reference Mac and iPhone (`docs/benchmarks.md`, "Alignment with camera
 /// prediction").
 final class CameraAlignment {
   /// Sets the map camera to the `FlutterMap` camera extrapolated from its

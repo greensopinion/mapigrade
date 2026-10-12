@@ -10,11 +10,11 @@
 
 ## 3. Example and integration test
 
-- [ ] 3.1 Add an integration test to `example/integration_test/map_texture_test.dart` that sets a limit, creates a map, loads the style and waits for `MapIdle` without a render error; a second case sets the limit while a map exists, creates a second map, and both reach `MapIdle`; verify that the tests pass on macOS and on the iPhone
+- [ ] 3.1 Add an integration test to `packages/test_harness/integration_test/map_texture_test.dart` that sets a limit, creates a map, loads the style and waits for `MapIdle` without a render error; a second case sets the limit while a map exists, creates a second map, and both reach `MapIdle`; verify that the tests pass on macOS and on the iPhone
 
 ## 4. Limit holds across restarts (spec scenarios)
 
-- [ ] 4.1 On macOS, set 200 MiB in the example before the first map is created (a temporary change, or a `--dart-define`), browse until the cache database's size (`sqlite3 <cache.db> 'pragma page_count; pragma page_size'`, path from `PlatformCachePath()` in the app container) exceeds 50 MiB, quit, start the app again and load the same area; verify that the size is still above 50 MiB. Repeat with no limit set and verify that the size is at most about 50 MiB, then with 10 MiB and verify that it falls to at most about 10 MiB and the map displays frames. Record the measured sizes in the change's design.md under a "Results" heading
+- [ ] 4.1 On macOS, set 200 MiB in the test harness before the first map is created (a temporary change, or a `--dart-define`), browse until the cache database's size (`sqlite3 <cache.db> 'pragma page_count; pragma page_size'`, path from `PlatformCachePath()` in the app container) exceeds 50 MiB, quit, start the app again and load the same area; verify that the size is still above 50 MiB. Repeat with no limit set and verify that the size is at most about 50 MiB, then with 10 MiB and verify that it falls to at most about 10 MiB and the map displays frames. Record the measured sizes in the change's design.md under a "Results" heading
 
 ## 5. Documentation
 
