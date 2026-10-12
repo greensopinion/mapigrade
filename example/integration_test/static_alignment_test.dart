@@ -116,9 +116,10 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
-  for (final (mode, prediction) in const [
+  // The default layer (prediction, lead 1), and the layer with the transform.
+  for (final (mode, alignment) in const [
     ('', null),
-    (', prediction 2', 2.0),
+    (', transform', CameraAlignment.transform),
   ]) {
     for (final c in cases) {
       testWidgets('alignment at rest: ${c.name}$mode', (tester) async {
@@ -148,11 +149,17 @@ void main() {
                     initialRotation: c.rotation,
                   ),
                   children: [
-                    MapLibreTextureLayer(
-                      styleJson: style,
-                      cameraPrediction: prediction,
-                      onController: (x) => controller = x,
-                    ),
+                    if (alignment == null)
+                      MapLibreTextureLayer(
+                        styleJson: style,
+                        onController: (x) => controller = x,
+                      )
+                    else
+                      MapLibreTextureLayer(
+                        styleJson: style,
+                        alignment: alignment,
+                        onController: (x) => controller = x,
+                      ),
                     if (overlay)
                       fm.CircleLayer(
                         circles: [

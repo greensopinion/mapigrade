@@ -152,12 +152,11 @@ void main() {
     expect(shown.camera.longitude, closeTo(target.longitude, 1e-9));
   });
 
-  /// A 400x300 FlutterMap at [center] with only the layer, configured as
-  /// given.
+  /// A 400x300 FlutterMap at [center] with only the layer, with [alignment]
+  /// or, if null, the layer's default.
   Widget layerApp(
     MapController mapController, {
-    bool compensatingTransform = true,
-    double? cameraPrediction,
+    CameraAlignment? alignment,
     required void Function(MapTextureController) onController,
   }) => MaterialApp(
     home: Center(
@@ -168,12 +167,17 @@ void main() {
           mapController: mapController,
           options: const MapOptions(initialCenter: center, initialZoom: 12),
           children: [
-            MapLibreTextureLayer(
-              styleJson: redStyle,
-              compensatingTransform: compensatingTransform,
-              cameraPrediction: cameraPrediction,
-              onController: onController,
-            ),
+            if (alignment == null)
+              MapLibreTextureLayer(
+                styleJson: redStyle,
+                onController: onController,
+              )
+            else
+              MapLibreTextureLayer(
+                styleJson: redStyle,
+                alignment: alignment,
+                onController: onController,
+              ),
           ],
         ),
       ),
@@ -185,20 +189,24 @@ void main() {
     matching: find.byType(Transform),
   );
 
-  for (final (name, transformOn, prediction) in const [
-    ('the default layer', true, null),
-    ('the layer without the transform', false, null),
-    ('the layer with prediction', true, 2.0),
+  for (final (name, alignment, transformDrawn) in const [
+    ('the default layer (prediction, lead 1)', null, false),
+    ('the layer with the transform', CameraAlignment.transform, true),
+    ('the layer with neither', CameraAlignment.none, false),
+    (
+      'the layer with prediction, lead 2',
+      CameraAlignment.prediction(lead: 2),
+      false,
+    ),
   ]) {
-    testWidgets('$name ${transformOn && prediction == null ? 'has' : 'has no'} '
+    testWidgets('$name ${transformDrawn ? 'has' : 'has no'} '
         'Transform while the camera moves', (tester) async {
       final mapController = MapController();
       MapTextureController? controller;
       await tester.pumpWidget(
         layerApp(
           mapController,
-          compensatingTransform: transformOn,
-          cameraPrediction: prediction,
+          alignment: alignment,
           onController: (c) => controller = c,
         ),
       );
@@ -217,23 +225,19 @@ void main() {
         expect(controller!.displayedFrame, isNotNull);
         expect(
           transformInLayer,
-          transformOn && prediction == null ? findsOneWidget : findsNothing,
+          transformDrawn ? findsOneWidget : findsNothing,
           reason: 'step $i',
         );
       }
     });
   }
 
-  testWidgets('with prediction, the map shows the converted camera after a '
-      'camera move stops', (tester) async {
+  testWidgets('with the default layer (prediction, lead 1), the map shows the '
+      'converted camera after a camera move stops', (tester) async {
     final mapController = MapController();
     MapTextureController? controller;
     await tester.pumpWidget(
-      layerApp(
-        mapController,
-        cameraPrediction: 2,
-        onController: (c) => controller = c,
-      ),
+      layerApp(mapController, onController: (c) => controller = c),
     );
     await controller!.frames.first.timeout(const Duration(seconds: 20));
     await Future<void>.delayed(const Duration(milliseconds: 200));

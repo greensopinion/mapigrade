@@ -28,9 +28,11 @@
 // named phases.
 //
 // `--dart-define=ALIGNMENT_MODE=<mode>` configures the layer (design D34 of
-// the camera-prediction change): `transform` (the default), `none` (no
-// transform, no prediction), or `predict1`, `predict2`, `predict3` (camera
-// prediction with a lead of that many refresh intervals). Each result line
+// the camera-prediction change): `transform` (the default here, so that
+// earlier procedures still measure the transform; the layer's own default is
+// `predict1`), `none` (no transform, no prediction), or `predict1`,
+// `predict2`, `predict3` (camera prediction with a lead of that many refresh
+// intervals). Each result line
 // states the mode and gives `error_drawn_px`, the error of what the layer
 // draws: with the transform in `transform` mode, without it otherwise. Pan
 // phases also give `offset_along_pan_px`, the mean signed distance at the
@@ -281,8 +283,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
         MapLibreTextureLayer(
           styleJson: videoStyle(),
           copyFree: copyFree,
-          compensatingTransform: _mode.compensatingTransform,
-          cameraPrediction: _mode.cameraPrediction,
+          alignment: _mode.alignment,
           onController: _onController,
         ),
         CircleLayer(
@@ -295,8 +296,7 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
         MapLibreTextureLayer(
           styleUrl: libertyStyleUrl,
           copyFree: copyFree,
-          compensatingTransform: _mode.compensatingTransform,
-          cameraPrediction: _mode.cameraPrediction,
+          alignment: _mode.alignment,
           onController: _onController,
         ),
         MarkerLayer(

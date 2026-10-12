@@ -7,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 
 import '../texture/map_texture_controller.dart';
 import '../texture/map_texture_view.dart';
+import 'camera_alignment.dart';
 import 'camera_prediction.dart';
 import 'camera_transform.dart';
 
@@ -15,9 +16,10 @@ import 'camera_transform.dart';
 /// layers after it are drawn above it.
 ///
 /// The layer creates its map when it is inserted and disposes it when it is
-/// removed. Until the map has displayed a frame for the current camera, the
-/// layer moves the last displayed frame to where the current camera places it
-/// (design D23).
+/// removed. By default it sets the map camera predicted one display refresh
+/// interval ahead while the camera moves, so that the map displayed then is
+/// close to the overlays; [alignment] selects how the layer aligns the map
+/// with the overlays during camera changes.
 class MapLibreTextureLayer extends StatefulWidget {
   const MapLibreTextureLayer({
     super.key,
@@ -25,8 +27,7 @@ class MapLibreTextureLayer extends StatefulWidget {
     this.styleJson,
     this.copyFree = true,
     this.onController,
-    this.compensatingTransform = true,
-    this.cameraPrediction,
+    this.alignment = const CameraAlignment.prediction(),
   }) : assert(
          (styleUrl == null) != (styleJson == null),
          'give exactly one of styleUrl and styleJson',
@@ -44,20 +45,10 @@ class MapLibreTextureLayer extends StatefulWidget {
   /// measurements.
   final void Function(MapTextureController controller)? onController;
 
-  /// Experimental, may change or be removed: whether the layer draws the
-  /// last displayed frame with a transform that moves it to where the
-  /// current camera places it (the default). When false, the layer draws the
-  /// frame where the layer is, so the map lags the overlays during camera
-  /// changes, but no strips are uncovered at the viewport edges.
-  final bool compensatingTransform;
-
-  /// Experimental, may change or be removed: when set, the layer sets the
-  /// map camera to the `FlutterMap` camera extrapolated from its recent
-  /// velocity by this many display refresh intervals, and draws the map
-  /// without the transform, whatever [compensatingTransform] says. The
-  /// camera at rest isn't extrapolated. Null (the default) turns prediction
-  /// off.
-  final double? cameraPrediction;
+  /// How the layer aligns the map with the overlays while the camera
+  /// changes; see [CameraAlignment]. Defaults to camera prediction with a
+  /// lead of 1 display refresh interval.
+  final CameraAlignment alignment;
 
   @override
   State<MapLibreTextureLayer> createState() => _MapLibreTextureLayerState();
@@ -93,7 +84,7 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
         widget.styleJson != oldWidget.styleJson) {
       _loadStyle();
     }
-    if (widget.cameraPrediction != oldWidget.cameraPrediction) {
+    if (widget.alignment != oldWidget.alignment) {
       _predictor = CameraPredictor();
     }
   }
@@ -118,7 +109,7 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
   Widget build(BuildContext context) {
     final controller = _controller!;
     final target = viewCameraOf(fm.MapCamera.of(context));
-    final lead = widget.cameraPrediction;
+    final lead = widget.alignment.lead;
     var camera = target;
     if (lead != null) {
       final refreshRate = View.of(context).display.refreshRate;
@@ -138,8 +129,7 @@ class _MapLibreTextureLayerState extends State<MapLibreTextureLayer> {
 
     Widget texture = MapTextureView(controller: controller);
     final frame = controller.displayedFrame;
-    final transform =
-        frame == null || !widget.compensatingTransform || lead != null
+    final transform = frame == null || !widget.alignment.isTransform
         ? null
         : layerTransform(ViewCamera.ofFrame(frame), target);
     if (transform != null) {

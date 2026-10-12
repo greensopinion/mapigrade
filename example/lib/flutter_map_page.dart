@@ -31,7 +31,7 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
   final _mapController = MapController();
   String _camera = '';
   FrameCamera? _frame;
-  AlignmentMode _mode = AlignmentMode.transform;
+  AlignmentMode _mode = AlignmentMode.predict1;
 
   void _onController(MapTextureController controller) {
     controller.frames.listen((f) {
@@ -65,8 +65,7 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
               MapLibreTextureLayer(
                 styleUrl: widget.styleUrl,
                 copyFree: copyFree,
-                compensatingTransform: _mode.compensatingTransform,
-                cameraPrediction: _mode.cameraPrediction,
+                alignment: _mode.alignment,
                 onController: _onController,
               ),
               PolylineLayer(

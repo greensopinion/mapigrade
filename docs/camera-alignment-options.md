@@ -79,7 +79,7 @@ Send MapLibre the camera that `flutter_map` is expected to have when the map fra
 - Strips: depend on whether the transform stays, and how far it then moves the frame.
 - Work: small. The alignment benchmark measures the result directly.
 - Measured (camera-prediction change, 2026-10-11), without the transform, with leads of 1 to 3 refresh intervals. With a lead of 1, pans at 1,000 px/s had a p50 error of 0 or 8.33 px on the Mac and 8.33 px on the iPhone, with the map lagging by 4.2–7.9 px on average and no strips; after abrupt stops and reversals the map ran ahead by 7–8 px and 22–25 px. A lead of 2 had a p50 error of 0.02 px on the iPhone but felt worse in a manual check. In the manual check on both devices a lead of 1 felt best; the overlays floated only while a fling decelerated.
-- Decision (2026-10-11): make a lead of 1 the default, in a separate change. Results in `benchmarks.md`; the decision in the camera-prediction change's design.
+- Decision (2026-10-11): make a lead of 1 the default. Results in `benchmarks.md`; the decision in the camera-prediction change's design. The camera-prediction-default change made `CameraAlignment.prediction()` the layer's default; `CameraAlignment.transform` selects the behavior of option 1, and `CameraAlignment.none` that of option 3.
 
 ### 6. One Flutter texture per display buffer
 
