@@ -24,6 +24,10 @@ The system SHALL set the map camera from the `flutter_map` camera whenever the `
 - **WHEN** the `flutter_map` camera changes through a gesture or a camera controller call
 - **THEN** a later displayed map frame reports the converted camera
 
+#### Scenario: Camera jump larger than the viewport
+- **WHEN** the `flutter_map` camera moves in one step by more than the viewport
+- **THEN** a later displayed map frame reports the new camera, and the map shows it
+
 #### Scenario: Rotated map
 - **WHEN** the `flutter_map` rotation is 30 degrees
 - **THEN** the map is rotated by the same angle in the same direction as the overlays, and fills the viewport without empty corners when the camera is at rest
@@ -43,31 +47,12 @@ When the camera is at rest and the map has displayed a frame for it, a geographi
 - **WHEN** the `flutter_map` viewport is resized and the camera is then at rest
 - **THEN** the markers meet the 1 logical pixel limit at the new size
 
-### Requirement: Compensating transform
-When the layer is configured with the compensating transform, while the camera of the displayed map frame differs from the current `flutter_map` camera, the system SHALL draw the map with a transform that moves, scales and rotates the frame so that each coordinate in the frame appears where the current `flutter_map` camera places it. The transform SHALL use the camera of the last displayed frame that Dart has been notified of. If the transform would move the frame entirely outside the viewport, the system SHALL draw the frame without the transform, so that Flutter draws the texture and takes the next map frame. The layer SHALL provide one alignment option with three values: camera prediction at a stated lead (requirement "Camera prediction"), the compensating transform, or neither. With camera prediction or with neither, the system SHALL draw the map without the transform.
-
-#### Scenario: Camera ahead of the displayed frame
-- **WHEN** the layer is configured with the compensating transform, the `flutter_map` camera has moved by a known offset since the last displayed frame that Dart has been notified of, and the raster thread displays that frame
-- **THEN** the frame is drawn shifted by that offset, and a coordinate in the frame appears at the position the current camera places it
-
-#### Scenario: Camera jump larger than the viewport
-- **WHEN** the layer is configured with the compensating transform, and the `flutter_map` camera moves in one step by more than the viewport, so that the transform would move the displayed frame entirely outside the viewport
-- **THEN** the frame is drawn without the transform, and a later displayed map frame reports the new camera
-
-#### Scenario: Antimeridian
-- **WHEN** the layer is configured with the compensating transform, and the `flutter_map` camera pans across the antimeridian
-- **THEN** the transform uses the shorter longitude difference, and the map does not jump by a world width
-
-#### Scenario: Transform turned off
-- **WHEN** the layer is configured with neither the transform nor prediction, and the `flutter_map` camera moves
-- **THEN** the displayed map frame is drawn where the layer is, without a transform, and no strips are uncovered at the viewport edges
-
 ### Requirement: Camera prediction
-The system SHALL provide a camera prediction mode for the layer, with a lead given as a number of display refresh intervals. The mode SHALL be the layer's default, with a lead of 1. In this mode the system SHALL set the map camera to the converted `flutter_map` camera extrapolated by the lead from the camera's velocity over the last Flutter frames, for center, zoom and bearing, and SHALL draw the map without the compensating transform. When the `flutter_map` camera hasn't changed since the previous Flutter frame, the predicted camera SHALL equal the converted camera.
+The system SHALL provide a camera prediction mode for the layer, with a lead given as a number of display refresh intervals. The layer SHALL provide one alignment option with two values: camera prediction at a stated lead, or no alignment. Camera prediction with a lead of 1 SHALL be the layer's default. In the prediction mode the system SHALL set the map camera to the converted `flutter_map` camera extrapolated by the lead from the camera's velocity over the last Flutter frames, for center, zoom and bearing. When the `flutter_map` camera hasn't changed since the previous Flutter frame, the predicted camera SHALL equal the converted camera. With either value, the system SHALL draw the displayed map frame at the position of the layer, without moving, scaling or rotating it.
 
 #### Scenario: Default layer
 - **WHEN** an application places the layer without configuring its alignment, and the `flutter_map` camera pans at a constant speed
-- **THEN** the camera the map renders is ahead of the converted camera by 1 refresh interval of that movement, and the map is drawn without a transform
+- **THEN** the camera the map renders is ahead of the converted camera by 1 refresh interval of that movement, and the displayed map frame is drawn at the position of the layer
 
 #### Scenario: Steady pan
 - **WHEN** the prediction mode is on with a lead of n refresh intervals, and the `flutter_map` camera pans at a constant speed
@@ -81,12 +66,16 @@ The system SHALL provide a camera prediction mode for the layer, with a lead giv
 - **WHEN** the prediction mode is on and the `flutter_map` camera pans across the antimeridian
 - **THEN** the velocity uses the shorter longitude difference, and the predicted camera does not jump by a world width
 
+#### Scenario: No alignment
+- **WHEN** the layer is configured with no alignment, and the `flutter_map` camera moves
+- **THEN** the map camera is the converted camera, the displayed map frame is drawn at the position of the layer, and no strips are uncovered at the viewport edges
+
 ### Requirement: Alignment measurement
-The system SHALL provide a measurement mode that records, for each Flutter frame during camera changes, the map frame whose camera the transform used, the map frame that Flutter displayed, and the `flutter_map` camera. From these it SHALL compute the alignment error in logical pixels, the largest distance at the viewport corners and center between where the displayed map frame draws a coordinate and where the overlays draw it, both with the transform and without it. The measurement mode SHALL run with the layer configured with the compensating transform, with neither the transform nor prediction, or with camera prediction at a stated lead, and SHALL report the configuration. It SHALL include phases in which the pan stops abruptly, decelerates as a `flutter_map` fling does, and reverses direction, and for these SHALL report the overshoot: the largest alignment error of the drawn map from the moment the camera's motion changes (an abrupt stop, the start of a deceleration, or a reversal) until half a second after the camera is at rest or moves at constant speed again, and the overshoot ahead: over the same time, the largest distance at the viewport center by which the drawn map is ahead of the overlays in the direction of motion before the change, or 0 if it isn't ahead.
+The system SHALL provide a measurement mode that records, for each Flutter frame during camera changes, the map frame that Flutter displayed and the `flutter_map` camera. From these it SHALL compute the alignment error in logical pixels: the largest distance at the viewport corners and center between where the displayed map frame, as the layer draws it, draws a coordinate and where the overlays draw it. The measurement mode SHALL run with the layer configured with camera prediction at a stated lead or with no alignment, and SHALL report the configuration. It SHALL include phases in which the pan stops abruptly, decelerates as a `flutter_map` fling does, and reverses direction, and for these SHALL report the overshoot: the largest alignment error from the moment the camera's motion changes (an abrupt stop, the start of a deceleration, or a reversal) until half a second after the camera is at rest or moves at constant speed again, and the overshoot ahead: over the same time, the largest distance at the viewport center by which the drawn map is ahead of the overlays in the direction of motion before the change, or 0 if it isn't ahead.
 
 #### Scenario: Pan at a stated speed
 - **WHEN** the alignment benchmark pans at a constant stated speed in logical pixels per second
-- **THEN** the report states the speed, the fraction of Flutter frames whose displayed map frame differs from the frame the transform used, and the p50, p95 and largest alignment error with and without the transform
+- **THEN** the report states the speed, the layer configuration, and the p50, p95 and largest alignment error
 
 #### Scenario: Pan that stops
 - **WHEN** the alignment benchmark pans at 1,000 logical px/s and stops abruptly, or decelerates to rest as a `flutter_map` fling does
