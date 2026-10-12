@@ -12,7 +12,7 @@ The directory `example/` at the repository root holds the app we use for integra
 - Update references to `example/` and to the moved documents in the specs, the documents in `docs/`, the README, scripts, and the in-flight changes. Archived changes keep their references, because they describe the repository as it was when they were archived.
 - The plugin's code and its Dart API don't change. The test harness keeps importing `package:flutter_mapigrade/testing.dart`.
 
-This change is implemented after the work of `android-texture-vertical-slice` is committed, and before that change's remaining tasks (the emulator integration tests and the Pixel measurements) are done. Those tasks and that change's design are updated to the new paths. This change is archived after `android-texture-vertical-slice`, because its spec delta starts from that change's versions of the same requirements.
+This change is implemented after the work of `android-texture-vertical-slice` is committed, and before that change's remaining tasks (the emulator integration tests and the Pixel measurements) are done. Those tasks and that change's design are updated to the new paths. Its spec delta and the spec delta of `android-texture-vertical-slice` both use the test harness names, so either change can be archived first.
 
 ## Capabilities
 
@@ -22,7 +22,7 @@ None.
 
 ### Modified Capabilities
 
-- `map-texture`: the scenarios that name the example app and `example/lib/color_check.dart` name the test harness and its path instead. The requirements don't change. The delta is written against the spec as it is after `android-texture-vertical-slice` is archived, because that change modifies the same requirements.
+- `map-texture`: the scenarios that name the example app and `example/lib/color_check.dart` name the test harness and its path instead. The requirements don't change. The in-flight change `android-texture-vertical-slice` modifies the same requirements; its delta uses the test harness names too.
 
 ## Impact
 

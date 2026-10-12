@@ -49,15 +49,15 @@ During continuous camera changes on the reference Mac, on the reference iPhone a
 The system SHALL support macOS 14.3 or later on arm64, iOS 15.5 or later on arm64 devices, the iOS simulator on arm64 Macs, and Android 10 (API level 29) or later on arm64 devices and emulators. The same Dart API SHALL work on every supported platform without platform-specific calls from the application.
 
 #### Scenario: Example runs on each platform
-- **WHEN** the example app is built and run on macOS, on an iPhone, on the iOS simulator, on an Android device and on an arm64 Android emulator, using the same Dart code
+- **WHEN** the test harness is built and run on macOS, on an iPhone, on the iOS simulator, on an Android device and on an arm64 Android emulator, using the same Dart code
 - **THEN** on each platform the map appears in the widget, and style, camera, resize and dispose work as specified
 
 #### Scenario: Release build on iPhone
-- **WHEN** the example app is built in release mode and installed on an iPhone
+- **WHEN** the test harness is built in release mode and installed on an iPhone
 - **THEN** the app starts, Dart resolves every native function of the plugin, and the map appears
 
 #### Scenario: Release build on Android
-- **WHEN** the example app is built in release mode and installed on the reference Android device
+- **WHEN** the test harness is built in release mode and installed on the reference Android device
 - **THEN** the app starts, Dart resolves every native function of the plugin, and the map appears with a style and tiles loaded over HTTPS
 
 ### Requirement: No rendering while the application is in the background
@@ -102,7 +102,7 @@ By default the system SHALL render each map frame directly into the display buff
 - **THEN** the system renders no new frames during that period
 
 #### Scenario: Colors in both modes
-- **WHEN** the color check (`example/lib/color_check.dart`) runs in each mode the platform offers
+- **WHEN** the color check (`packages/test_harness/lib/color_check.dart`) runs in each mode the platform offers
 - **THEN** the map's fill and background colors match the Flutter swatches of the same colors within 2/255 per channel
 
 ## ADDED Requirements

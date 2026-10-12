@@ -113,11 +113,11 @@ The system SHALL release the map, its render resources, its threads and its Flut
 The system SHALL support macOS 14.3 or later on arm64, iOS 15.5 or later on arm64 devices, and the iOS simulator on arm64 Macs. The same Dart API SHALL work on every supported platform without platform-specific calls from the application.
 
 #### Scenario: Example runs on each platform
-- **WHEN** the example app is built and run on macOS, on an iPhone, and on the iOS simulator, using the same Dart code
+- **WHEN** the test harness is built and run on macOS, on an iPhone, and on the iOS simulator, using the same Dart code
 - **THEN** on each platform the map appears in the widget, and style, camera, resize and dispose work as specified
 
 #### Scenario: Release build on iPhone
-- **WHEN** the example app is built in release mode and installed on an iPhone
+- **WHEN** the test harness is built in release mode and installed on an iPhone
 - **THEN** the app starts, Dart resolves every native function of the plugin, and the map appears
 
 ### Requirement: No rendering while the application is in the background
@@ -158,5 +158,5 @@ By default the system SHALL render each map frame directly into the display buff
 - **THEN** the system renders no new frames during that period
 
 #### Scenario: Colors in both modes
-- **WHEN** the color check (`example/lib/color_check.dart`) runs in each mode
+- **WHEN** the color check (`packages/test_harness/lib/color_check.dart`) runs in each mode
 - **THEN** the map's fill and background colors match the Flutter swatches of the same colors within 2/255 per channel
