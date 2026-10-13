@@ -3,7 +3,8 @@
 /// change), its alignment option (D43 of the camera-prediction-default
 /// change, D47 of the remove-camera-transform change, which removed the
 /// compensating transform of D23), and its callbacks and failure reports (D66
-/// and D67 of the public-api change).
+/// and D67 of the public-api change), and D80 of the http-headers-and-assets
+/// change.
 ///
 /// Only files in `lib/src/layer/` may import `package:flutter_map` (design
 /// D9).
@@ -19,14 +20,16 @@ import '../texture/map_texture_controller.dart';
 import '../texture/map_texture_view.dart';
 import 'camera_prediction.dart';
 import 'camera_projection.dart';
+import 'http_header_rule.dart';
 import 'layer_alignment.dart';
 import 'layer_exception.dart';
 
 /// Creates the map of a [MapTextureLayer]; the signature of
-/// [MapTextureController.create].
+/// [MapTextureController.create], with [HttpHeaderRule]s.
 typedef MapTextureControllerFactory = MapTextureController Function({
   required double pixelRatio,
   required bool copyFree,
+  required List<HttpHeaderRule> httpHeaders,
 });
 
 /// The widget that `MapigradeLayer` builds, with the parameters that only
@@ -41,6 +44,7 @@ class MapTextureLayer extends StatefulWidget {
     this.alignment = const LayerAlignment.prediction(),
     this.onStyleLoaded,
     this.onError,
+    this.httpHeaders = const [],
     this.copyFree = true,
     this.onController,
     this.createController,
@@ -66,6 +70,9 @@ class MapTextureLayer extends StatefulWidget {
   /// failure through [FlutterError.reportError].
   final void Function(LayerException exception)? onError;
 
+  /// Read when the layer creates its map.
+  final List<HttpHeaderRule> httpHeaders;
+
   /// Whether the map renders directly into the displayed buffers (the
   /// default); see [MapTextureController.create]. Read when the layer creates
   /// its map. Has no effect on Android.
@@ -82,6 +89,18 @@ class MapTextureLayer extends StatefulWidget {
   @override
   State<MapTextureLayer> createState() => _MapTextureLayerState();
 }
+
+MapTextureController _createController({
+  required double pixelRatio,
+  required bool copyFree,
+  required List<HttpHeaderRule> httpHeaders,
+}) => MapTextureController.create(
+  pixelRatio: pixelRatio,
+  copyFree: copyFree,
+  httpHeaders: [
+    for (final rule in httpHeaders) (url: rule.url, headers: rule.headers),
+  ],
+);
 
 class _MapTextureLayerState extends State<MapTextureLayer> {
   MapTextureController? _controller;
@@ -102,12 +121,13 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     // fixed at creation, so the map is created when the metrics have arrived,
     // which runs this method again.
     if (MediaQuery.sizeOf(context).isEmpty) return;
-    final create = widget.createController ?? MapTextureController.create;
+    final create = widget.createController ?? _createController;
     final MapTextureController controller;
     try {
       controller = create(
         pixelRatio: MediaQuery.devicePixelRatioOf(context),
         copyFree: widget.copyFree,
+        httpHeaders: widget.httpHeaders,
       );
     } on MapTextureException catch (e) {
       // Not retried while the layer is in the tree, so that the failure is

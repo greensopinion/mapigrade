@@ -13,7 +13,7 @@
 //   buffers, no copy and no Present().
 //
 // The core in this directory has no platform dependencies. Each platform
-// implements one kind of target and the three functions at the end of this
+// implements one kind of target and the four functions at the end of this
 // file (macOS and iOS: darwin/.../MapTextureMetal.mm; Android:
 // android/src/main/cpp/map_texture_android.cpp).
 #pragma once
@@ -139,6 +139,9 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 
 // The path of MapLibre's tile cache database, or an empty string for none.
 std::string PlatformCachePath();
+
+// The root of asset:// URLs, or empty if unknown (design D83).
+std::string PlatformAssetPath();
 
 // Runs `work` in the platform's per-iteration scope on the map thread. On
 // Apple platforms this is an autorelease pool, so that Objective-C objects

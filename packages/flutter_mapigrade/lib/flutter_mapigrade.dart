@@ -2,6 +2,7 @@
 /// see [MapigradeLayer].
 library;
 
+export 'src/layer/http_header_rule.dart' show HttpHeaderRule;
 export 'src/layer/layer_alignment.dart' show LayerAlignment;
 export 'src/layer/layer_exception.dart'
     show

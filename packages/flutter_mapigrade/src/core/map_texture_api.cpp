@@ -1,11 +1,13 @@
 #include "map_texture_api.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "map_texture.h"
 
@@ -28,6 +30,54 @@ bool all_paused = false;
 // The maximum size in bytes of the tile cache for maps created next, or -1 if
 // Dart hasn't set one; guarded by registry_mutex (design D61).
 int64_t maximum_cache_size = -1;
+
+// Copies and validates the rules of map_texture_create() (design D82). On
+// failure, `error` names the header without its value.
+bool ReadHeaderRules(const char* const* strings, const int32_t* counts,
+                     int32_t rule_count,
+                     std::vector<map_texture::HttpHeaderRule>* rules,
+                     std::string* error) {
+  if (rule_count < 0) {
+    *error = "rule_count is negative";
+    return false;
+  }
+  if (rule_count > 0 && (strings == nullptr || counts == nullptr)) {
+    *error = "header rules are null";
+    return false;
+  }
+  size_t next = 0;
+  for (int32_t i = 0; i < rule_count; ++i) {
+    if (counts[i] < 0) {
+      *error = "a header count is negative";
+      return false;
+    }
+    map_texture::HttpHeaderRule rule;
+    const char* url = strings[next++];
+    if (url == nullptr) {
+      *error = "a rule URL is null";
+      return false;
+    }
+    rule.url = url;
+    for (int32_t j = 0; j < counts[i]; ++j) {
+      const char* name = strings[next++];
+      const char* value = strings[next++];
+      if (name == nullptr || value == nullptr) {
+        *error = "a header name or value is null";
+        return false;
+      }
+      if (mln_adapter_http_header_validate(name, value) != MLN_STATUS_OK) {
+        const char* message = mln_thread_last_error_message();
+        *error = message != nullptr && message[0] != '\0'
+                     ? message
+                     : "HTTP header rejected";
+        return false;
+      }
+      rule.headers.push_back({name, value});
+    }
+    rules->push_back(std::move(rule));
+  }
+  return true;
+}
 
 std::shared_ptr<MapTexture> Find(int64_t handle) {
   std::lock_guard lock(registry_mutex);
@@ -64,8 +114,24 @@ int64_t TotalRenderedFrames() {
 extern "C" {
 
 int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
-                           map_texture_event_callback callback) {
-  if (callback == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+                           map_texture_event_callback callback,
+                           const char* const* header_strings,
+                           const int32_t* header_counts, int32_t rule_count,
+                           char** out_error) {
+  if (out_error != nullptr) *out_error = nullptr;
+  auto fail = [out_error](int64_t error, const std::string& message) {
+    if (out_error != nullptr) *out_error = strdup(message.c_str());
+    return error;
+  };
+  if (callback == nullptr) {
+    return fail(MAP_TEXTURE_ERROR_INVALID_ARGUMENT, "callback is null");
+  }
+  std::vector<map_texture::HttpHeaderRule> rules;
+  std::string error;
+  if (!ReadHeaderRules(header_strings, header_counts, rule_count, &rules,
+                       &error)) {
+    return fail(MAP_TEXTURE_ERROR_INVALID_ARGUMENT, error);
+  }
   int64_t handle;
   std::optional<uint64_t> cache_size;
   {
@@ -74,8 +140,9 @@ int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
     if (maximum_cache_size >= 0) cache_size = maximum_cache_size;
   }
   auto texture = MapTexture::Create(handle, pixel_ratio, copy_free != 0,
-                                    cache_size, callback);
-  if (!texture) return MAP_TEXTURE_ERROR_CREATE_FAILED;
+                                    cache_size, std::move(rules), callback,
+                                    &error);
+  if (!texture) return fail(MAP_TEXTURE_ERROR_CREATE_FAILED, error);
   std::lock_guard lock(registry_mutex);
   // The map can't have rendered yet: its render session is attached by the
   // first resize, which needs the handle returned here.
@@ -83,6 +150,8 @@ int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
   Registry()[handle] = std::move(texture);
   return handle;
 }
+
+void map_texture_string_free(char* string) { std::free(string); }
 
 int32_t map_texture_set_maximum_cache_size(int64_t bytes) {
   if (bytes < 0) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;

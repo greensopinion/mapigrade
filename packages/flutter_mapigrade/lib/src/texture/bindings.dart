@@ -104,10 +104,25 @@ typedef MapTextureEventCallback = Void Function(
 
 @Native<
         Int64 Function(
-            Double, Int32, Pointer<NativeFunction<MapTextureEventCallback>>)>(
+            Double,
+            Int32,
+            Pointer<NativeFunction<MapTextureEventCallback>>,
+            Pointer<Pointer<Utf8>>,
+            Pointer<Int32>,
+            Int32,
+            Pointer<Pointer<Utf8>>)>(
     symbol: 'map_texture_create')
-external int mapTextureCreate(double pixelRatio, int copyFree,
-    Pointer<NativeFunction<MapTextureEventCallback>> callback);
+external int mapTextureCreate(
+    double pixelRatio,
+    int copyFree,
+    Pointer<NativeFunction<MapTextureEventCallback>> callback,
+    Pointer<Pointer<Utf8>> headerStrings,
+    Pointer<Int32> headerCounts,
+    int ruleCount,
+    Pointer<Pointer<Utf8>> outError);
+
+@Native<Void Function(Pointer<Utf8>)>(symbol: 'map_texture_string_free')
+external void mapTextureStringFree(Pointer<Utf8> string);
 
 @Native<Int32 Function(Int64)>(symbol: 'map_texture_set_maximum_cache_size')
 external int mapTextureSetMaximumCacheSize(int bytes);

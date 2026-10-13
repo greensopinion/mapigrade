@@ -166,6 +166,10 @@ make_framework() {
     install_name_tool -id "@rpath/$fw_name.framework/$fw_name" "$contents/$fw_name"
   fi
   cp -R "$install/include/maplibre_native_c.h" "$install/include/maplibre_native_c" "$contents/Headers/"
+  # callback_adapter.h's "maplibre_native_c/<name>.h" includes don't resolve in
+  # a framework. Remove this when the FFI includes them as "<name>.h".
+  sed -i '' 's|^#include "maplibre_native_c/|#include "|' \
+    "$contents/Headers/maplibre_native_c/callback_adapter.h"
   cat > "$contents/Modules/module.modulemap" <<MODULEMAP
 framework module $fw_name {
   umbrella header "maplibre_native_c.h"

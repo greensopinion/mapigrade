@@ -339,6 +339,17 @@ std::string PlatformCachePath() {
   return [directory URLByAppendingPathComponent:@"cache.db"].path.UTF8String;
 }
 
+// App.framework's resourcePath is its root on iOS and Resources/ on macOS.
+std::string PlatformAssetPath() {
+  NSBundle* main = [NSBundle mainBundle];
+  NSString* framework =
+      [main.privateFrameworksPath stringByAppendingPathComponent:@"App.framework"];
+  NSBundle* app = [NSBundle bundleWithPath:framework];
+  if (app == nil || app.resourcePath == nil) return {};
+  return [app.resourcePath stringByAppendingPathComponent:@"flutter_assets"]
+      .UTF8String;
+}
+
 }  // namespace map_texture
 
 extern "C" int32_t map_texture_process_thread_count(void) {

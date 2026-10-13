@@ -103,11 +103,21 @@ typedef struct map_texture_stats {
 // into one render texture, and each frame is copied on the GPU into a free
 // display buffer (design D20). On Android every map renders directly into the
 // display buffers, and `copy_free` has no effect. Events are
-// delivered through `callback`, from any thread. Returns a handle (> 0) or a
-// negative MAP_TEXTURE_ERROR_* value.
+// delivered through `callback`, from any thread.
+//
+// `header_strings` holds, for each of `rule_count` HTTP header rules, its URL
+// glob and `header_counts[i]` name and value pairs (design D81).
+//
+// Returns a handle (> 0) or a negative MAP_TEXTURE_ERROR_* value. On failure
+// `*out_error`, if non-null, is a message to free with
+// map_texture_string_free().
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
-    double pixel_ratio, int32_t copy_free,
-    map_texture_event_callback callback);
+    double pixel_ratio, int32_t copy_free, map_texture_event_callback callback,
+    const char* const* header_strings, const int32_t* header_counts,
+    int32_t rule_count, char** out_error);
+
+// Frees a string returned by map_texture_create().
+MAP_TEXTURE_EXPORT void map_texture_string_free(char* string);
 
 // Sets the maximum size in bytes of the tile cache for maps created after the
 // call. Maps that already exist keep their maximum size. Without a call, maps

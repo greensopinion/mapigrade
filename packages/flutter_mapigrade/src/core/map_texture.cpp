@@ -91,21 +91,50 @@ struct TaskDone {
 std::shared_ptr<MapTexture> MapTexture::Create(
     int64_t handle, double pixel_ratio, bool copy_free,
     std::optional<uint64_t> maximum_cache_size,
-    map_texture_event_callback callback) {
-  if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) return nullptr;
+    std::vector<HttpHeaderRule> header_rules,
+    map_texture_event_callback callback, std::string* out_error) {
+  if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) {
+    *out_error = "invalid pixel ratio";
+    return nullptr;
+  }
   std::shared_ptr<MapTexture> texture(
-      new MapTexture(handle, pixel_ratio, maximum_cache_size, callback));
-  if (!texture->Start(copy_free)) return nullptr;
+      new MapTexture(handle, pixel_ratio, maximum_cache_size,
+                     std::move(header_rules), callback));
+  if (!texture->Start(copy_free, out_error)) return nullptr;
   return texture;
 }
 
 MapTexture::MapTexture(int64_t handle, double pixel_ratio,
                        std::optional<uint64_t> maximum_cache_size,
+                       std::vector<HttpHeaderRule> header_rules,
                        map_texture_event_callback callback)
     : handle_(handle),
       initial_pixel_ratio_(pixel_ratio),
       maximum_cache_size_(maximum_cache_size),
-      callback_(callback) {}
+      header_rules_(std::move(header_rules)),
+      callback_(callback) {
+  // Filled before any rule points into it.
+  for (const auto& rule : header_rules_) {
+    for (const auto& [name, value] : rule.headers) {
+      transform_headers_.push_back({name.c_str(), value.c_str()});
+    }
+  }
+  size_t first_header = 0;
+  for (const auto& rule : header_rules_) {
+    mln_adapter_http_header_transform_rule transform_rule{};
+    transform_rule.kind = MLN_ADAPTER_RESOURCE_KIND_ANY;
+    transform_rule.flags = MLN_ADAPTER_URL_MATCH_GLOB;
+    transform_rule.url = rule.url.c_str();
+    transform_rule.headers = rule.headers.empty()
+                                 ? nullptr
+                                 : transform_headers_.data() + first_header;
+    transform_rule.header_count = rule.headers.size();
+    transform_rules_.push_back(transform_rule);
+    first_header += rule.headers.size();
+  }
+  transform_table_.rules = transform_rules_.data();
+  transform_table_.count = transform_rules_.size();
+}
 
 MapTexture::~MapTexture() {
   // Dispose() joins the thread; this only covers a failed Start().
@@ -116,15 +145,19 @@ MapTexture::~MapTexture() {
   }
 }
 
-bool MapTexture::Start(bool copy_free) {
+bool MapTexture::Start(bool copy_free, std::string* out_error) {
   target_ = CreatePlatformRenderTarget(weak_from_this(), copy_free);
-  if (!target_) return false;
+  if (!target_) {
+    *out_error = "failed to create the render target";
+    return false;
+  }
   thread_ = std::thread([this] { Run(); });
   std::unique_lock lock(init_mutex_);
   init_cv_.wait(lock, [this] { return init_done_; });
   if (!init_ok_) {
     thread_.join();
     target_->Unregister();
+    *out_error = init_error_.empty() ? "map creation failed" : init_error_;
     return false;
   }
   return true;
@@ -332,12 +365,15 @@ void MapTexture::MaybeNotifyAfterResize() {
 
 bool MapTexture::Init() {
   std::string cache_path = PlatformCachePath();
+  // Without a path, MapLibre's default root makes asset:// URLs fail.
+  std::string asset_path = PlatformAssetPath();
   mln_runtime_options runtime_options = mln_runtime_options_default();
   runtime_options.cache_path = cache_path.empty() ? nullptr : cache_path.c_str();
+  runtime_options.asset_path = asset_path.empty() ? nullptr : asset_path.c_str();
   runtime_options.event_mask = MLN_RUNTIME_EVENT_MASK_NONE;
   mln_status status = mln_runtime_create(&runtime_options, &runtime_);
   if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_runtime_create", status);
+    ReportInitStatus("mln_runtime_create", status);
     return false;
   }
 
@@ -356,10 +392,23 @@ bool MapTexture::Init() {
     }
   }
 
+  // Before the map, so that style requests carry the headers.
+  if (!header_rules_.empty()) {
+    mln_http_header_transform transform{};
+    transform.size = sizeof(transform);
+    transform.callback = mln_adapter_http_header_transform_callback;
+    transform.user_data = &transform_table_;
+    status = mln_runtime_set_http_header_transform(runtime_, &transform);
+    if (status != MLN_STATUS_OK) {
+      ReportInitStatus("mln_runtime_set_http_header_transform", status);
+      return false;
+    }
+  }
+
   mln_wake_source wake = MLN_HANDLE_NULL;
   status = mln_runtime_wake_source_acquire(runtime_, &wake);
   if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_runtime_wake_source_acquire", status);
+    ReportInitStatus("mln_runtime_wake_source_acquire", status);
     return false;
   }
   {
@@ -374,7 +423,7 @@ bool MapTexture::Init() {
   map_options.event_mask = kMapEventMask;
   status = mln_map_create(runtime_, &map_options, &map_);
   if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_map_create", status);
+    ReportInitStatus("mln_map_create", status);
     return false;
   }
   return true;
@@ -799,7 +848,9 @@ void MapTexture::Emit(int32_t type, const char* message,
   callback_(event);
 }
 
-void MapTexture::ReportStatus(const char* what, mln_status status) {
+namespace {
+
+std::string StatusMessage(const char* what, mln_status status) {
   const char* detail = mln_thread_last_error_message();
   std::string message = std::string(what) + " failed with status " +
                         std::to_string(static_cast<int>(status));
@@ -807,7 +858,18 @@ void MapTexture::ReportStatus(const char* what, mln_status status) {
     message += ": ";
     message += detail;
   }
-  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, message.c_str());
+  return message;
+}
+
+}  // namespace
+
+void MapTexture::ReportStatus(const char* what, mln_status status) {
+  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, StatusMessage(what, status).c_str());
+}
+
+void MapTexture::ReportInitStatus(const char* what, mln_status status) {
+  init_error_ = StatusMessage(what, status);
+  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
 }
 
 }  // namespace map_texture

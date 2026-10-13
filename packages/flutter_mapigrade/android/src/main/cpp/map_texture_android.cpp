@@ -414,6 +414,9 @@ std::string PlatformCachePath() {
   return cache_dir + "/flutter_mapigrade.db";
 }
 
+// The FFI reads /android_asset/ from the APK's assets/ directory.
+std::string PlatformAssetPath() { return "/android_asset/flutter_assets"; }
+
 void RunInPlatformScope(const std::function<void()>& work) { work(); }
 
 }  // namespace map_texture

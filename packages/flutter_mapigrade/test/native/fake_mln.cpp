@@ -19,6 +19,16 @@ std::atomic<uint64_t> next_handle{1};
 mln_camera_options camera{};
 std::vector<fake_mln::Call> calls;
 std::atomic<mln_status> cache_size_status{MLN_STATUS_OK};
+int header_transform_registrations = 0;
+mln_http_header_transform header_transform{};
+std::string validate_name;
+std::string validate_message;
+std::string runtime_create_message;
+mln_status validate_status = MLN_STATUS_OK;
+mln_status runtime_create_status = MLN_STATUS_OK;
+std::string last_asset_path;
+// What mln_thread_last_error_message returns.
+thread_local std::string last_error;
 
 void Record(const char* name, uint64_t size = 0) {
   std::lock_guard lock(mutex);
@@ -50,6 +60,9 @@ void Reset() {
   render_count = 0;
   render_starts.clear();
   calls.clear();
+  header_transform_registrations = 0;
+  header_transform = {};
+  last_asset_path.clear();
 }
 
 void QueueRenderUpdate() {
@@ -81,6 +94,53 @@ void SetMaximumCacheSizeStatus(mln_status status) {
   cache_size_status.store(status);
 }
 
+int HeaderTransformRegistrations() {
+  std::lock_guard lock(mutex);
+  return header_transform_registrations;
+}
+
+bool HeaderTransformUsesAdapter() {
+  std::lock_guard lock(mutex);
+  return header_transform.callback ==
+         &mln_adapter_http_header_transform_callback;
+}
+
+std::vector<HeaderRule> HeaderRules() {
+  std::lock_guard lock(mutex);
+  std::vector<HeaderRule> rules;
+  const auto* table = static_cast<const mln_adapter_http_header_transform_rules*>(
+      header_transform.user_data);
+  if (table == nullptr) return rules;
+  for (size_t i = 0; i < table->count; ++i) {
+    const auto& rule = table->rules[i];
+    HeaderRule copy{rule.kind, rule.flags, rule.url, {}};
+    for (size_t j = 0; j < rule.header_count; ++j) {
+      copy.headers.push_back({rule.headers[j].name, rule.headers[j].value});
+    }
+    rules.push_back(std::move(copy));
+  }
+  return rules;
+}
+
+void SetHeaderValidateResult(std::string name, mln_status status,
+                             std::string message) {
+  std::lock_guard lock(mutex);
+  validate_name = std::move(name);
+  validate_status = status;
+  validate_message = std::move(message);
+}
+
+std::string LastAssetPath() {
+  std::lock_guard lock(mutex);
+  return last_asset_path;
+}
+
+void SetRuntimeCreateResult(mln_status status, std::string message) {
+  std::lock_guard lock(mutex);
+  runtime_create_status = status;
+  runtime_create_message = std::move(message);
+}
+
 }  // namespace fake_mln
 
 extern "C" {
@@ -91,10 +151,43 @@ mln_runtime_options mln_runtime_options_default(void) MLN_NOEXCEPT {
   return options;
 }
 
-mln_status mln_runtime_create(const mln_runtime_options*,
+mln_status mln_runtime_create(const mln_runtime_options* options,
                               mln_runtime* out_runtime) MLN_NOEXCEPT {
-  *out_runtime = next_handle++;
   Record("mln_runtime_create");
+  std::lock_guard lock(mutex);
+  last_asset_path =
+      options->asset_path == nullptr ? "<null>" : options->asset_path;
+  if (runtime_create_status != MLN_STATUS_OK) {
+    last_error = runtime_create_message;
+    return runtime_create_status;
+  }
+  *out_runtime = next_handle++;
+  return MLN_STATUS_OK;
+}
+
+mln_status mln_runtime_set_http_header_transform(
+    mln_runtime, const mln_http_header_transform* transform) MLN_NOEXCEPT {
+  Record("mln_runtime_set_http_header_transform");
+  std::lock_guard lock(mutex);
+  ++header_transform_registrations;
+  header_transform = *transform;
+  return MLN_STATUS_OK;
+}
+
+mln_status mln_adapter_http_header_transform_callback(
+    void*, uint32_t, const char*,
+    mln_http_header_transform_response*) MLN_NOEXCEPT {
+  return MLN_STATUS_OK;
+}
+
+mln_status mln_adapter_http_header_validate(const char* name,
+                                            const char*) MLN_NOEXCEPT {
+  std::lock_guard lock(mutex);
+  last_error.clear();
+  if (validate_status != MLN_STATUS_OK && validate_name == name) {
+    last_error = validate_message;
+    return validate_status;
+  }
   return MLN_STATUS_OK;
 }
 
@@ -242,6 +335,8 @@ mln_status mln_render_session_destroy(mln_render_session) MLN_NOEXCEPT {
   return MLN_STATUS_OK;
 }
 
-const char* mln_thread_last_error_message(void) MLN_NOEXCEPT { return ""; }
+const char* mln_thread_last_error_message(void) MLN_NOEXCEPT {
+  return last_error.c_str();
+}
 
 }  // extern "C"

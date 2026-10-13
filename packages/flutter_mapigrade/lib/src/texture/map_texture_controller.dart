@@ -225,6 +225,9 @@ class MapTextureException implements Exception {
   String toString() => 'MapTextureException: $message';
 }
 
+/// Header names and values for requests whose URL matches the glob [url].
+typedef HeaderRule = ({String url, Map<String, String> headers});
+
 /// Controls one MapLibre map that renders into a Flutter texture.
 ///
 /// Commands return immediately; the map renders on its own native thread.
@@ -252,15 +255,51 @@ class MapTextureController {
   /// On Android every map renders directly into the buffers that Flutter
   /// displays, and [copyFree] has no effect.
   factory MapTextureController.create(
-      {required double pixelRatio, bool copyFree = true}) {
+      {required double pixelRatio,
+      bool copyFree = true,
+      List<HeaderRule> httpHeaders = const []}) {
     late final MapTextureController controller;
     final callable = NativeCallable<MapTextureEventCallback>.listener(
         (Pointer<MapTextureEventStruct> event) => controller._onEvent(event));
-    final handle =
-        mapTextureCreate(pixelRatio, copyFree ? 1 : 0, callable.nativeFunction);
+    final (handle, error) = using((arena) {
+      // Each rule's URL, then its names and values (design D81).
+      final strings = [
+        for (final rule in httpHeaders) ...[
+          rule.url,
+          for (final MapEntry(:key, :value) in rule.headers.entries) ...[
+            key,
+            value,
+          ],
+        ],
+      ];
+      final headerStrings = arena<Pointer<Utf8>>(strings.length);
+      for (var i = 0; i < strings.length; ++i) {
+        headerStrings[i] = strings[i].toNativeUtf8(allocator: arena);
+      }
+      final headerCounts = arena<Int32>(httpHeaders.length);
+      for (var i = 0; i < httpHeaders.length; ++i) {
+        headerCounts[i] = httpHeaders[i].headers.length;
+      }
+      final outError = arena<Pointer<Utf8>>();
+      final handle = mapTextureCreate(
+          pixelRatio,
+          copyFree ? 1 : 0,
+          callable.nativeFunction,
+          headerStrings,
+          headerCounts,
+          httpHeaders.length,
+          outError);
+      String? error;
+      if (outError.value != nullptr) {
+        error = outError.value.toDartString();
+        mapTextureStringFree(outError.value);
+      }
+      return (handle, error);
+    });
     if (handle <= 0) {
       callable.close();
-      throw MapTextureException('map_texture_create failed with $handle');
+      throw MapTextureException(
+          error ?? 'map_texture_create failed with $handle');
     }
     final textureId = mapTextureTextureId(handle);
     controller = MapTextureController._(handle, textureId, copyFree, callable);

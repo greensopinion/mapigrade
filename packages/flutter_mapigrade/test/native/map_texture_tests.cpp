@@ -1,9 +1,11 @@
 // Tests of MapTexture with a surface render target (design D52), its pacing by
-// display refresh interval (D53), and the maximum size of the tile cache
-// (D61-D63), on the fake FFI in fake_mln.cpp.
+// display refresh interval (D53), the maximum size of the tile cache
+// (D61-D63), and the HTTP header rules (D81, D82), on the fake FFI in
+// fake_mln.cpp.
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -130,13 +132,28 @@ map_texture_stats Stats(int64_t handle) {
 std::atomic<int64_t> fake_now{0};
 int64_t FakeNow() { return fake_now.load(); }
 
-int64_t CreateMap() {
+// Sets `error` to the message of map_texture_create().
+int64_t CreateMapWithRules(const std::vector<const char*>& strings,
+                           const std::vector<int32_t>& counts,
+                           std::string* error = nullptr) {
   fake_mln::Reset();
   {
     std::lock_guard lock(events_mutex);
     events.clear();
   }
-  int64_t handle = map_texture_create(2.0, 1, OnEvent);
+  char* message = nullptr;
+  int64_t handle = map_texture_create(
+      2.0, 1, OnEvent, strings.empty() ? nullptr : strings.data(),
+      counts.empty() ? nullptr : counts.data(),
+      static_cast<int32_t>(counts.size()), &message);
+  CHECK((handle > 0) == (message == nullptr));
+  if (error != nullptr) *error = message == nullptr ? "" : message;
+  map_texture_string_free(message);
+  return handle;
+}
+
+int64_t CreateMap() {
+  int64_t handle = CreateMapWithRules({}, {});
   CHECK(handle > 0);
   return handle;
 }
@@ -374,6 +391,120 @@ void CacheSizeFailureIsReportedAndMapRenders() {
   map_texture_dispose(handle);
 }
 
+// CallNames() without the process-wide cache size calls.
+std::vector<std::string> InitCallNames() {
+  std::vector<std::string> names;
+  for (const auto& name : CallNames()) {
+    if (name != kSetCacheSize &&
+        name != "mln_runtime_offline_operation_discard") {
+      names.push_back(name);
+    }
+  }
+  return names;
+}
+
+void HeaderRulesAreCopiedAndRegistered() {
+  // Strings the caller overwrites after the call.
+  char url1[] = "https://tiles.example.com/v2/**";
+  char name1[] = "X-Access-Key";
+  char value1[] = "k2";
+  char name2[] = "X-Other";
+  char value2[] = "o";
+  char url2[] = "https://tiles.example.com/**";
+  char value3[] = "k1";
+  int64_t handle = CreateMapWithRules(
+      {url1, name1, value1, name2, value2, url2, name1, value3}, {2, 1});
+  CHECK(handle > 0);
+  for (char* text : {url1, name1, value1, name2, value2, url2, value3}) {
+    std::memset(text, 'x', std::strlen(text));
+  }
+  CHECK(fake_mln::HeaderTransformRegistrations() == 1);
+  CHECK(fake_mln::HeaderTransformUsesAdapter());
+  auto rules = fake_mln::HeaderRules();
+  CHECK(rules.size() == 2);
+  if (rules.size() == 2) {
+    for (const auto& rule : rules) {
+      CHECK(rule.kind == MLN_ADAPTER_RESOURCE_KIND_ANY);
+      CHECK(rule.flags == MLN_ADAPTER_URL_MATCH_GLOB);
+    }
+    CHECK(rules[0].url == "https://tiles.example.com/v2/**");
+    CHECK((rules[0].headers == std::vector<fake_mln::Header>{
+                                   {"X-Access-Key", "k2"}, {"X-Other", "o"}}));
+    CHECK(rules[1].url == "https://tiles.example.com/**");
+    CHECK((rules[1].headers ==
+           std::vector<fake_mln::Header>{{"X-Access-Key", "k1"}}));
+  }
+  CHECK((InitCallNames() == std::vector<std::string>{
+                                "mln_runtime_create",
+                                "mln_runtime_set_http_header_transform",
+                                "mln_map_create"}));
+  map_texture_dispose(handle);
+}
+
+void RuleWithoutHeadersIsRegistered() {
+  int64_t handle = CreateMapWithRules({"https://a.example.com/**"}, {0});
+  CHECK(handle > 0);
+  auto rules = fake_mln::HeaderRules();
+  CHECK(rules.size() == 1 && rules[0].headers.empty());
+  map_texture_dispose(handle);
+}
+
+void NoHeaderTransformWithoutRules() {
+  int64_t handle = CreateMap();
+  CHECK(fake_mln::HeaderTransformRegistrations() == 0);
+  CHECK((InitCallNames() ==
+         std::vector<std::string>{"mln_runtime_create", "mln_map_create"}));
+  map_texture_dispose(handle);
+}
+
+void EmptyAssetPathKeepsDefault() {
+  int64_t handle = CreateMap();
+  CHECK(fake_mln::LastAssetPath() == "<null>");
+  map_texture_dispose(handle);
+}
+
+void RejectedHeaderFailsCreate() {
+  const char* message = "HTTP header \"Host\" is managed by MapLibre";
+  fake_mln::SetHeaderValidateResult("Host", MLN_STATUS_INVALID_ARGUMENT,
+                                    message);
+  std::string error;
+  int64_t result = CreateMapWithRules(
+      {"https://a.example.com/**", "X-Ok", "1", "Host", "secret"}, {2},
+      &error);
+  fake_mln::SetHeaderValidateResult("", MLN_STATUS_OK, "");
+  CHECK(result == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(error == message);
+  // Rejected before the map thread starts.
+  CHECK(fake_mln::Calls().empty());
+}
+
+void InvalidRuleArraysFailCreate() {
+  std::string error;
+  fake_mln::Reset();
+  char* message = nullptr;
+  CHECK(map_texture_create(2.0, 1, OnEvent, nullptr, nullptr, 1, &message) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(message != nullptr);
+  map_texture_string_free(message);
+  CHECK(CreateMapWithRules({"https://a.example.com/**"}, {-1}, &error) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(!error.empty());
+  // A null out_error is allowed.
+  CHECK(map_texture_create(2.0, 1, nullptr, nullptr, nullptr, 0, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(fake_mln::Calls().empty());
+}
+
+void FailedInitReportsMessage() {
+  fake_mln::SetRuntimeCreateResult(MLN_STATUS_NATIVE_ERROR, "no runtime");
+  std::string error;
+  int64_t result = CreateMapWithRules({}, {}, &error);
+  fake_mln::SetRuntimeCreateResult(MLN_STATUS_OK, "");
+  CHECK(result == MAP_TEXTURE_ERROR_CREATE_FAILED);
+  CHECK(error.find("mln_runtime_create") != std::string::npos);
+  CHECK(error.find("no runtime") != std::string::npos);
+}
+
 }  // namespace
 
 namespace map_texture {
@@ -387,6 +518,8 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 }
 
 std::string PlatformCachePath() { return {}; }
+
+std::string PlatformAssetPath() { return {}; }
 
 void RunInPlatformScope(const std::function<void()>& work) { work(); }
 
@@ -405,6 +538,13 @@ int main() {
   NegativeCacheSizeIsRejected();
   ZeroCacheSizeIsApplied();
   CacheSizeFailureIsReportedAndMapRenders();
+  HeaderRulesAreCopiedAndRegistered();
+  RuleWithoutHeadersIsRegistered();
+  NoHeaderTransformWithoutRules();
+  EmptyAssetPathKeepsDefault();
+  RejectedHeaderFailsCreate();
+  InvalidRuleArraysFailCreate();
+  FailedInitReportsMessage();
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

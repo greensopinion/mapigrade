@@ -13,6 +13,8 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "buffer_state.h"
 #include "command_queue.h"
@@ -23,6 +25,13 @@
 
 namespace map_texture {
 
+// Headers for requests whose URL matches the glob `url` (design D81).
+struct HttpHeaderRule {
+  std::string url;
+  // Names and values.
+  std::vector<std::pair<std::string, std::string>> headers;
+};
+
 class MapTexture : public std::enable_shared_from_this<MapTexture> {
  public:
   // Creates the platform render target, starts the map thread, and waits
@@ -30,11 +39,12 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // session renders directly into the display buffers (design D20). With
   // `maximum_cache_size`, the maximum size in bytes of the runtime's tile
   // cache is that value; otherwise it is MapLibre's default (design D61).
-  // Returns null on failure.
+  // Returns null on failure and sets `out_error`.
   static std::shared_ptr<MapTexture> Create(
       int64_t handle, double pixel_ratio, bool copy_free,
       std::optional<uint64_t> maximum_cache_size,
-      map_texture_event_callback callback);
+      std::vector<HttpHeaderRule> header_rules,
+      map_texture_event_callback callback, std::string* out_error);
 
   ~MapTexture();
 
@@ -89,9 +99,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
  private:
   MapTexture(int64_t handle, double pixel_ratio,
              std::optional<uint64_t> maximum_cache_size,
+             std::vector<HttpHeaderRule> header_rules,
              map_texture_event_callback callback);
 
-  bool Start(bool copy_free);
+  bool Start(bool copy_free, std::string* out_error);
   void Run();
   // One iteration of the map thread's loop; returns true to stop.
   bool RunOnce();
@@ -126,10 +137,19 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void Emit(int32_t type, const char* message = nullptr,
             const FrameInfo* frame = nullptr, int64_t display_time_us = 0);
   void ReportStatus(const char* what, mln_status status);
+  // ReportStatus() that also sets init_error_.
+  void ReportInitStatus(const char* what, mln_status status);
 
   const int64_t handle_;
   const double initial_pixel_ratio_;
   const std::optional<uint64_t> maximum_cache_size_;
+
+  // Fixed after the constructor. They outlive the runtime, whose destruction
+  // waits for in-flight transform callbacks.
+  const std::vector<HttpHeaderRule> header_rules_;
+  std::vector<mln_adapter_http_header> transform_headers_;
+  std::vector<mln_adapter_http_header_transform_rule> transform_rules_;
+  mln_adapter_http_header_transform_rules transform_table_{};
 
   std::unique_ptr<RenderTarget> target_;
   CommandQueue commands_;
@@ -141,6 +161,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::condition_variable init_cv_;
   bool init_done_ = false;
   bool init_ok_ = false;
+  // Why Init() failed; map thread until init_done_.
+  std::string init_error_;
 
   // Guards wake_ against destruction while another thread signals it.
   std::mutex wake_mutex_;

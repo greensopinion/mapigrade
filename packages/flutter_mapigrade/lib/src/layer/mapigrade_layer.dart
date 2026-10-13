@@ -2,6 +2,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../texture/map_texture_controller.dart';
+import 'http_header_rule.dart';
 import 'layer_alignment.dart';
 import 'layer_exception.dart';
 import 'map_texture_layer.dart';
@@ -16,6 +17,7 @@ final class MapigradeLayer extends StatelessWidget {
     this.styleUrl,
     this.styleJson,
     this.alignment = const LayerAlignment.prediction(),
+    this.httpHeaders = const [],
     this.onStyleLoaded,
     this.onError,
   }) : assert(
@@ -44,6 +46,10 @@ final class MapigradeLayer extends StatelessWidget {
   /// How the layer aligns the map with the overlays while the camera moves.
   final LayerAlignment alignment;
 
+  /// HTTP header rules, read when the layer creates its map. To change them,
+  /// give the layer a new [key].
+  final List<HttpHeaderRule> httpHeaders;
+
   /// Called each time a style has loaded.
   final VoidCallback? onStyleLoaded;
 
@@ -56,6 +62,7 @@ final class MapigradeLayer extends StatelessWidget {
     styleUrl: styleUrl,
     styleJson: styleJson,
     alignment: alignment,
+    httpHeaders: httpHeaders,
     onStyleLoaded: onStyleLoaded,
     onError: onError,
   );

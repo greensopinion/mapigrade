@@ -45,4 +45,37 @@ std::vector<Call> Calls();
 // MLN_STATUS_OK until set. Not reset by Reset().
 void SetMaximumCacheSizeStatus(mln_status status);
 
+struct Header {
+  std::string name;
+  std::string value;
+  bool operator==(const Header&) const = default;
+};
+
+struct HeaderRule {
+  uint32_t kind = 0;
+  uint32_t flags = 0;
+  std::string url;
+  std::vector<Header> headers;
+};
+
+// Calls of mln_runtime_set_http_header_transform since the last Reset().
+int HeaderTransformRegistrations();
+
+// Whether the last registered callback is the adapter's.
+bool HeaderTransformUsesAdapter();
+
+// The last registered rules, read from the table now, while its map exists.
+std::vector<HeaderRule> HeaderRules();
+
+// The status and message of mln_adapter_http_header_validate for `name`;
+// not reset by Reset().
+void SetHeaderValidateResult(std::string name, mln_status status,
+                             std::string message);
+
+// The last asset path given to mln_runtime_create, or "<null>".
+std::string LastAssetPath();
+
+// The status and message of mln_runtime_create. Not reset by Reset().
+void SetRuntimeCreateResult(mln_status status, std::string message);
+
 }  // namespace fake_mln
