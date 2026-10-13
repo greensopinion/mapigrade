@@ -34,7 +34,7 @@ iOS and macOS support Swift Package Manager only. Android apps must limit their 
 
 - `alignment`: while the camera moves, the default `LayerAlignment.prediction()` keeps the map within about one frame of the overlays; `LayerAlignment.none` within about two.
 - `onError`: receives each `LayerException`; when null, failures go to `FlutterError.reportError`.
-- `MapigradeLayer.maximumCacheSizeBytes`: the tile cache's maximum size, 50 MiB by default, for maps created afterwards. Each map evicts from the shared cache file to its own maximum size. Freshness follows the server's cache headers.
+- `MapigradeLayer.maximumCacheSizeBytes`: the tile cache's maximum size, 50 MiB by default, for maps created afterwards. Each map evicts from the shared cache file to its own maximum size; after a reduction, the cache reaches the new maximum size as the map stores new tiles. Freshness follows the server's cache headers.
 
 ## Limitations
 

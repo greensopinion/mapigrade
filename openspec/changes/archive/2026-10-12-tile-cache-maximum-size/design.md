@@ -7,7 +7,7 @@ Current state, as checked in this repository and in the MapLibre Native FFI and 
 - `MapTexture::Init()` (`src/core/map_texture.cpp`) runs on the map thread, which becomes the runtime's owner thread. It creates the runtime with `cache_path` from `PlatformCachePath()` and `event_mask = MLN_RUNTIME_EVENT_MASK_NONE`, then creates the map. The style is loaded later, by a command from Dart (`map_texture_load_style_url` or `_json`).
 - Each map creates its own runtime. The FFI gives each runtime its own platform context, and MapLibre's `FileSourceManager` includes the platform context in the key under which it shares file sources. Each runtime therefore has its own `DatabaseFileSource`: its own database thread and its own SQLite connection to the shared cache file. MapLibre sets an unlimited SQLite busy timeout, so two maps that write to the file at the same time wait for each other and don't fail.
 - `OfflineDatabase` holds the maximum ambient cache size in memory, per connection. It is not stored in the database. Each connection starts with `ResourceOptions::maximumCacheSize()`, which the FFI leaves at `DEFAULT_MAX_CACHE_SIZE` (50 MiB), and evicts ambient resources (least recently used first) when a write would exceed it. `mln_runtime_options` has no size field.
-- `mln_runtime_set_maximum_ambient_cache_size_start(runtime, size, &operation_id)` must be called on the owner thread. It queues `DatabaseFileSource::setMaximumAmbientCacheSize` on that runtime's database thread. The new limit takes effect when the database thread runs it, and lowering the limit evicts at once. Completion is reported through `MLN_RUNTIME_EVENT_OFFLINE_OPERATION_COMPLETED`. `mln_runtime_offline_operation_discard()` drops the stored result and suppresses the completion event.
+- `mln_runtime_set_maximum_ambient_cache_size_start(runtime, size, &operation_id)` must be called on the owner thread. It queues `DatabaseFileSource::setMaximumAmbientCacheSize` on that runtime's database thread. The new limit takes effect when the database thread runs it. Lowering the limit evicts only part of the excess at once, and each later write evicts more (see Results). Completion is reported through `MLN_RUNTIME_EVENT_OFFLINE_OPERATION_COMPLETED`. `mln_runtime_offline_operation_discard()` drops the stored result and suppresses the completion event.
 - The database thread is a single MapLibre actor: it runs the messages queued to it in order. Resource requests and the writes of downloaded resources reach the same database thread.
 - `MapTexture::ReportStatus()` emits a `MAP_TEXTURE_EVENT_RENDER_ERROR` event, which Dart receives as `RenderError`.
 - `src/core/map_texture_api.cpp` already holds process-wide state guarded by `registry_mutex` (the registry of live maps and `all_paused`).
@@ -79,9 +79,30 @@ The getter returns the last value set, or 50 MiB (52,428,800 bytes, MapLibre's `
 - [Two maps created with different limits share one file, and each connection evicts to its own limit. The smaller limit wins whenever that map writes.] → D61 makes one application-wide value the common case; the Dart documentation states the behaviour.
 - [A later FFI or MapLibre version creates separate database file sources for the size operation and the resource loader, and the limit no longer applies to the connection that stores tiles.] → The check that more than 50 MiB stays in the cache across a restart (tasks.md, section 4) shows it.
 - [The layer reports a failure to apply the limit (D63) as a `LayerRenderException`, although rendering didn't fail.] → Accepted for now; `public-api` (D68) allows a subclass of `LayerException` to be added later if applications need to tell the two apart.
+- [When the maximum size is lowered, MapLibre evicts only part of the excess when the map starts (Results, runs 4 and 5), and the cache reaches the new maximum size only as the map stores new resources.] → The user accepted this on 2026-10-12; the spec scenario and the README state it. Repeating the size operation until the cache is small enough, or fixing `evict()` in MapLibre, would remove it.
 - [An asynchronous failure of the size operation isn't reported.] → The map uses the 50 MiB default, which is today's behaviour.
 - [A limit of 0 means every downloaded resource is evicted when the next is written, so the map downloads tiles again after each pan back.] → This is the meaning of 0; the documentation states it.
 
 ## Migration Plan
 
 None. The change adds API, and applications that don't call it behave as before.
+
+## Results
+
+Measured on 2026-10-12 on macOS (M2 Max) with the test harness, the OpenFreeMap Liberty style, a 1200x900 view at zoom 14, and a temporary integration test that set the maximum size from a `--dart-define` and moved the camera across a grid of positions, waiting for `MapIdle` at each. Each run was a new process. "Data" is MapLibre's measure of the ambient cache, the sum of the stored data lengths of tiles and resources; "used" is the database's in-use pages times the page size (`page_count - freelist_count`), which also counts indexes and row overhead.
+
+| Run | Maximum size | Positions | Data before | Data after | Used after | File after |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 200 MiB | 0-589 (new) | 1.3 MiB | 51.9 MiB | 55.3 MiB | 55.3 MiB |
+| 2 (restart) | 200 MiB | 0-29 (cached) | 51.9 MiB | 51.9 MiB | 55.3 MiB | 55.3 MiB |
+| 3 (restart) | none (50 MiB default) | 600-659 (new) | 51.9 MiB | 49.4 MiB | 52.8 MiB | 55.3 MiB |
+| 4 (restart) | 10 MiB | 0-19 (mostly cached) | 49.4 MiB | 42.6 MiB | 45.4 MiB | 45.4 MiB |
+| 5 (restart) | 10 MiB | 0 (cached) | 42.6 MiB | 35.4 MiB | 37.8 MiB | 37.8 MiB |
+| 6 (restart) | 10 MiB | 700-719 (new) | 35.4 MiB | 10.8 MiB | 11.6 MiB | 31.0 MiB |
+
+Every run displayed frames and reported no `RenderError` or `LoadingFailed`.
+
+- Runs 1 and 2: with 200 MiB the cache kept more than 50 MiB, also after a restart. The maximum size therefore reached the connection that stores tiles (D62).
+- Run 3: without a value, MapLibre evicted to its 50 MiB default.
+- Runs 4 and 5: lowering the maximum size to 10 MiB evicted only about 7 MiB at each start, not down to 10 MiB. In MapLibre's `OfflineDatabase::evict()` (`platform/default/src/mln/storage/offline_database.cpp`, MapLibre Native 43e1060), each iteration of the loop subtracts `stats.bytesReleased()` from `newAmbientCacheSize`, but `bytesReleased()` is the total released since `stats` was created, not the amount released by that iteration. The loop therefore stops after it has released about the square root of twice the excess times the batch size (about 0.75 MiB for 50 tiles). This contradicts the statement, made under Context before the measurement, that lowering the limit evicts at once; the Context now states what was measured.
+- Run 6: each write of a downloaded resource calls `evict()` again, so the cache reached 10 MiB once the map stored new tiles. The freed pages stay in the file until MapLibre vacuums it, so the file stayed at 31 MiB on disk.
