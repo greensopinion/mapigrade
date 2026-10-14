@@ -35,7 +35,7 @@ Non-goals:
 - `map-layer`: the requirement "Unsupported architectures" changes its example of an unsupported device from "no arm64 ABI" to an ABI outside `arm64-v8a`, `armeabi-v7a` and `x86_64`, and its "Supported device" scenario covers the new ABIs.
 - `third-party-notices`: the requirement "Notices equal to the FFI build" compares the committed notices with the pinned upstream release in place of the local build at the commit in `scripts/maplibre_ffi.lock`.
 
-The `map-texture` and `third-party-notices` deltas modify requirements that the in-progress changes `android-texture-vertical-slice` and `third-party-notices` add or change. Both changes are archived before this change's specs are written.
+The `map-texture` delta modifies the requirement "Supported platforms" as the in-progress change `android-texture-vertical-slice` states it. That change is archived before this one.
 
 ## Impact
 

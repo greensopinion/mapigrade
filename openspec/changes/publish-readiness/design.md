@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md for motivation and scope. The last decision of the in-progress change `third-party-notices` is D97, so decisions here are numbered from D98.
+See proposal.md for motivation and scope, and the specs for the requirements. The last decision of an archived or in-progress change is D97 (`third-party-notices`), so decisions here are numbered from D98.
 
 Current state, as checked on 2026-10-13:
 
@@ -104,9 +104,9 @@ A GitHub Actions workflow on a macOS runner, which has no FFI build:
 2. Creates an app with `flutter create` outside the checkout, with a path dependency on that directory and the example's `lib/main.dart`.
 3. Builds `flutter build apk --release`, `flutter build ios --simulator`, `flutter build ios --no-codesign` and `flutter build macos`.
 4. Checks that the APK's `lib/` has both libraries for each of the three ABIs, and that the iOS and macOS apps contain `MapLibreNativeC.framework`.
-5. Downloads the pinned release tarballs, checks `SHA256SUMS`, and runs the tests that compare the committed headers (D101) and notices (D108) with them.
+5. Runs `scripts/fetch_ffi_release.sh`, which downloads the pinned release's tarballs and `SHA256SUMS` into the git-ignored `third_party/maplibre-native-ffi-release/<version>/` and checks them, and runs the tests that compare the committed headers (D101) and notices (D108) with them. `scripts/package_xcframework.sh` (D102) and `scripts/copy_ffi_notices.sh` (D108) read the tarballs from the same directory.
 
-The workflow runs on pull requests that change the package's native build files, the lock file or `.pubignore`. Runtime checks need devices and are tasks, not CI: an arm64 Android device, the x86_64 emulator, `armeabi-v7a` through `adb install --abi armeabi-v7a` on a device whose `ro.product.cpu.abilist` lists it, an iPhone and macOS. Each runs a release build that loads a style over HTTPS, which exercises the verifier's keep rules under R8.
+The workflow runs on pull requests that change the package's native build files, the lock file or `.pubignore`. A second job on a Linux runner with KVM installs the APK on an x86_64 emulator and runs the test harness's integration tests: the Android emulator on Apple-silicon Macs runs only arm64 system images. The other runtime checks need devices and are tasks, not CI: an arm64 Android device, `armeabi-v7a` through `adb install --abi armeabi-v7a` on a device whose `ro.product.cpu.abilist` lists it, an iPhone and macOS. Each runs a release build that loads a style over HTTPS, which exercises the verifier's keep rules under R8.
 
 ### D107. Upstream contribution
 
@@ -114,7 +114,9 @@ We propose a pull request to `maplibre/maplibre-native-ffi` that adds `MapLibreN
 
 ### D108. Notices from the release
 
-`scripts/copy_ffi_notices.sh` reads the notice files from the release tarballs of the pinned version: the common files from an Apple preset's tarball and the Android files from `android-arm64-egl`, with the table and error rules of D91 and D92. The runtime AAR contains the same files in `META-INF/licenses/maplibre-native-c/`, plus `rustls-platform-verifier/` and `android-ndk/NOTICE`. A task compares the AAR's files with the tarball's. A file that is in the AAR but not in the tarball is handled by the rule of D92: a developer decides which platforms it applies to and adds it to the table.
+`scripts/copy_ffi_notices.sh` reads the notice files from the release tarballs of the pinned version: the common files from an Apple preset's tarball and the Android files from `android-arm64-egl`, with the table and error rules of D91 and D92. `scripts/build_maplibre_ffi.sh` no longer calls it, because a local build may be at a commit without a release.
+
+We compared the 0.202610.0 artifacts on 2026-10-13. The AAR's `META-INF/licenses/maplibre-native-c/` files are byte-identical to the `android-arm64-egl` tarball's `licenses/`, and its `android-ndk/NOTICE` is byte-identical to `cxx-runtime.txt`. The package's committed notices, copied from the local build at `677a1cf`, are byte-identical to the 0.202610.0 tarball's. The AAR also contains `rustls-platform-verifier/` (`LICENSE-APACHE`, `LICENSE-MIT`, and a `NOTICE` that describes the FFI project's modifications). `rust.md` already lists `rustls-platform-verifier-android 0.1.1` and `rustls-platform-verifier 0.6.2`, which the `third-party-notices` change accepted as covering the component, so the license entries don't change.
 
 ## Risks / Trade-offs
 
