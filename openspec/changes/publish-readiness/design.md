@@ -110,7 +110,11 @@ The workflow runs on pull requests that change the package's native build files,
 
 ### D107. Upstream contribution
 
-We propose a pull request to `maplibre/maplibre-native-ffi` that adds `MapLibreNativeC.xcframework.zip`, assembled from the Apple presets as in D102, and its checksum to the native release, and, separately, a Prefab module in the runtime AARs. We prototype both in this repository first (stage 0 of the migration plan), so the pull request describes an assembly that we have already built and run on three platforms.
+We propose a pull request to `maplibre/maplibre-native-ffi` that adds `MapLibreNativeC.xcframework.zip`, assembled from the Apple presets as in D102, and its checksum to the native release, and, separately, a Prefab module in the runtime AARs. The MapLibre organization already publishes an xcframework zip for Swift Package Manager: `maplibre-native` releases contain `MapLibre.dynamic.xcframework.zip`, which `maplibre-gl-native-distribution` declares as a remote binary target.
+
+Before the pull request, we build the zip from upstream tarballs and run it as a remote binary target on macOS and an iPhone, so the proposal describes an assembly that works. We do that first, before the Android and CI work, because the zip is only in the release that this change waits for if the pull request is merged before that release. The Prefab proposal needs no prototype and can be raised at any time.
+
+Upstream's `AI_POLICY.md` requires the contributor to write issues, pull request descriptions and review replies, and to read every line submitted. The user writes and opens both proposals. The implementation on a branch of a fork follows upstream's conventions (mise tasks, `hk` checks, `ci:test`).
 
 ### D108. Notices from the release
 
@@ -132,8 +136,8 @@ We compared the 0.202610.0 artifacts on 2026-10-13. The AAR's `META-INF/licenses
 
 ## Migration Plan
 
-1. Stage 0, against 0.202610.0: implement D99 to D106 with the zip from `scripts/package_xcframework.sh` on a fork's pre-release, and run D106 and the runtime checks.
-2. Stage 1: open the upstream pull request (D107). After it is merged, repeat the checks against `unstable-native-snapshot`.
+1. Stage 0, against 0.202610.0: build the zip with `scripts/package_xcframework.sh`, publish it on a fork's pre-release, and run it as a remote binary target on macOS and an iPhone.
+2. Stage 1: raise Prefab and open the xcframework zip pull request upstream (D107). While upstream reviews them, implement the rest of D99 to D106 against 0.202610.0 and run D106 and the runtime checks. After the pull request is merged, repeat the checks against `unstable-native-snapshot`.
 3. Stage 2: pin the release that contains #807, #808 and, if accepted, the zip. Run `scripts/update_ffi_pins.sh`, the notices script and D106, and confirm that the dry run reports no warnings.
 
 Nothing is published before stage 2, so there is no rollback beyond reverting commits.
