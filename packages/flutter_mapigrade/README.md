@@ -36,6 +36,61 @@ iOS and macOS support Swift Package Manager only. Android apps must limit their 
 - `onError`: receives each `LayerException`; when null, failures go to `FlutterError.reportError`.
 - `MapigradeLayer.maximumCacheSizeBytes`: the tile cache's maximum size, 50 MiB by default, for maps created afterwards. Each map evicts from the shared cache file to its own maximum size; after a reduction, the cache reaches the new maximum size as the map stores new tiles. Freshness follows the server's cache headers.
 
+## HTTP headers
+
+To send an access key or other headers to a tile server, give `httpHeaders` a list of `HttpHeaderRule`s:
+
+```dart
+MapigradeLayer(
+  styleUrl: 'https://tiles.example.com/style.json',
+  httpHeaders: [
+    HttpHeaderRule(
+      url: 'https://tiles.example.com/**',
+      headers: {'X-Access-Key': 'my-key'},
+    ),
+  ],
+)
+```
+
+Each HTTP request that the map sends gets the headers of the first rule whose `url` matches the request's complete URL, and no headers when no rule matches. A request to a host that no rule names, such as a third-party glyph server, doesn't get the access key.
+
+`url` is a glob, compared with the URL byte for byte and case-sensitively, after tile URL templates are filled in:
+
+- `*` matches any characters except `/`, so `https://*.example.com/**` matches `https://a.example.com/x` but not `https://attacker.example/x.example.com/x`.
+- `**` matches any characters.
+- `?` matches one character except `/`.
+- `\` makes the next character literal.
+
+The layer reads `httpHeaders` when it creates its map. Rebuilding the layer with different rules has no effect; to change them, give the layer a new `key`.
+
+MapLibre or the platform HTTP client manages these headers, and a rule can't set them: `Accept-Encoding`, `Connection`, `Content-Length`, `Host`, `If-Modified-Since`, `If-None-Match`, `Keep-Alive`, `Proxy-Authorization`, `Proxy-Connection`, `Range`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade` and `User-Agent`. A rule with one of them, an invalid header name, or a value with a control character other than horizontal tab makes the layer report a `LayerCreateException`, whose message names the header and doesn't contain its value. In debug builds, the `HttpHeaderRule` constructor also asserts on an invalid name or a control character.
+
+Requests that the map serves from its cache or from assets don't get the headers.
+
+## Flutter assets
+
+`asset://<asset key>` loads the Flutter asset with that key, in the style URL and in every URL in a style:
+
+```dart
+MapigradeLayer(styleUrl: 'asset://assets/style.json')
+```
+
+An asset of a package `foo` has the key `packages/foo/<path>`, for example `asset://packages/foo/assets/style.json`. A PMTiles file bundled as an asset has the source URL `pmtiles://asset://assets/tiles.pmtiles`.
+
+MapLibre reads a PMTiles file in byte ranges. On Android, a compressed asset is decompressed from its start for each range, so exclude PMTiles files from compression in `android/app/build.gradle.kts`:
+
+```kotlin
+android {
+    androidResources {
+        noCompress += "pmtiles"
+    }
+}
+```
+
+MBTiles files can't be loaded from assets, because MapLibre opens them only from an absolute file path.
+
+On iOS and macOS, the layer reads assets from the main bundle's `App.framework`. In an add-to-app host that loads Flutter from another framework, `asset://` URLs fail with a `LayerLoadException`.
+
 ## Limitations
 
 - No API for style layers, sources, queries or pitch.

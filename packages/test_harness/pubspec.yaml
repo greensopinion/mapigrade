@@ -52,6 +52,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # The style and tiles that integration_test/resource_test.dart loads with
+  # asset:// URLs. tool/make_test_tiles.sh builds area.pmtiles.
+  assets:
+    - assets/
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

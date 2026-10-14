@@ -1,0 +1,23 @@
+{
+  "version": 8,
+  "sources": {
+    "area": {
+      "type": "vector",
+      "url": "pmtiles://asset://assets/area.pmtiles"
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {"background-color": "#00ff00"}
+    },
+    {
+      "id": "area",
+      "type": "fill",
+      "source": "area",
+      "source-layer": "area",
+      "paint": {"fill-color": "#0000ff", "fill-antialias": false}
+    }
+  ]
+}

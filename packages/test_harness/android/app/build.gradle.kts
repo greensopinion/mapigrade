@@ -34,6 +34,12 @@ android {
         versionName = flutter.versionName
     }
 
+    // MapLibre reads PMTiles assets in byte ranges, which needs them stored
+    // without compression.
+    androidResources {
+        noCompress += "pmtiles"
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
