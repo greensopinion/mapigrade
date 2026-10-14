@@ -97,23 +97,29 @@ Both: Xcode 26.6 (17F113); Flutter 3.47.5 stable (framework `6a19cca564`, engine
 Procedure (`packages/test_harness/lib/benchmark.dart`):
 
 ```sh
-cd example
+cd packages/test_harness
 # macOS: open brings the window to the front. Keep the whole window visible during the
 # run: a window behind others, or partly under another window, gets fewer frames or none.
 flutter build macos --release --dart-define=BENCHMARK=true
 open -W --env MLT_WINDOW_SIZE=1600x1000 --stdout result.txt \
-  build/macos/Build/Products/Release/flutter_mapigrade_example.app
+  build/macos/Build/Products/Release/test_harness.app
 
-# iPhone: the result line is read from the console.
+# iPhone (add --dart-define=BENCHMARK_SUSTAINED_S=300 for the 5-minute run)
 flutter build ios --release --dart-define=BENCHMARK=true
 xcrun devicectl device install app --device <device> build/ios/iphoneos/Runner.app
 xcrun devicectl device process launch --device <device> --console \
-  -e '{"MLT_KEEP_AWAKE":"1"}' com.greensopinion.mapigradeExample
+  -e '{"MLT_KEEP_AWAKE":"1"}' com.greensopinion.mapigradeTestHarness
 
-# 5-minute run: add --dart-define=BENCHMARK_SUSTAINED_S=300 to the iOS build.
+# Memory and color measurements (any device)
+flutter drive -d <device> --driver=test_driver/integration_test.dart \
+  --target=integration_test/memory_measurement.dart
+flutter drive -d <device> --driver=test_driver/integration_test.dart \
+  --target=integration_test/color_measurement.dart
 ```
 
 The app prints one line starting with `BENCHMARK_RESULT` (or `BENCHMARK_SUSTAINED_RESULT`) and exits.
+
+Instruments' `xctrace` launches an app by its bundle identifier, which the Debug and Release builds share. Delete `build/macos/Build/Products/Debug/test_harness.app` before tracing the Release build, or `xctrace` starts the Debug build.
 
 ### Results (measured 30 s pass)
 
@@ -470,3 +476,14 @@ Trace: in the Metal System Trace of the benchmark run (about 100 s, including th
 ### iPhone (iOS slice, task 5.7)
 
 A 20 s Metal System Trace on the iPhone 15 Pro Max (`xcrun xctrace record --device <id> --template 'Metal System Trace' --attach <pid>`, 2026-10-10), attached to a release build of the example panning continuously (`--dart-define=CONTINUOUS_PAN=true`): the app's encoders were 4,966 render encoders and 2,050 blit encoders, with no compute encoders; 4,100 were encoded on the map thread and 2,916 on Flutter's raster thread. Of the 12,808 time-profile samples, `mln_render_session_render_update` appears in 6,032, the plugin's blit (`-[IOGPUMetalBlitCommandEncoder copyFromTexture:toTexture:]` from `MetalRenderTarget::CopyToBuffer`) in 121 and `copyPixelBuffer` in 77, while `CVPixelBufferLockBaseAddress`, `IOSurfaceLock`, `getBytes`, `replaceRegion` and `mln_texture_read_premultiplied_rgba8` appear 0 times. Two samples are in `IOSurfaceClientGetBaseAddressOfPlane`; both are called by the Metal driver's `getGPUVirtualAddress` while it encodes the plugin's blit, which computes a GPU address, not a CPU read.
+
+## Color check
+
+`packages/test_harness/lib/color_check.dart` (`flutter run -d macos -t lib/color_check.dart`) shows a map whose style has a `#3366CC` background and a `#E6B31A` fill, and Flutter swatches of the same colors below it. In a window screenshot (Display P3, 2026-10-09) the map and the swatches measured:
+
+| Color | Map | Flutter swatch | Largest channel difference |
+| --- | --- | --- | --- |
+| fill `#E6B31A` | 222, 181, 67 | 222, 181, 67 | 0 |
+| background `#3366CC` | 64, 101, 197 | 64, 100, 197 | 1 |
+
+Both are within the 2/255 tolerance, so the IOSurface buffers need no explicit color space. On the iPhone, `packages/test_harness/integration_test/color_measurement.dart` renders the same screen to an image with `RepaintBoundary.toImage` and compares the pixels: the map and the swatches had identical values (fill 230, 179, 26; background 51, 102, 204; 2026-10-10).

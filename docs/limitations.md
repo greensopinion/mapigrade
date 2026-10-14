@@ -1,6 +1,6 @@
 # Limitations and findings of the macOS and iOS vertical slices
 
-Measured results are in `benchmarks.md`. The designs and their amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md` (macOS) and `openspec/changes/ios-texture-vertical-slice/design.md` (iOS, decisions D11 to D18).
+Measured results are in `benchmarks.md`. The designs and their amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md` (macOS) and `openspec/changes/archive/2026-10-10-ios-texture-vertical-slice/design.md` (iOS, decisions D11 to D18).
 
 ## App bundle size
 
@@ -79,7 +79,7 @@ The engine source asserts the platform thread in `Shell::OnPlatformViewMarkTextu
 
 ### Colors
 
-Map colors match Flutter's within 1/255 per channel on macOS without setting a color space on the IOSurface (README, Color check). On the iPhone they match exactly: rendered to an image with `RepaintBoundary.toImage` (`packages/test_harness/integration_test/color_measurement.dart`), the map's fill and background and the Flutter swatches of the same colors had identical RGB values.
+Map colors match Flutter's within 1/255 per channel on macOS without setting a color space on the IOSurface (`benchmarks.md`, Color check). On the iPhone they match exactly: rendered to an image with `RepaintBoundary.toImage` (`packages/test_harness/integration_test/color_measurement.dart`), the map's fill and background and the Flutter swatches of the same colors had identical RGB values.
 
 ### Frame rate on the iPhone over dense areas
 
