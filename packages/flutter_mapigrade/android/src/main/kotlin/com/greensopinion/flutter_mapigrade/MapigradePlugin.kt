@@ -5,7 +5,9 @@ import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -20,6 +22,9 @@ import io.flutter.view.TextureRegistry
  * activity is stopped, and the renderers release cached resources under memory pressure (D55).
  *
  * The plugin supports one Flutter engine per process, as on macOS and iOS.
+ *
+ * When the process can't load the native library, for example on a device without an arm64 ABI,
+ * the plugin logs a warning and calls no native function for the life of the process (D85).
  */
 class MapigradePlugin : FlutterPlugin, ActivityAware {
     private var applicationContext: Context? = null
@@ -28,11 +33,11 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     private val activityCallbacks =
         object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(started: Activity) {
-                if (started === activity) nativeSetPaused(false)
+                if (libraryLoaded && started === activity) nativeSetPaused(false)
             }
 
             override fun onActivityStopped(stopped: Activity) {
-                if (stopped === activity) nativeSetPaused(true)
+                if (libraryLoaded && stopped === activity) nativeSetPaused(true)
             }
 
             override fun onActivityCreated(created: Activity, state: Bundle?) {}
@@ -50,19 +55,21 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
         object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
                 @Suppress("DEPRECATION")
-                if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) nativeReduceMemoryUse()
+                if (libraryLoaded && level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+                    nativeReduceMemoryUse()
+                }
             }
 
             @Deprecated("Deprecated in Java")
             override fun onLowMemory() {
-                nativeReduceMemoryUse()
+                if (libraryLoaded) nativeReduceMemoryUse()
             }
 
             override fun onConfigurationChanged(configuration: Configuration) {}
         }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        System.loadLibrary("flutter_mapigrade")
+        if (!loadLibrary()) return
         val context = binding.applicationContext
         applicationContext = context
         renderer = binding.flutterEngine.renderer
@@ -77,6 +84,7 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        if (!libraryLoaded) return
         val attached = binding.activity
         activity = attached
         attached.application.registerActivityLifecycleCallbacks(activityCallbacks)
@@ -108,7 +116,37 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     private external fun nativeReduceMemoryUse()
 
     companion object {
+        private const val LIBRARY = "flutter_mapigrade"
+
         private var renderer: FlutterRenderer? = null
+
+        // The result of the first load in this process, or null before it. The result applies to
+        // the process, so a second engine doesn't load the library again.
+        private var loadResult: Boolean? = null
+
+        /** Whether the process loaded the native library. */
+        private val libraryLoaded: Boolean
+            get() = loadResult == true
+
+        private fun loadLibrary(): Boolean {
+            loadResult?.let { return it }
+            val loaded =
+                try {
+                    System.loadLibrary(LIBRARY)
+                    true
+                } catch (e: UnsatisfiedLinkError) {
+                    Log.w(
+                        "flutter_mapigrade",
+                        "lib$LIBRARY.so isn't available for this device's ABIs " +
+                            "(${Build.SUPPORTED_ABIS.joinToString()}); MapigradeLayer.isSupported " +
+                            "is false",
+                        e,
+                    )
+                    false
+                }
+            loadResult = loaded
+            return loaded
+        }
 
         /**
          * For tests (map_texture_trim_surfaces_for_testing): makes Flutter remove the surfaces of

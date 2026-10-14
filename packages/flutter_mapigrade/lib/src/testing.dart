@@ -20,6 +20,7 @@ export 'texture/map_texture_controller.dart'
         RenderError,
         StyleLoaded;
 export 'texture/map_texture_view.dart' show MapTextureView;
+export 'texture/native_library.dart' show nativeLibraryAvailableOverride;
 export 'texture/test_hooks.dart'
     show
         memoryFootprintForTesting,

@@ -97,7 +97,7 @@ The `flutter_map` layer (`MapLibreTextureLayer`, flutter-map-layer change) align
 
 ## Known limitations
 
-- arm64 only: the FFI presets are `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal`, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds.
+- arm64 only: the FFI presets are `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal`, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds. On Android the plugin packages `libflutter_mapigrade.so` for `arm64-v8a` only. On a device without an arm64 ABI, the plugin logs a warning that names the device's ABIs and calls no native code, the app starts, `MapigradeLayer.isSupported` is false, and a `MapigradeLayer` reports a `LayerCreateException` (unsupported-architectures change). `packages/test_harness/integration_test/unsupported_test.dart` checks this on an arm64 device with an APK built without the library; a 32-bit device was not tested.
 - iOS 15.5 or later, the FFI's iOS deployment target.
 - Swift Package Manager only: the plugin has no podspec.
 - One Flutter engine per process: the plugin keeps the texture registry of the engine that registered it last.

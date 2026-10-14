@@ -2,6 +2,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../texture/map_texture_controller.dart';
+import '../texture/native_library.dart';
 import 'http_header_rule.dart';
 import 'layer_alignment.dart';
 import 'layer_exception.dart';
@@ -24,6 +25,13 @@ final class MapigradeLayer extends StatelessWidget {
          (styleUrl == null) != (styleJson == null),
          'give exactly one of styleUrl and styleJson',
        );
+
+  /// Whether the layer can create a map in this process: false when the
+  /// package's native library isn't available, for example on an Android
+  /// device without an arm64 ABI. When it is false, place another layer, such
+  /// as a `TileLayer`, in place of this one; this layer would report a
+  /// [LayerCreateException] and draw nothing.
+  static bool get isSupported => nativeLibraryAvailable;
 
   /// The maximum size in bytes of the tile cache for maps created after it is
   /// set; 50 MiB by default. Each map evicts from the shared cache file to its

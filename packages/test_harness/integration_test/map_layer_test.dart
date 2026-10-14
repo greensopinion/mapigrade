@@ -87,6 +87,11 @@ void main() {
     };
   }
 
+  test('MapigradeLayer.isSupported is true in an app with the native library',
+      () {
+    expect(MapigradeLayer.isSupported, isTrue);
+  });
+
   testWidgets('the layer fills the FlutterMap below the markers', (
     tester,
   ) async {

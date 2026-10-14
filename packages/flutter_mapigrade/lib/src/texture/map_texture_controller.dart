@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import 'native_library.dart';
 
 /// A map camera: center, zoom and bearing in degrees.
 class MapCamera {
@@ -254,10 +255,19 @@ class MapTextureController {
   ///
   /// On Android every map renders directly into the buffers that Flutter
   /// displays, and [copyFree] has no effect.
+  ///
+  /// Throws [MapTextureException] without calling native code when the native
+  /// library isn't available in this process (design D86 of the
+  /// unsupported-architectures change).
   factory MapTextureController.create(
       {required double pixelRatio,
       bool copyFree = true,
       List<HeaderRule> httpHeaders = const []}) {
+    if (!nativeLibraryAvailable) {
+      throw const MapTextureException(
+          'the native library of flutter_mapigrade is not available in this '
+          'process');
+    }
     late final MapTextureController controller;
     final callable = NativeCallable<MapTextureEventCallback>.listener(
         (Pointer<MapTextureEventStruct> event) => controller._onEvent(event));
@@ -312,11 +322,14 @@ class MapTextureController {
   /// maximum size.
   ///
   /// Throws [ArgumentError] for a negative [bytes] without calling native
-  /// code, and [MapTextureException] if the native call fails.
+  /// code, and [MapTextureException] if the native call fails. Does nothing
+  /// when the native library isn't available in this process (design D86 of
+  /// the unsupported-architectures change).
   static void setMaximumCacheSize(int bytes) {
     if (bytes < 0) {
       throw ArgumentError.value(bytes, 'bytes', 'must not be negative');
     }
+    if (!nativeLibraryAvailable) return;
     final status = mapTextureSetMaximumCacheSize(bytes);
     if (status != mapTextureOk) {
       throw MapTextureException(

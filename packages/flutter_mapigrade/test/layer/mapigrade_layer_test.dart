@@ -1,13 +1,21 @@
-// Widget tests for the public layer (design D66 of the public-api change).
+// Widget tests for the public layer (design D66 of the public-api change, D86
+// of unsupported-architectures).
 import 'package:flutter/widgets.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
 import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
 import 'package:flutter_mapigrade/src/layer/mapigrade_layer.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
+import 'package:flutter_mapigrade/src/texture/native_library.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
+
+const _markerKey = Key('marker');
 
 void main() {
+  tearDown(() => nativeLibraryAvailableOverride = null);
+
   testWidgets('builds a copy-free MapTextureLayer with the same values', (
     tester,
   ) async {
@@ -79,5 +87,63 @@ void main() {
       throwsArgumentError,
     );
     expect(MapigradeLayer.maximumCacheSizeBytes, 52428800);
+  });
+
+  test('isSupported reports whether the native library is available', () {
+    nativeLibraryAvailableOverride = true;
+    expect(MapigradeLayer.isSupported, isTrue);
+    nativeLibraryAvailableOverride = false;
+    expect(MapigradeLayer.isSupported, isFalse);
+  });
+
+  testWidgets('reports a creation failure without the native library', (
+    tester,
+  ) async {
+    nativeLibraryAvailableOverride = false;
+    final failures = <LayerException>[];
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(size: Size(800, 600)),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: FlutterMap(
+            options: const MapOptions(
+              initialCenter: LatLng(49.25, -123.1),
+              initialZoom: 10,
+            ),
+            children: [
+              MapigradeLayer(
+                styleUrl: 'https://example.com/style.json',
+                onError: failures.add,
+              ),
+              const MarkerLayer(
+                markers: [
+                  Marker(
+                    point: LatLng(49.25, -123.1),
+                    child: SizedBox(key: _markerKey),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(failures, hasLength(1));
+    expect(failures.single, isA<LayerCreateException>());
+    expect(
+      failures.single.message,
+      contains('native library of flutter_mapigrade is not available'),
+    );
+    expect(find.byKey(_markerKey), findsOneWidget);
+  });
+
+  test('maximumCacheSizeBytes is stored without the native library', () {
+    nativeLibraryAvailableOverride = false;
+    addTearDown(() => MapigradeLayer.maximumCacheSizeBytes = 52428800);
+    MapigradeLayer.maximumCacheSizeBytes = 1024;
+    expect(MapigradeLayer.maximumCacheSizeBytes, 1024);
   });
 }

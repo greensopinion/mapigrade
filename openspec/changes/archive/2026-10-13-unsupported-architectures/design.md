@@ -48,7 +48,7 @@ Alternative: compare `Abi.current()` with `androidArm64`, `iosArm64` and `macosA
 
 ### D88. The test harness can leave the native library out of the APK
 
-`packages/test_harness/android/app/build.gradle.kts` reads a Gradle property, `mapigrade.omitNativeLibrary`. When it is `true`, the app excludes `**/libflutter_mapigrade.so` through `packaging.jniLibs.excludes`. An integration test, `integration_test/unsupported_test.dart`, run with `flutter test integration_test/unsupported_test.dart --android-project-arg=mapigrade.omitNativeLibrary=true` on an arm64 emulator or device, checks that the app starts, that `isSupported` is false, and that the layer reports `LayerCreateException`. The property is in the test harness only, not in the plugin.
+`packages/test_harness/android/app/build.gradle.kts` reads a Gradle property, `mapigrade.omitNativeLibrary`. When it is `true`, the app excludes `**/libflutter_mapigrade.so` through `packaging.jniLibs.excludes`. An integration test, `integration_test/unsupported_test.dart`, run with `env 'ORG_GRADLE_PROJECT_mapigrade.omitNativeLibrary=true' flutter test integration_test/unsupported_test.dart` on an arm64 emulator or device, checks that the app starts, that `isSupported` is false, and that the layer reports `LayerCreateException`. The property is in the test harness only, not in the plugin. `flutter test` has no `--android-project-arg` option, so the property is set through Gradle's `ORG_GRADLE_PROJECT_` environment variable.
 
 Alternative: test on an `x86_64` emulator. Rejected as the only check: the Android emulator on Apple-silicon Macs runs arm64 system images only. A run on a 32-bit device is in the tasks as an optional check.
 
@@ -61,5 +61,5 @@ The README's limitation becomes: the native library is built for arm64; on Andro
 - [The check on Android uses `dlopen` by library name, which depends on the app's linker namespace] → It is the same lookup that `DynamicLoadingSystem` already uses for every binding, so if it fails, the bindings fail too.
 - [`providesSymbol` on Darwin depends on `map_texture_create` being visible to `dlsym`] → `@Native` already resolves the symbols from the process the same way. The unit and integration tests on macOS and iOS check that `isSupported` is true.
 - [An application that ignores `isSupported` gets a viewport without a map] → This matches any other creation failure, and the failure handler receives `LayerCreateException`.
-- [`tile-cache-maximum-size` adds a static setter that calls native code] → That change's setter must check `nativeLibraryAvailable` first. Task 5.1 updates its tasks.
+- [`tile-cache-maximum-size` added a static setter that calls native code] → That change was archived on 2026-10-12, before this one was implemented, so `MapTextureController.setMaximumCacheSize` checks `nativeLibraryAvailable` and calls no native code when it is false (task 5.1).
 - [Behavior on a real 32-bit device is checked only if one is available] → The arm64 run without the library (D88) exercises the same code path, because `loadLibrary` fails with the same error.

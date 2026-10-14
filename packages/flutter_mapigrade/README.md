@@ -28,7 +28,38 @@ Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a di
 | iOS | 15.5 | arm64 |
 | macOS | 14.3 | arm64 |
 
-iOS and macOS support Swift Package Manager only. Android apps must limit their ABIs to `arm64-v8a`.
+iOS and macOS support Swift Package Manager only.
+
+The native library is built for arm64. On Android, an app that also runs on other ABIs, such as `armeabi-v7a` or `x86_64`, starts there without the native library. `MapigradeLayer.isSupported` is then false; read it and place another layer when it is false:
+
+```dart
+FlutterMap(
+  options: const MapOptions(initialCenter: LatLng(49.25, -123.1)),
+  children: [
+    if (MapigradeLayer.isSupported)
+      MapigradeLayer(styleUrl: 'https://tiles.openfreemap.org/styles/liberty')
+    else
+      TileLayer(
+        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.example.app',
+      ),
+  ],
+)
+```
+
+A `MapigradeLayer` placed without the native library reports a `LayerCreateException` to `onError` and draws nothing.
+
+An app that wants no fallback limits its ABIs to `arm64-v8a` in its own app module, so that Google Play offers it only to devices with an arm64 ABI. In `android/app/build.gradle.kts`:
+
+```kotlin
+android {
+    defaultConfig {
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+    }
+}
+```
 
 ## Options
 

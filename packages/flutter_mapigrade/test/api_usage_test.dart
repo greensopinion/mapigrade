@@ -17,7 +17,12 @@ void main() {
     );
     final map = FlutterMap(
       options: const MapOptions(initialCenter: LatLng(0, 0)),
-      children: const [layer],
+      children: [
+        if (MapigradeLayer.isSupported)
+          layer
+        else
+          TileLayer(urlTemplate: 'https://tile.example.com/{z}/{x}/{y}.png'),
+      ],
     );
     final LayerException exception = switch (map.children.length) {
       0 => const LayerLoadException('load'),
