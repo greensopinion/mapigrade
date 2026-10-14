@@ -89,7 +89,7 @@ Each displayed frame is reported to Dart with the camera and size it was rendere
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | commit `6f5a662093873a5a690de34fe21f6329b58e77e3`, presets `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal` (`scripts/maplibre_ffi.lock`) |
+| MapLibre Native FFI | commit `677a1cfdf1ab2b914f633d4abc790b7136d3a321`, presets `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal` (`scripts/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.5 |
 
