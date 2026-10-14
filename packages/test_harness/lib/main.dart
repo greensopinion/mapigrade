@@ -278,6 +278,10 @@ class _MapScreenState extends State<MapScreen>
                 _button('pan-north', Icons.arrow_upward, () => _pan(0, -0.25)),
                 _button('pan-south', Icons.arrow_downward, () => _pan(0, 0.25)),
                 _button('pan-east', Icons.arrow_forward, () => _pan(0.25, 0)),
+                // Shows the license registry, including the FFI's notices
+                // (task 4.2 of the third-party-notices change).
+                _button('open-licenses', Icons.description,
+                    () => showLicensePage(context: context)),
               ]),
               SwitchListTile(
                 key: const Key('continuous-pan'),

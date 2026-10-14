@@ -21,12 +21,14 @@ class MapTextureView extends StatelessWidget {
     if (!controller.isDisposed) {
       controller.setDisplayRefreshRate(View.of(context).display.refreshRate);
     }
-    return LayoutBuilder(builder: (context, constraints) {
-      final size = constraints.biggest;
-      if (size.isFinite && !size.isEmpty && !controller.isDisposed) {
-        controller.resize(size, pixelRatio);
-      }
-      return Texture(textureId: controller.textureId);
-    });
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        if (size.isFinite && !size.isEmpty && !controller.isDisposed) {
+          controller.resize(size, pixelRatio);
+        }
+        return Texture(textureId: controller.textureId);
+      },
+    );
   }
 }

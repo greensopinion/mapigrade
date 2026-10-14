@@ -22,6 +22,7 @@ class ViewCamera {
 
   /// The MapLibre camera.
   final MapCamera camera;
+
   /// The logical size of the viewport.
   final Size viewport;
 

@@ -25,8 +25,10 @@ class CameraVelocity {
 
   /// The rate of change of the center, in normalized Mercator coordinates.
   final Offset center;
+
   /// The rate of change of the zoom.
   final double zoom;
+
   /// The rate of change of the bearing, in degrees.
   final double bearing;
 

@@ -19,10 +19,13 @@ class MapCamera {
 
   /// The latitude of the center, in degrees.
   final double latitude;
+
   /// The longitude of the center, in degrees.
   final double longitude;
+
   /// The MapLibre zoom level.
   final double zoom;
+
   /// The bearing in degrees.
   final double bearing;
 
@@ -44,10 +47,13 @@ class FrameCamera {
 
   /// Increases by one for each frame the map renders.
   final int frameId;
+
   /// The camera the frame was rendered with.
   final MapCamera camera;
+
   /// The size of the frame in physical pixels.
   final Size physicalSize;
+
   /// Physical pixels per logical pixel of the frame.
   final double scaleFactor;
 
@@ -80,6 +86,7 @@ class StyleLoaded extends MapEvent {
 class LoadingFailed extends MapEvent {
   /// A loading failure with [message].
   const LoadingFailed(this.message);
+
   /// Describes the cause of the failure.
   final String message;
 }
@@ -88,6 +95,7 @@ class LoadingFailed extends MapEvent {
 class RenderError extends MapEvent {
   /// A render error with [message].
   const RenderError(this.message);
+
   /// Describes the cause of the error.
   final String message;
 }
@@ -102,29 +110,30 @@ class MapIdle extends MapEvent {
 /// Counters from the native map thread.
 class MapTextureStats {
   MapTextureStats._(MapTextureStatsStruct s)
-      : renderedFrames = s.renderedFrames,
-        skippedRenders = s.skippedRenders,
-        waitsForDisplay = s.waitsForDisplay,
-        renderUpdateCount = s.renderUpdateCount,
-        renderUpdateTotal = Duration(microseconds: s.renderUpdateTotalNs ~/ 1000),
-        renderUpdateMax = Duration(microseconds: s.renderUpdateMaxNs ~/ 1000),
-        copyCount = s.copyCount,
-        copyTotal = Duration(microseconds: s.copyTotalNs ~/ 1000),
-        copyMax = Duration(microseconds: s.copyMaxNs ~/ 1000),
-        presentedFrames = s.presentedFrames,
-        renderUpdateAvailableEvents = s.renderUpdateAvailableEvents,
-        needsRepaintFrames = s.needsRepaintFrames,
-        pausedRenders = s.pausedRenders,
-        memoryReductions = s.memoryReductions,
-        frameCycleCount = s.frameCycleCount,
-        frameCycleTotal = Duration(microseconds: s.frameCycleTotalNs ~/ 1000),
-        pickupWaitCount = s.pickupWaitCount,
-        pickupWaitTotal = Duration(microseconds: s.pickupWaitTotalNs ~/ 1000),
-        presentToRenderCount = s.presentToRenderCount,
-        presentToRenderTotal =
-            Duration(microseconds: s.presentToRenderTotalNs ~/ 1000),
-        renderAheadFrames = s.renderAheadFrames,
-        intervalWaits = s.intervalWaits;
+    : renderedFrames = s.renderedFrames,
+      skippedRenders = s.skippedRenders,
+      waitsForDisplay = s.waitsForDisplay,
+      renderUpdateCount = s.renderUpdateCount,
+      renderUpdateTotal = Duration(microseconds: s.renderUpdateTotalNs ~/ 1000),
+      renderUpdateMax = Duration(microseconds: s.renderUpdateMaxNs ~/ 1000),
+      copyCount = s.copyCount,
+      copyTotal = Duration(microseconds: s.copyTotalNs ~/ 1000),
+      copyMax = Duration(microseconds: s.copyMaxNs ~/ 1000),
+      presentedFrames = s.presentedFrames,
+      renderUpdateAvailableEvents = s.renderUpdateAvailableEvents,
+      needsRepaintFrames = s.needsRepaintFrames,
+      pausedRenders = s.pausedRenders,
+      memoryReductions = s.memoryReductions,
+      frameCycleCount = s.frameCycleCount,
+      frameCycleTotal = Duration(microseconds: s.frameCycleTotalNs ~/ 1000),
+      pickupWaitCount = s.pickupWaitCount,
+      pickupWaitTotal = Duration(microseconds: s.pickupWaitTotalNs ~/ 1000),
+      presentToRenderCount = s.presentToRenderCount,
+      presentToRenderTotal = Duration(
+        microseconds: s.presentToRenderTotalNs ~/ 1000,
+      ),
+      renderAheadFrames = s.renderAheadFrames,
+      intervalWaits = s.intervalWaits;
 
   /// Frames the map rendered.
   final int renderedFrames;
@@ -134,18 +143,23 @@ class MapTextureStats {
 
   /// Renders deferred because Flutter hadn't taken the latest frame yet.
   final int waitsForDisplay;
+
   /// Calls of `mln_render_session_render_update`.
   final int renderUpdateCount;
+
   /// The total time of the calls counted by [renderUpdateCount].
   final Duration renderUpdateTotal;
+
   /// The longest of the calls counted by [renderUpdateCount].
   final Duration renderUpdateMax;
 
   /// GPU copies of the rendered frame into a display buffer, including the
   /// wait for completion. Always 0 for a copy-free map.
   final int copyCount;
+
   /// The total time of the copies counted by [copyCount].
   final Duration copyTotal;
+
   /// The longest of the copies counted by [copyCount].
   final Duration copyMax;
 
@@ -169,17 +183,20 @@ class MapTextureStats {
   /// Time from one render to the start of the next, while rendering
   /// continuously.
   final int frameCycleCount;
+
   /// The total of the times counted by [frameCycleCount].
   final Duration frameCycleTotal;
 
   /// Time from publishing a frame until Flutter takes it.
   final int pickupWaitCount;
+
   /// The total of the times counted by [pickupWaitCount].
   final Duration pickupWaitTotal;
 
   /// Time from Flutter taking a frame until the next render starts, for
   /// renders that waited for Flutter to take the latest frame.
   final int presentToRenderCount;
+
   /// The total of the times counted by [presentToRenderCount].
   final Duration presentToRenderTotal;
 
@@ -220,6 +237,7 @@ class MapTextureDisposedException implements Exception {
 class MapTextureException implements Exception {
   /// A failure with [message].
   const MapTextureException(this.message);
+
   /// Describes the failure.
   final String message;
   @override
@@ -235,7 +253,11 @@ typedef HeaderRule = ({String url, Map<String, String> headers});
 /// Calls after [dispose] throw [MapTextureDisposedException].
 class MapTextureController {
   MapTextureController._(
-      this._handle, this.textureId, this.copyFree, this._callable);
+    this._handle,
+    this.textureId,
+    this.copyFree,
+    this._callable,
+  );
 
   /// Creates a map that renders at [pixelRatio] device pixels per logical
   /// pixel. The ratio fixes the density of the style's sprites and glyphs for
@@ -259,18 +281,21 @@ class MapTextureController {
   /// Throws [MapTextureException] without calling native code when the native
   /// library isn't available in this process (design D86 of the
   /// unsupported-architectures change).
-  factory MapTextureController.create(
-      {required double pixelRatio,
-      bool copyFree = true,
-      List<HeaderRule> httpHeaders = const []}) {
+  factory MapTextureController.create({
+    required double pixelRatio,
+    bool copyFree = true,
+    List<HeaderRule> httpHeaders = const [],
+  }) {
     if (!nativeLibraryAvailable) {
       throw const MapTextureException(
-          'the native library of flutter_mapigrade is not available in this '
-          'process');
+        'the native library of flutter_mapigrade is not available in this '
+        'process',
+      );
     }
     late final MapTextureController controller;
     final callable = NativeCallable<MapTextureEventCallback>.listener(
-        (Pointer<MapTextureEventStruct> event) => controller._onEvent(event));
+      (Pointer<MapTextureEventStruct> event) => controller._onEvent(event),
+    );
     final (handle, error) = using((arena) {
       // Each rule's URL, then its names and values (design D81).
       final strings = [
@@ -292,13 +317,14 @@ class MapTextureController {
       }
       final outError = arena<Pointer<Utf8>>();
       final handle = mapTextureCreate(
-          pixelRatio,
-          copyFree ? 1 : 0,
-          callable.nativeFunction,
-          headerStrings,
-          headerCounts,
-          httpHeaders.length,
-          outError);
+        pixelRatio,
+        copyFree ? 1 : 0,
+        callable.nativeFunction,
+        headerStrings,
+        headerCounts,
+        httpHeaders.length,
+        outError,
+      );
       String? error;
       if (outError.value != nullptr) {
         error = outError.value.toDartString();
@@ -309,7 +335,8 @@ class MapTextureController {
     if (handle <= 0) {
       callable.close();
       throw MapTextureException(
-          error ?? 'map_texture_create failed with $handle');
+        error ?? 'map_texture_create failed with $handle',
+      );
     }
     final textureId = mapTextureTextureId(handle);
     controller = MapTextureController._(handle, textureId, copyFree, callable);
@@ -333,7 +360,8 @@ class MapTextureController {
     final status = mapTextureSetMaximumCacheSize(bytes);
     if (status != mapTextureOk) {
       throw MapTextureException(
-          'map_texture_set_maximum_cache_size failed with $status');
+        'map_texture_set_maximum_cache_size failed with $status',
+      );
     }
   }
 
@@ -376,8 +404,15 @@ class MapTextureController {
   /// Sets the camera. When this is called faster than the map renders, the
   /// map renders the latest camera only.
   void setCamera(MapCamera camera) {
-    _check(mapTextureSetCamera(_handle, camera.latitude, camera.longitude,
-        camera.zoom, camera.bearing));
+    _check(
+      mapTextureSetCamera(
+        _handle,
+        camera.latitude,
+        camera.longitude,
+        camera.zoom,
+        camera.bearing,
+      ),
+    );
   }
 
   /// Sets the viewport's logical size and device pixel ratio. Repeated calls
@@ -389,8 +424,14 @@ class MapTextureController {
         pixelRatio == _pixelRatio) {
       return;
     }
-    _check(mapTextureResize(
-        _handle, logicalSize.width, logicalSize.height, pixelRatio));
+    _check(
+      mapTextureResize(
+        _handle,
+        logicalSize.width,
+        logicalSize.height,
+        pixelRatio,
+      ),
+    );
     _width = logicalSize.width;
     _height = logicalSize.height;
     _pixelRatio = pixelRatio;
@@ -460,8 +501,10 @@ class MapTextureController {
           zoom: e.zoom,
           bearing: e.bearing,
         ),
-        physicalSize:
-            Size(e.physicalWidth.toDouble(), e.physicalHeight.toDouble()),
+        physicalSize: Size(
+          e.physicalWidth.toDouble(),
+          e.physicalHeight.toDouble(),
+        ),
         scaleFactor: e.scaleFactor,
         displayTime: e.displayTimeUs < 0 ? null : e.displayTimeUs,
       );

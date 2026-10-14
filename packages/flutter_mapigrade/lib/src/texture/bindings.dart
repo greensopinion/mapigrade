@@ -100,26 +100,29 @@ final class MapTextureStatsStruct extends Struct {
 }
 
 typedef MapTextureEventCallback = Void Function(
-    Pointer<MapTextureEventStruct> event);
+  Pointer<MapTextureEventStruct> event,
+);
 
 @Native<
-        Int64 Function(
-            Double,
-            Int32,
-            Pointer<NativeFunction<MapTextureEventCallback>>,
-            Pointer<Pointer<Utf8>>,
-            Pointer<Int32>,
-            Int32,
-            Pointer<Pointer<Utf8>>)>(
-    symbol: 'map_texture_create')
+  Int64 Function(
+    Double,
+    Int32,
+    Pointer<NativeFunction<MapTextureEventCallback>>,
+    Pointer<Pointer<Utf8>>,
+    Pointer<Int32>,
+    Int32,
+    Pointer<Pointer<Utf8>>,
+  )
+>(symbol: 'map_texture_create')
 external int mapTextureCreate(
-    double pixelRatio,
-    int copyFree,
-    Pointer<NativeFunction<MapTextureEventCallback>> callback,
-    Pointer<Pointer<Utf8>> headerStrings,
-    Pointer<Int32> headerCounts,
-    int ruleCount,
-    Pointer<Pointer<Utf8>> outError);
+  double pixelRatio,
+  int copyFree,
+  Pointer<NativeFunction<MapTextureEventCallback>> callback,
+  Pointer<Pointer<Utf8>> headerStrings,
+  Pointer<Int32> headerCounts,
+  int ruleCount,
+  Pointer<Pointer<Utf8>> outError,
+);
 
 @Native<Void Function(Pointer<Utf8>)>(symbol: 'map_texture_string_free')
 external void mapTextureStringFree(Pointer<Utf8> string);
@@ -131,32 +134,47 @@ external int mapTextureSetMaximumCacheSize(int bytes);
 external int mapTextureTextureId(int handle);
 
 @Native<Int32 Function(Int64, Pointer<Utf8>)>(
-    symbol: 'map_texture_load_style_url')
+  symbol: 'map_texture_load_style_url',
+)
 external int mapTextureLoadStyleUrl(int handle, Pointer<Utf8> url);
 
 @Native<Int32 Function(Int64, Pointer<Utf8>)>(
-    symbol: 'map_texture_load_style_json')
+  symbol: 'map_texture_load_style_json',
+)
 external int mapTextureLoadStyleJson(int handle, Pointer<Utf8> json);
 
 @Native<Int32 Function(Int64, Double, Double, Double, Double)>(
-    symbol: 'map_texture_set_camera')
+  symbol: 'map_texture_set_camera',
+)
 external int mapTextureSetCamera(
-    int handle, double latitude, double longitude, double zoom, double bearing);
+  int handle,
+  double latitude,
+  double longitude,
+  double zoom,
+  double bearing,
+);
 
 @Native<Int32 Function(Int64, Double, Double, Double)>(
-    symbol: 'map_texture_resize')
+  symbol: 'map_texture_resize',
+)
 external int mapTextureResize(
-    int handle, double logicalWidth, double logicalHeight, double pixelRatio);
+  int handle,
+  double logicalWidth,
+  double logicalHeight,
+  double pixelRatio,
+);
 
 @Native<Int32 Function(Int64, Pointer<MapTextureStatsStruct>)>(
-    symbol: 'map_texture_get_stats')
+  symbol: 'map_texture_get_stats',
+)
 external int mapTextureGetStats(int handle, Pointer<MapTextureStatsStruct> out);
 
 @Native<Int32 Function(Int64)>(symbol: 'map_texture_dispose')
 external int mapTextureDispose(int handle);
 
 @Native<Void Function(Pointer<MapTextureEventStruct>)>(
-    symbol: 'map_texture_event_free')
+  symbol: 'map_texture_event_free',
+)
 external void mapTextureEventFree(Pointer<MapTextureEventStruct> event);
 
 @Native<Int32 Function()>(symbol: 'map_texture_process_thread_count')
@@ -169,19 +187,23 @@ external int mapTextureThermalState();
 external int mapTextureMemoryFootprint();
 
 @Native<Int32 Function(Pointer<Int64>)>(
-    symbol: 'map_texture_released_buffers_alive_for_testing')
+  symbol: 'map_texture_released_buffers_alive_for_testing',
+)
 external int mapTextureReleasedBuffersAliveForTesting(Pointer<Int64> outBytes);
 
 @Native<Void Function(Int32)>(
-    symbol: 'map_texture_set_render_ahead_for_testing')
+  symbol: 'map_texture_set_render_ahead_for_testing',
+)
 external void mapTextureSetRenderAheadForTesting(int mode);
 
 @Native<Int32 Function(Int64, Double)>(
-    symbol: 'map_texture_set_display_refresh_rate')
+  symbol: 'map_texture_set_display_refresh_rate',
+)
 external int mapTextureSetDisplayRefreshRate(int handle, double hz);
 
 @Native<Int32 Function(Int32)>(
-    symbol: 'map_texture_released_buffers_for_testing')
+  symbol: 'map_texture_released_buffers_for_testing',
+)
 external int mapTextureReleasedBuffersForTesting(int reset);
 
 @Native<Void Function(Int32)>(symbol: 'map_texture_set_paused_for_testing')

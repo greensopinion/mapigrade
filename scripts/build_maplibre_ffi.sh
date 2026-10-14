@@ -6,7 +6,9 @@
 # preset into third_party/maplibre-native-ffi/MapLibreNativeC.xcframework. For
 # Android presets, it also builds the FFI's patched rustls-platform-verifier
 # Android component and installs it into the Maven repository
-# third_party/maplibre-native-ffi/android-maven/.
+# third_party/maplibre-native-ffi/android-maven/. It copies the third-party
+# notices of the presets it built into packages/flutter_mapigrade/notices/
+# with scripts/copy_ffi_notices.sh.
 #
 #   scripts/build_maplibre_ffi.sh                     # all presets
 #   scripts/build_maplibre_ffi.sh ios-arm64-metal     # one preset; the
@@ -202,6 +204,10 @@ for preset in "${presets[@]}"; do
     fi
   done
 done
+
+# Copies the presets' third-party notices into the package, which shows them
+# in the license registry. The copies are committed with the lock file.
+"$repo_root/scripts/copy_ffi_notices.sh" "${presets[@]}"
 
 # Builds the FFI's patched rustls-platform-verifier Android component and
 # installs its AAR, with a POM, into a file-based Maven repository. The plugin's

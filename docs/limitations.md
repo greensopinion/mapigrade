@@ -32,18 +32,32 @@ This is the size of the app bundle, not the App Store download size, which Apple
 
 ## Licenses and third-party notices
 
-We have not completed a license review. Before any distribution, the following must be reviewed and their notices included with the app. The FFI build installs them in `third_party/maplibre-native-ffi/<preset>/share/maplibre-native-c/`:
+The package is licensed under the BSD 3-Clause License (`packages/flutter_mapigrade/LICENSE`, and an identical `LICENSE` at the repository root).
 
-| File | Component | License |
-| --- | --- | --- |
-| `LICENSE` | MapLibre Native FFI | BSD 2-Clause |
-| `licenses/maplibre-native.md` | MapLibre Native and the third-party code it includes (Boost, RapidJSON, earcut.hpp, protozero, geojson-vt-cpp and others; 1,347 lines) | BSD 2-Clause plus the listed notices |
-| `licenses/icu.txt` | ICU | Unicode license |
-| `licenses/fastpfor.txt` | FastPFOR | Apache 2.0 |
-| `licenses/nunicode.txt` | nunicode | MIT |
-| `licenses/pmtiles.txt` | PMTiles | BSD 3-Clause |
+Apps built with the package show the notices of MapLibre Native FFI in Flutter's license registry, so `showLicensePage` lists them without code in the app (third-party-notices change). The FFI build installs the notices in `third_party/maplibre-native-ffi/<preset>/share/maplibre-native-c/`. `scripts/copy_ffi_notices.sh` copies them unchanged into `packages/flutter_mapigrade/notices/`, and the package registers one entry per file:
 
-The Apple builds of the FFI (macOS and iOS) don't link its Rust platform component, so no Rust crate notices apply to them.
+| File | Entry | Component | License | Platforms |
+| --- | --- | --- | --- | --- |
+| `LICENSE` | MapLibre Native FFI | MapLibre Native FFI | BSD 2-Clause | all |
+| `licenses/maplibre-native.md` | MapLibre Native | MapLibre Native and the third-party code it includes (Boost, RapidJSON, earcut.hpp, protozero, geojson-vt-cpp and others; 1,347 lines) | BSD 2-Clause plus the listed notices | all |
+| `licenses/icu.txt` | ICU | ICU | Unicode license | all |
+| `licenses/fastpfor.txt` | FastPFOR | FastPFOR | Apache 2.0 | all |
+| `licenses/nunicode.txt` | nunicode | nunicode | MIT | all |
+| `licenses/pmtiles.txt` | PMTiles | PMTiles | BSD 3-Clause | all |
+| `licenses/rust.md` | MapLibre Native FFI Rust crates | 62 Rust crates of the FFI's platform component, including `rustls-platform-verifier-android` | MIT, Apache 2.0, BSD, ISC, 0BSD, CDLA-Permissive-2.0, Unicode-3.0 | Android |
+| `licenses/cxx-runtime.txt` | Android NDK C++ runtime | the NDK's C++ runtime | Apache 2.0 and the other licenses that the NDK's notice file lists | Android |
+
+The Apple builds of the FFI (macOS and iOS) don't link its Rust platform component or the NDK's C++ runtime, so their apps neither contain nor list those two notices.
+
+No review has been done of whether each license is acceptable for a given app, for example CDLA-Permissive-2.0 and Unicode-3.0 among the Rust crates. The notices are shown; their acceptability is the app's decision.
+
+On the license page:
+
+- "MapLibre Native FFI" appears above the alphabetical list. The page places the first package of the registry there, and the package registers its notices before `main` (design D95 of the third-party-notices change).
+- The Markdown files (`maplibre-native.md`, `rust.md`) are shown as text, including headings, code fences and link syntax.
+- Our "ICU" entry and the Flutter engine's "icu" entry are separate rows, because the page compares package names case-sensitively.
+
+Size of the notices, measured on 2026-10-14 with release builds of the test harness, with and without the notice assets: the Android APK grew by 79,799 bytes (about 78 KB), and the macOS app bundle by 112 KB on disk (`du -sk`) and 29,482 bytes zipped.
 
 Map data: the example uses OpenFreeMap tiles (OpenStreetMap data, ODbL) and the MapLibre demo tiles. The example does not show the attribution that OpenStreetMap data requires. A product must show it.
 

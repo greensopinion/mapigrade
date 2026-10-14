@@ -24,16 +24,33 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   path: ^1.9.1
+  yaml: ^3.1.4
 
 flutter:
   plugin:
     platforms:
+      # The dartPluginClass entries register the third-party notices with the
+      # license registry (design D94 of the third-party-notices change).
       android:
         package: com.greensopinion.flutter_mapigrade
         pluginClass: MapigradePlugin
+        dartPluginClass: MapigradeAndroidNotices
+        dartFileName: src/notices/third_party_notices.dart
       ios:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true
+        dartPluginClass: MapigradeDarwinNotices
+        dartFileName: src/notices/third_party_notices.dart
       macos:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true
+        dartPluginClass: MapigradeDarwinNotices
+        dartFileName: src/notices/third_party_notices.dart
+
+  # Third-party notices of MapLibre Native FFI, copied by
+  # scripts/copy_ffi_notices.sh (design D91 and D93). The Android notices are
+  # for libraries that only the Android build links.
+  assets:
+    - path: notices/common/
+    - path: notices/android/
+      platforms: [android]

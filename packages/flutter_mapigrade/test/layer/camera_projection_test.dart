@@ -8,9 +8,12 @@ import 'package:latlong2/latlong.dart';
 
 const viewport = Size(400, 300);
 
-Matcher near(Offset expected, [double tolerance = 1e-6]) => isA<Offset>()
-    .having((o) => (o - expected).distance, 'distance to $expected',
-        lessThan(tolerance));
+Matcher near(Offset expected, [double tolerance = 1e-6]) =>
+    isA<Offset>().having(
+      (o) => (o - expected).distance,
+      'distance to $expected',
+      lessThan(tolerance),
+    );
 
 void main() {
   group('the converted camera places coordinates where flutter_map does', () {
@@ -37,8 +40,10 @@ void main() {
           (-0.002, 0.006),
         ]) {
           final ll = LatLng(lat + dLat, lon + dLon);
-          expect(screenPosition(converted, mercator(ll.latitude, ll.longitude)),
-              near(camera.latLngToScreenOffset(ll), 1e-3));
+          expect(
+            screenPosition(converted, mercator(ll.latitude, ll.longitude)),
+            near(camera.latLngToScreenOffset(ll), 1e-3),
+          );
         }
       });
     }

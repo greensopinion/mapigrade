@@ -181,7 +181,10 @@ The script:
 2. applies the local patches in `scripts/patches/maplibre-native-ffi-*.patch`, if any (currently none; the last one, needed by copy-free maps, was merged upstream as [maplibre-native-ffi#807](https://github.com/maplibre/maplibre-native-ffi/pull/807) and is in the pinned commit);
 3. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
 4. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
-5. wraps each installed preset's dylib in a framework and combines them into `MapLibreNativeC.xcframework` for the Flutter plugin.
+5. runs `scripts/copy_ffi_notices.sh` with the presets it built, which copies each preset's `share/maplibre-native-c/LICENSE` and `licenses/` unchanged into `packages/flutter_mapigrade/notices/`; the package shows them in Flutter's license registry (`docs/limitations.md`, "Licenses and third-party notices");
+6. wraps each installed preset's dylib in a framework and combines them into `MapLibreNativeC.xcframework` for the Flutter plugin.
+
+`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `scripts/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of a preset installed at the pinned commit. `scripts/copy_ffi_notices.sh` fails when a preset installs a notice file that the script doesn't list; add the file to the script, to `lib/src/notices/third_party_notices.dart` and, for a new directory, to the package's `pubspec.yaml`.
 
 Output in `third_party/maplibre-native-ffi/` (gitignored):
 
