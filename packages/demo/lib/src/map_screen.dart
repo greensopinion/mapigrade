@@ -1,0 +1,288 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:latlong2/latlong.dart';
+
+import 'flyover.dart';
+import 'flyover_player.dart';
+import 'metrics_panel.dart';
+import 'stage_layers.dart';
+import 'stages.dart';
+import 'styles.dart';
+
+/// The start of stage 9 in Nice.
+const _initialCenter = LatLng(43.6975, 7.2700);
+const _initialZoom = 12.0;
+
+/// The center and zoom of the map's camera.
+typedef _Position = ({LatLng center, double zoom});
+
+/// The demo's map: `MapigradeLayer` as the base layer of a `FlutterMap`, with
+/// the stage overlays, the attribution and the controls above it.
+class MapScreen extends StatefulWidget {
+  const MapScreen({super.key});
+
+  @override
+  State<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends State<MapScreen>
+    with SingleTickerProviderStateMixin {
+  final _mapController = MapController();
+
+  /// One metrics object for the life of the screen: the layer keeps its key,
+  /// so a style change keeps its map (design D115).
+  final _metrics = LayerMetrics();
+  late final FlyoverPlayer _player;
+
+  /// Updated on every camera change; only the readout listens, so a camera
+  /// change doesn't rebuild the panel.
+  final _position = ValueNotifier<_Position>((
+    center: _initialCenter,
+    zoom: _initialZoom,
+  ));
+
+  List<Stage>? _stages;
+  DemoStyle _style = demoStyles.first;
+  bool _showStages = true;
+  bool _warmUp = false;
+  bool _settingsOpen = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = FlyoverPlayer(vsync: this, controller: _mapController)
+      ..addListener(() => setState(() {}));
+    loadStages(rootBundle).then((stages) {
+      if (mounted) setState(() => _stages = stages);
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    _position.dispose();
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  /// A touch or click on the map stops the flyover (design D119).
+  void _onPointerDown(PointerDownEvent event, LatLng point) => _player.stop();
+
+  /// Called on every camera change, by gestures and by the flyover.
+  void _onPositionChanged(MapCamera camera, bool hasGesture) =>
+      _position.value = (center: camera.center, zoom: camera.zoom);
+
+  /// Any camera change that isn't the flyover's own stops it: scroll-wheel
+  /// and trackpad zoom, keyboard input, and gestures without a pointer down.
+  /// A resize doesn't: the flyover keeps the sequence it started with.
+  void _onMapEvent(MapEvent event) {
+    if (event.source != MapEventSource.mapController &&
+        event.source != MapEventSource.nonRotatedSizeChange) {
+      _player.stop();
+    }
+  }
+
+  /// Shows a failure of the map. The layer can report one while it builds,
+  /// so the snack bar is shown after the frame.
+  void _showError(LayerException exception) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(exception.message)));
+    });
+  }
+
+  void _playOrStop() {
+    final stages = _stages;
+    if (_player.isActive || stages == null) {
+      _player.stop();
+    } else {
+      _player.play(
+        Flyover.build(stages, _mapController.camera),
+        warmUp: _warmUp,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stages = _stages;
+    return Scaffold(
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            // Method tear-offs compare equal, so these options are equal
+            // from one build to the next and FlutterMap keeps them.
+            options: MapOptions(
+              initialCenter: _initialCenter,
+              initialZoom: _initialZoom,
+              onPointerDown: _onPointerDown,
+              onMapEvent: _onMapEvent,
+              onPositionChanged: _onPositionChanged,
+            ),
+            children: [
+              // The base layer: first among the children, so that the layers
+              // after it are drawn above it.
+              MapigradeLayer(
+                styleUrl: _style.url,
+                onError: _showError,
+                metrics: _metrics,
+              ),
+              if (_showStages && stages != null) ...stageLayers(stages),
+              riderLayer(_player.rider),
+              attributionOf(_style),
+            ],
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: _panel(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _panel(BuildContext context) {
+    final theme = Theme.of(context);
+    final player = _player;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: 300,
+        maxHeight: MediaQuery.sizeOf(context).height - 96,
+      ),
+      child: Card(
+        color: theme.colorScheme.surface.withValues(alpha: 0.92),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Mapigrade demo',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: player.isActive ? 'Stop flyover' : 'Play flyover',
+                    icon: Icon(player.isActive ? Icons.stop : Icons.play_arrow),
+                    onPressed: _stages == null ? null : _playOrStop,
+                  ),
+                  IconButton(
+                    tooltip: _settingsOpen ? 'Hide settings' : 'Show settings',
+                    icon: Icon(_settingsOpen ? Icons.expand_less : Icons.tune),
+                    onPressed: () =>
+                        setState(() => _settingsOpen = !_settingsOpen),
+                  ),
+                ],
+              ),
+              if (player.isActive)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    player.phase == FlyoverPhase.warmingUp
+                        ? 'Warming up: loading tiles'
+                              '${player.stage == null ? '' : ' (stage ${player.stage})'}'
+                        : 'Flyover: stage ${player.stage ?? ''}',
+                    style: theme.textTheme.bodySmall!.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              _PositionReadout(_position),
+              const SizedBox(height: 4),
+              MetricsPanel(metrics: _metrics),
+              if (_showStages)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Tour de France Femmes 2026 routes are approximate.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              if (_settingsOpen) ..._settings(theme),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _settings(ThemeData theme) => [
+    const Divider(),
+    Row(
+      children: [
+        const Text('Style'),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DropdownButton<DemoStyle>(
+            isExpanded: true,
+            value: _style,
+            items: [
+              for (final style in demoStyles)
+                DropdownMenuItem(value: style, child: Text(style.name)),
+            ],
+            onChanged: (style) => setState(() => _style = style!),
+          ),
+        ),
+      ],
+    ),
+    SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: const Text('Stage overlays'),
+      value: _showStages,
+      onChanged: (value) => setState(() => _showStages = value),
+    ),
+    CheckboxListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: const Text('Warm-up pass before the flyover'),
+      value: _warmUp,
+      onChanged: _player.isActive
+          ? null
+          : (value) => setState(() => _warmUp = value!),
+    ),
+  ];
+}
+
+/// The map's center, in degrees to 5 decimals (about 1 m), and its zoom.
+class _PositionReadout extends StatelessWidget {
+  const _PositionReadout(this.position);
+
+  final ValueListenable<_Position> position;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall!
+        .copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    return ValueListenableBuilder(
+      valueListenable: position,
+      builder: (context, p, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Center: ${p.center.latitude.toStringAsFixed(5)}, '
+            '${p.center.longitude.toStringAsFixed(5)}',
+            style: style,
+          ),
+          Text('Zoom: ${p.zoom.toStringAsFixed(2)}', style: style),
+        ],
+      ),
+    );
+  }
+}

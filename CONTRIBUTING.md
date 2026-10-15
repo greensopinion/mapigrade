@@ -48,7 +48,7 @@ flutter drive -d <iPhone id> --driver=test_driver/integration_test.dart \
   --target=integration_test/map_texture_test.dart
 ```
 
-The iOS lifecycle tests use test hooks (`package:flutter_mapigrade/testing.dart`) that call the same functions as the background, foreground and memory warning handlers. The real notifications were checked on an iPhone (design D13, result).
+The iOS lifecycle tests use test hooks (`package:flutter_mapigrade/src/testing.dart`) that call the same functions as the background, foreground and memory warning handlers. The real notifications were checked on an iPhone (design D13, result).
 
 ## Measurements
 

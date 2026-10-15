@@ -1,6 +1,6 @@
 ## Purpose
 
-Defines the demo app that developers build from source to try `flutter_mapigrade` on their own devices: styles, gestures, overlays, frame rates, the alignment setting, and a fixed flyover over stages of the Tour de France Femmes avec Zwift 2026.
+Defines the demo app that developers build from source to try `flutter_mapigrade` on their own devices: styles, gestures, overlays, frame rates, a camera readout, and a fixed flyover over stages of the Tour de France Femmes avec Zwift 2026.
 
 ## ADDED Requirements
 
@@ -41,19 +41,12 @@ The demo SHALL display, updated once per second: the map's displayed frames per 
 - **WHEN** the map has loaded its tiles and the camera hasn't moved for a second
 - **THEN** the displayed and rendered frame rates are 0, the average render time is shown as unavailable, and the display states that the map is at rest
 
-### Requirement: Alignment setting
-The demo SHALL let the developer choose the layer's alignment: camera prediction with a lead of 1, 2 or 3 display refresh intervals, or no alignment. Camera prediction with a lead of 1 SHALL be the setting at launch. Changing the setting SHALL keep the map and the metrics.
-
-#### Scenario: No alignment
-- **WHEN** the developer chooses no alignment and pans the map quickly
-- **THEN** the layer has the alignment `LayerAlignment.none`, and the map is the same map as before the change
-
 ### Requirement: Stage overlays
-The demo SHALL draw, for each stage in the stage data, a polyline along the route, a green pin at the start and a red pin at the finish. The start pin SHALL have a bubble that states the stage number, the start and finish, the distance in kilometres and the stage winner. When a stage's start and finish are less than 500 m apart, the demo SHALL draw one pin for both, whose bubble states that the stage starts and finishes there. Pins and bubbles SHALL stay upright when the map rotates. The developer SHALL be able to hide and show the overlays.
+The demo SHALL draw, for each stage in the stage data, a polyline along the route, a green pin at the start and a red pin at the finish. The start pin SHALL have a bubble that states the race, the stage number, the start and finish, the distance in kilometres and the stage winner. When a stage's start and finish are less than 500 m apart, the demo SHALL draw one pin for both, whose bubble states that the stage starts and finishes there. Pins and bubbles SHALL stay upright when the map rotates. The developer SHALL be able to hide and show the overlays.
 
 #### Scenario: Stage 7 overlays
 - **WHEN** the camera shows stage 7
-- **THEN** a polyline runs from a green pin at La Voulte-sur-Rhône to a red pin at Mont Ventoux, and the green pin's bubble states "Stage 7", "La Voulte-sur-Rhône – Mont Ventoux", "146.8 km" and "Katarzyna Niewiadoma-Phinney"
+- **THEN** a polyline runs from a green pin at La Voulte-sur-Rhône to a red pin at Mont Ventoux, and the green pin's bubble states "Tour de France Femmes avec Zwift 2026", "Stage 7", "La Voulte-sur-Rhône – Mont Ventoux", "146.8 km" and "Katarzyna Niewiadoma-Phinney"
 
 #### Scenario: Loop stage
 - **WHEN** the camera shows stage 9, Nice to Nice
@@ -72,7 +65,7 @@ The demo SHALL read the stages from an asset file that contains, for each stage,
 | 7 | 7 August 2026 | La Voulte-sur-Rhône | Mont Ventoux | 146.8 km | Mountain | Katarzyna Niewiadoma-Phinney | Canyon//SRAM |
 | 4 | 4 August 2026 | Gevrey-Chambertin | Dijon | 21 km | Individual time trial | Marlen Reusser | Movistar Team |
 
-The route coordinates SHALL be approximate: a script in `packages/demo/tool/` SHALL compute them from waypoints stored in the repository, with a router that uses OpenStreetMap data, and the repository SHALL contain the script's output. Running the script again with the same waypoints SHALL write the same file, unless the router's data has changed. The demo SHALL state that the routes are approximate.
+The route coordinates SHALL be approximate: a script in `packages/demo/tool/` SHALL compute them from waypoints stored in the repository, with a router that uses OpenStreetMap data, and the repository SHALL contain the script's output. Where the router goes to a waypoint and back along the same road, the script SHALL remove that spur, because the race doesn't ride it. Running the script again with the same waypoints SHALL write the same file, unless the router's data has changed. The demo SHALL state that the routes are approximate.
 
 #### Scenario: Data file contents
 - **WHEN** the demo's tests read the asset file
@@ -83,7 +76,7 @@ The route coordinates SHALL be approximate: a script in `packages/demo/tool/` SH
 - **THEN** the demo states that the routes are approximate
 
 ### Requirement: Flyover
-The demo SHALL play a flyover on request. For each stage in the order of the stage data, the flyover SHALL show the start at a street-level zoom, then the whole route, then the finish at a street-level zoom, and then move to the next stage's start by zooming out, panning and zooming in. For a stage whose start and finish share one pin, the flyover SHALL skip the finish. While it shows a whole route, the flyover SHALL rotate the map and return it to north up before it moves on. The camera SHALL be a function of the time since the flyover started and of the viewport size when it started, so that two runs in the same viewport show the same camera at the same time. The developer SHALL be able to choose a warm-up pass, which plays the whole flyover once before the run that starts from the beginning again, so that the run shows tiles that are already loaded. A touch, click or scroll on the map, or the stop control, SHALL stop the flyover and leave the camera where it is.
+The demo SHALL play a flyover on request. For each stage in the order of the stage data, the flyover SHALL show the start north up at zoom 14, then follow the route from start to finish at zoom 16 like a drone ahead of a rider, then turn the map back to north up at zoom 14 at the finish, and then move to the next stage's start by zooming out, panning and zooming in. For a stage whose start and finish share one pin, the flyover SHALL not hold at the finish. While it follows a route, the flyover SHALL show a rider marker on the route, SHALL turn the map so that the rider's direction of travel points up the screen, and SHALL keep the rider below the center of the viewport so that the view shows the road ahead. The map SHALL turn no faster than 45° per second; where the road turns faster, the camera SHALL slow down. The rider marker SHALL be shown only while the flyover follows a route. The camera SHALL be a function of the time since the flyover started and of the viewport size when it started, so that two runs in the same viewport show the same camera at the same time. The developer SHALL be able to choose a warm-up pass, which plays the whole flyover once before the run that starts from the beginning again, so that the run shows tiles that are already loaded. A touch, click or scroll on the map, or the stop control, SHALL stop the flyover and leave the camera where it is.
 
 #### Scenario: Deterministic camera
 - **WHEN** the flyover's camera is computed twice for the same viewport size at the same time since the start
@@ -91,7 +84,15 @@ The demo SHALL play a flyover on request. For each stage in the order of the sta
 
 #### Scenario: Stage order
 - **WHEN** the flyover plays to the end
-- **THEN** it shows stage 9, then stage 7, then stage 4, and ends at the finish of stage 4 in Dijon
+- **THEN** it shows stage 9, then stage 7, then stage 4, and ends north up at the finish of stage 4 in Dijon
+
+#### Scenario: Following a route
+- **WHEN** the flyover follows the route of stage 7
+- **THEN** the zoom is 16, a rider marker moves along the route below the center of the viewport, the rider moves up the screen, and the map turns with the road on the climb of Mont Ventoux without spinning
+
+#### Scenario: Rider marker outside the follow
+- **WHEN** the flyover holds at a start or moves between stages, or is stopped
+- **THEN** no rider marker is shown
 
 #### Scenario: Warm-up pass
 - **WHEN** the developer starts the flyover with the warm-up pass chosen
@@ -100,6 +101,17 @@ The demo SHALL play a flyover on request. For each stage in the order of the sta
 #### Scenario: Stop by touch
 - **WHEN** the developer touches the map during the flyover
 - **THEN** the flyover stops, the camera stays where it was, and the gestures move the map
+
+### Requirement: Camera readout
+The demo SHALL display the latitude and longitude of the map's center, in degrees to 5 decimal places, and the map's zoom, to 2 decimal places. The display SHALL update with every camera change, whether a gesture or the flyover moves the camera.
+
+#### Scenario: Readout during a pan
+- **WHEN** the developer drags the map
+- **THEN** the displayed center changes with the map while the drag continues, and the zoom stays the same
+
+#### Scenario: Readout during the flyover
+- **WHEN** the flyover follows a route
+- **THEN** the displayed center changes on every frame and the displayed zoom is 16.00
 
 ### Requirement: Attribution
 The demo SHALL show on the map the attribution that the chosen style requires, and an OpenStreetMap attribution with a link to its copyright page for the routes. For the OpenFreeMap styles the attribution SHALL name OpenFreeMap, OpenMapTiles and OpenStreetMap.

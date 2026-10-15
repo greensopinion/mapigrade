@@ -6,10 +6,10 @@ Developers who want to evaluate `flutter_mapigrade` have two apps to choose from
 
 - A new app, `packages/demo`, added to the workspace with `publish_to: none`. It runs on Android, iOS and macOS.
 - The demo shows the map with `MapigradeLayer` as the base layer of a `FlutterMap`, with `flutter_map` gestures, a style picker, and a display of the map's displayed and rendered frame rates, its average render time per frame, and the Flutter UI frame rate. The map values come from snapshots of a `LayerMetrics`, the public API that the change `layer-metrics` adds, taken once per second; the UI frame rate comes from Flutter's frame timings.
+- A readout of the map's center and zoom that updates as the camera moves.
 - The first version offers keyless styles only: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles.
-- Settings for the alignment mode (camera prediction with a lead, or none), so that a developer can compare them while the camera moves.
 - A Tour de France Femmes avec Zwift 2026 overlay with stages 9, 7 and 4, in that order. Each stage has a green start pin with a bubble that states the stage, its distance and its winner, a red finish pin, and a polyline along the route. Where a stage starts and finishes at the same place (stage 9, Nice to Nice), one marker shows both.
-- A flyover that plays a fixed sequence for each stage: the start, the whole route, the finish, then to the next stage by zooming out, panning and zooming in. The camera position is a function of elapsed time, so every run shows the same view at the same time. An optional warm-up pass plays the sequence once to load tiles before the visible run. A touch on the map stops the flyover.
+- A flyover that plays a fixed sequence for each stage: the start, the route followed from start to finish at zoom 16 like a drone ahead of a rider marker, with the map turned to the rider's direction of travel, the finish, then to the next stage by zooming out, panning and zooming in. The camera position is a function of elapsed time, so every run shows the same view at the same time. An optional warm-up pass plays the sequence once to load tiles before the visible run. A touch on the map stops the flyover.
 - A stage data file in the demo's assets, with each stage's facts and route coordinates. The routes are approximate: a script in `packages/demo/tool/` computes them with a router on OpenStreetMap data from waypoints that we choose, and we commit its output. The demo states that the routes are approximate. Stage facts come from a cited source; where sources disagree (the distance of stage 7 is 146.8 km in one table and 144 km in another), we use the figure from letourfemmes.fr.
 - OpenStreetMap attribution on the map.
 - The demo imports only `package:flutter_mapigrade/flutter_mapigrade.dart`, so that its code shows what an application can use. When the demo gives the layer a new key, it creates a new `LayerMetrics` with it.
@@ -20,7 +20,8 @@ Non-goals:
 - No distribution of built apps (app stores, TestFlight, Play tracks, signed macOS builds).
 - No pitch: the map supports center, zoom and bearing only.
 - No styles that need an API key, and no place to enter keys. We plan to add both later.
-- No mode in which the camera follows the route.
+- No mode, other than the flyover, in which the camera follows the route.
+- No alignment setting: the layer uses its default alignment.
 - No change to the package: the metrics API is the change `layer-metrics`.
 - No change to the example or the test harness.
 
@@ -28,7 +29,7 @@ Non-goals:
 
 ### New Capabilities
 
-- `demo-app`: the demo app's platforms, styles, frame rate display, alignment settings, Tour de France overlay, flyover sequence, stage data and its sources, and attribution.
+- `demo-app`: the demo app's platforms, styles, frame rate display, camera readout, Tour de France overlay, flyover sequence, stage data and its sources, and attribution.
 
 ### Modified Capabilities
 
@@ -41,5 +42,5 @@ None.
 - Package: none. The demo depends on `LayerMetrics` and the `metrics` parameter of `MapigradeLayer` from the change `layer-metrics`, which is archived before this one.
 - Network: the demo loads styles and tiles from OpenFreeMap and demotiles.maplibre.org. The route script calls a routing service once per stage when we run it; the design chooses the service and checks its usage policy.
 - Data licensing: the routes are derived from OpenStreetMap data under the ODbL, which the attribution covers.
-- Documentation: `README.md` (repository layout and how to run the demo). The layout in `README.md` and `docs/limitations.md` name `lib/testing.dart`; the library is `lib/src/testing.dart`, which this change corrects.
+- Documentation: `README.md` (repository layout and how to run the demo). The layout in `README.md`, `docs/limitations.md` and `CONTRIBUTING.md` name `lib/testing.dart` or `package:flutter_mapigrade/testing.dart`; the library is `lib/src/testing.dart`, which this change corrects.
 - Interaction with `publish-readiness`: the demo's `android/gradle.properties` needs the same local FFI setting as the example and the test harness (task 5.3 of that change), whichever change is archived second.

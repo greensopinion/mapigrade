@@ -6,7 +6,7 @@
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS and iOS, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
 
-macOS and iOS are complete; Android is in progress (`openspec/changes/android-texture-vertical-slice/`). For how to use the plugin in an app, see [packages/flutter_mapigrade/README.md](packages/flutter_mapigrade/README.md).
+macOS and iOS are complete; Android is in progress (`openspec/changes/android-texture-vertical-slice/`). For how to use the plugin in an app, see [packages/flutter_mapigrade/README.md](packages/flutter_mapigrade/README.md). To try it on your own devices, build the demo app: [packages/demo/README.md](packages/demo/README.md).
 
 ## Documentation
 
@@ -23,7 +23,7 @@ macOS and iOS are complete; Android is in progress (`openspec/changes/android-te
 ```
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS; Android in progress)
   lib/src/texture/                       Dart API: MapTextureController, MapTextureView, @Native bindings
-  lib/testing.dart                       test hooks and measurement helpers (not for applications)
+  lib/src/testing.dart                   test hooks and measurement helpers (not for applications)
   lib/src/layer/                         flutter_map layer (MapigradeLayer)
   src/core/                              C++ core: map thread, commands, buffer state, C ABI (no Apple dependencies)
   darwin/flutter_mapigrade/              Swift package shared by macOS and iOS: Metal render target,
@@ -31,6 +31,9 @@ packages/flutter_mapigrade/              Flutter plugin (macOS, iOS; Android in 
   android/                               Android plugin: Kotlin plugin class, JNI and texture code
   example/                               usage example of the public API (Android, iOS, macOS)
   test/                                  Dart unit tests; test/native/ C++ unit tests for the core
+packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
+                                         flyover on your own devices (Android, iOS, macOS)
+  tool/                                  the script that computes the stage routes
 packages/test_harness/                   test harness app: integration tests, benchmarks, color check
   integration_test/                      spec scenarios (map_texture_test.dart), memory and color
                                          measurements (run with flutter drive)

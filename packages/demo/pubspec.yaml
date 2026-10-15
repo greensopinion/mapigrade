@@ -1,0 +1,28 @@
+name: mapigrade_demo
+description: "A demo app for trying flutter_mapigrade: styles, gestures, overlays, frame rates and a flyover."
+publish_to: 'none'
+
+resolution: workspace
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_map: 8.3.2
+  flutter_mapigrade:
+    path: ../flutter_mapigrade
+  latlong2: ^0.10.1
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/tdff_2026.geojson
