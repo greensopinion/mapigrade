@@ -1,10 +1,11 @@
 // Widget tests for the public layer (design D66 of the public-api change, D86
-// of unsupported-architectures).
+// of unsupported-architectures, D111 of layer-metrics).
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
 import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
+import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
 import 'package:flutter_mapigrade/src/layer/mapigrade_layer.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
 import 'package:flutter_mapigrade/src/texture/native_library.dart';
@@ -66,6 +67,20 @@ void main() {
     expect(layer.styleJson, '{}');
     expect(layer.alignment, const LayerAlignment.prediction());
     expect(layer.httpHeaders, isEmpty);
+    expect(layer.metrics, isNull);
+  });
+
+  testWidgets('passes metrics', (tester) async {
+    final metrics = LayerMetrics();
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(size: Size.zero),
+        child: MapigradeLayer(styleJson: '{}', metrics: metrics),
+      ),
+    );
+
+    final layer = tester.widget<MapTextureLayer>(find.byType(MapTextureLayer));
+    expect(layer.metrics, same(metrics));
   });
 
   test('requires exactly one of styleUrl and styleJson', () {
@@ -101,6 +116,7 @@ void main() {
   ) async {
     nativeLibraryAvailableOverride = false;
     final failures = <LayerException>[];
+    final metrics = LayerMetrics();
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(size: Size(800, 600)),
@@ -115,6 +131,7 @@ void main() {
               MapigradeLayer(
                 styleUrl: 'https://example.com/style.json',
                 onError: failures.add,
+                metrics: metrics,
               ),
               const MarkerLayer(
                 markers: [
@@ -138,6 +155,7 @@ void main() {
       contains('native library of flutter_mapigrade is not available'),
     );
     expect(find.byKey(_markerKey), findsOneWidget);
+    expect(metrics.snapshot().renderedFrames, 0);
   });
 
   test('maximumCacheSizeBytes is stored without the native library', () {

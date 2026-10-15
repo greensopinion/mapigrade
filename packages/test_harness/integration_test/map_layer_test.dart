@@ -1,9 +1,11 @@
 // Integration tests for the flutter_map layer (map-layer spec, design D21 of
-// the flutter-map-layer change, D67 of the public-api change).
+// the flutter-map-layer change, D67 of the public-api change, D111 of the
+// layer-metrics change).
 //
 //   cd packages/test_harness && flutter test integration_test/map_layer_test.dart -d macos
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -460,5 +462,98 @@ void main() {
     expect(reports.single.exception, isA<LayerLoadException>());
     expect(reports.single.library, 'flutter_mapigrade');
     expect(find.byType(MapigradeLayer), findsOneWidget);
+  });
+
+  // Metrics scenarios of the map-layer spec. The metrics come from the main
+  // library only.
+  testWidgets('metrics increase while the camera moves', (tester) async {
+    final mapController = MapController();
+    final metrics = LayerMetrics();
+    final loaded = Completer<void>();
+    await tester.pumpWidget(MaterialApp(
+      home: Center(
+        child: SizedBox(
+          width: 400,
+          height: 300,
+          child: FlutterMap(
+            mapController: mapController,
+            options: const MapOptions(initialCenter: center, initialZoom: 12),
+            children: [
+              MapigradeLayer(
+                styleJson: redStyle,
+                metrics: metrics,
+                onStyleLoaded: () {
+                  if (!loaded.isCompleted) loaded.complete();
+                },
+                onError: (e) => fail('unexpected failure $e'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+    await loaded.future.timeout(const Duration(seconds: 20));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
+    final first = metrics.snapshot();
+    final pan = Stopwatch()..start();
+    var longitude = center.longitude;
+    while (pan.elapsed < const Duration(seconds: 2)) {
+      longitude += 0.001;
+      mapController.move(LatLng(center.latitude, longitude), 12);
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    final second = metrics.snapshot();
+    debugPrint('LAYER_METRICS $first -> $second');
+
+    expect(second.time, greaterThan(first.time));
+    expect(second.displayedFrames, greaterThan(first.displayedFrames));
+    expect(second.renderedFrames, greaterThan(first.renderedFrames));
+    expect(second.renderTime, greaterThan(first.renderTime));
+    if (Platform.isAndroid) {
+      expect(second.displayedFrames, second.renderedFrames);
+    } else {
+      expect(second.displayedFrames, lessThanOrEqualTo(second.renderedFrames));
+    }
+  });
+
+  testWidgets('metrics stay the same while the map is at rest', (
+    tester,
+  ) async {
+    final metrics = LayerMetrics();
+    MapTextureController? controller;
+    // Subscribed before the style loads, so that no idle event is missed.
+    final idle = Completer<void>();
+    await tester.pumpWidget(
+      appWith(
+        MapTextureLayer(
+          styleJson: redStyle,
+          metrics: metrics,
+          onController: (c) {
+            controller = c;
+            c.events.firstWhere((e) => e is MapIdle).then((_) {
+              if (!idle.isCompleted) idle.complete();
+            });
+          },
+        ),
+      ),
+    );
+    expect(controller, isNotNull);
+    await idle.future.timeout(const Duration(seconds: 20));
+    // On macOS and iOS, Flutter can take the last rendered frame for display
+    // after the idle event.
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await tester.pump();
+
+    final first = metrics.snapshot();
+    await Future<void>.delayed(const Duration(seconds: 1));
+    final second = metrics.snapshot();
+
+    expect(first.renderedFrames, greaterThan(0));
+    expect(second.displayedFrames, first.displayedFrames);
+    expect(second.renderedFrames, first.renderedFrames);
+    expect(second.renderTime, first.renderTime);
+    expect(second.time, greaterThan(first.time));
   });
 }

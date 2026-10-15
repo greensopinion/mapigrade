@@ -740,6 +740,8 @@ void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
   {
     std::lock_guard lock(stats_mutex_);
     ++stats_.rendered_frames;
+    // RenderUpdate has queued the frame on the surface (design D112).
+    ++stats_.presented_frames;
     if (needs_repaint) ++stats_.needs_repaint_frames;
   }
   Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &info, -1);

@@ -1,5 +1,6 @@
 // Widget tests for the layer when its map can't be created (design D67 of the
-// public-api change) and its header rules (D80 of http-headers-and-assets).
+// public-api change), its header rules (D80 of http-headers-and-assets) and
+// its metrics (D111 of layer-metrics).
 // The other scenarios need the native map and are integration tests in
 // packages/test_harness/integration_test/.
 import 'dart:async';
@@ -8,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera, MapEvent;
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
+import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
 import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +28,9 @@ class _FakeController implements MapTextureController {
   final _events = StreamController<MapEvent>.broadcast();
   final _frames = StreamController<FrameCamera>.broadcast();
   bool _disposed = false;
+
+  /// The counters that [stats] returns.
+  MapTextureStats values = const MapTextureStats.forTesting();
 
   @override
   int get textureId => 1;
@@ -46,6 +51,12 @@ class _FakeController implements MapTextureController {
   @override
   void setDisplayRefreshRate(double hz) {}
   @override
+  MapTextureStats stats() {
+    if (_disposed) throw const MapTextureDisposedException();
+    return values;
+  }
+
+  @override
   void dispose() {
     _disposed = true;
     _events.close();
@@ -56,11 +67,12 @@ class _FakeController implements MapTextureController {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-Widget _map(MapTextureLayer layer, {double pixelRatio = 1}) => MediaQuery(
-  data: MediaQueryData(
-    size: const Size(800, 600),
-    devicePixelRatio: pixelRatio,
-  ),
+Widget _map(
+  MapTextureLayer layer, {
+  double pixelRatio = 1,
+  Size size = const Size(800, 600),
+}) => MediaQuery(
+  data: MediaQueryData(size: size, devicePixelRatio: pixelRatio),
   child: Directionality(
     textDirection: TextDirection.ltr,
     child: FlutterMap(
@@ -205,5 +217,135 @@ void main() {
     );
 
     expect(failures, [const LayerCreateException(message)]);
+  });
+
+  group('metrics', () {
+    late List<_FakeController> controllers;
+    MapTextureController create({
+      required double pixelRatio,
+      required bool copyFree,
+      required List<HttpHeaderRule> httpHeaders,
+    }) {
+      final controller = _FakeController();
+      controllers.add(controller);
+      return controller;
+    }
+
+    MapTextureLayer layer(
+      LayerMetrics metrics, {
+      Key? key,
+      String style = 'https://example.com/style.json',
+    }) => MapTextureLayer(
+      key: key,
+      styleUrl: style,
+      createController: create,
+      metrics: metrics,
+    );
+
+    MapTextureStats stats(int displayed, int rendered, int renderMs) =>
+        MapTextureStats.forTesting(
+          presentedFrames: displayed,
+          renderedFrames: rendered,
+          renderUpdateTotal: Duration(milliseconds: renderMs),
+        );
+
+    void expectValues(
+      LayerMetrics metrics,
+      int displayed,
+      int rendered,
+      int renderMs,
+    ) {
+      final snapshot = metrics.snapshot();
+      expect(snapshot.displayedFrames, displayed);
+      expect(snapshot.renderedFrames, rendered);
+      expect(snapshot.renderTime, Duration(milliseconds: renderMs));
+    }
+
+    setUp(() => controllers = []);
+
+    testWidgets('No map yet', (tester) async {
+      final metrics = LayerMetrics();
+      expectValues(metrics, 0, 0, 0);
+      // The layer creates its map when the window's size has arrived.
+      await tester.pumpWidget(_map(layer(metrics), size: Size.zero));
+      expect(controllers, isEmpty);
+      expectValues(metrics, 0, 0, 0);
+    });
+
+    testWidgets("Map can't be created", (tester) async {
+      final metrics = LayerMetrics();
+      await tester.pumpWidget(
+        _map(
+          MapTextureLayer(
+            styleUrl: 'https://example.com/style.json',
+            createController: _failingCreate,
+            onError: (_) {},
+            metrics: metrics,
+          ),
+        ),
+      );
+      expectValues(metrics, 0, 0, 0);
+    });
+
+    testWidgets('Style change', (tester) async {
+      final metrics = LayerMetrics();
+      await tester.pumpWidget(_map(layer(metrics)));
+      controllers.single.values = stats(2, 3, 10);
+      expectValues(metrics, 2, 3, 10);
+
+      await tester.pumpWidget(
+        _map(layer(metrics, style: 'https://example.com/other.json')),
+      );
+      controllers.single.values = stats(4, 5, 20);
+
+      expect(controllers, hasLength(1));
+      expectValues(metrics, 4, 5, 20);
+    });
+
+    testWidgets('Layer removed', (tester) async {
+      final metrics = LayerMetrics();
+      await tester.pumpWidget(_map(layer(metrics)));
+      final controller = controllers.single;
+      controller.values = stats(2, 3, 10);
+      expectValues(metrics, 2, 3, 10);
+      // Frames rendered after the last snapshot are read at the dispose.
+      controller.values = stats(4, 5, 20);
+
+      await tester.pumpWidget(const SizedBox());
+
+      expect(controller.isDisposed, isTrue);
+      expectValues(metrics, 4, 5, 20);
+      expectValues(metrics, 4, 5, 20);
+    });
+
+    testWidgets('New key with the same object', (tester) async {
+      final metrics = LayerMetrics();
+      await tester.pumpWidget(_map(layer(metrics, key: const ValueKey(1))));
+      controllers.single.values = stats(4, 5, 20);
+      expectValues(metrics, 4, 5, 20);
+
+      await tester.pumpWidget(_map(layer(metrics, key: const ValueKey(2))));
+
+      expect(controllers, hasLength(2));
+      expect(controllers.first.isDisposed, isTrue);
+      expectValues(metrics, 0, 0, 0);
+      controllers.last.values = stats(1, 1, 3);
+      expectValues(metrics, 1, 1, 3);
+    });
+
+    testWidgets('Different object for the same map', (tester) async {
+      final previous = LayerMetrics();
+      await tester.pumpWidget(_map(layer(previous)));
+      final controller = controllers.single;
+      controller.values = stats(2, 3, 10);
+
+      final metrics = LayerMetrics();
+      await tester.pumpWidget(_map(layer(metrics)));
+      controller.values = stats(4, 5, 20);
+
+      expect(controllers, hasLength(1));
+      expectValues(metrics, 4, 5, 20);
+      expectValues(previous, 2, 3, 10);
+    });
   });
 }

@@ -71,6 +71,64 @@ android {
 - `onError`: receives each `LayerException`; when null, failures go to `FlutterError.reportError`.
 - `MapigradeLayer.maximumCacheSizeBytes`: the tile cache's maximum size, 50 MiB by default, for maps created afterwards. Each map evicts from the shared cache file to its own maximum size; after a reduction, the cache reaches the new maximum size as the map stores new tiles. Freshness follows the server's cache headers.
 
+## Metrics
+
+To show how fast the map renders, for example in a debug display, create a `LayerMetrics`, give it to the layer as `metrics`, and take snapshots with `snapshot()`. This example takes a snapshot once per second and computes the displayed frame rate:
+
+```dart
+class _MapPageState extends State<MapPage> {
+  final _metrics = LayerMetrics();
+  late final Timer _timer;
+  LayerMetricsSnapshot? _last;
+  double _fps = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final snapshot = _metrics.snapshot();
+      if (_last case final last?) {
+        final frames = snapshot.displayedFrames - last.displayedFrames;
+        final seconds = (snapshot.time - last.time).inMicroseconds / 1e6;
+        setState(() => _fps = frames / seconds);
+      }
+      _last = snapshot;
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      FlutterMap(
+        options: const MapOptions(initialCenter: LatLng(49.25, -123.1)),
+        children: [
+          MapigradeLayer(
+            styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+            metrics: _metrics,
+          ),
+        ],
+      ),
+      Text('${_fps.toStringAsFixed(0)} fps'),
+    ],
+  );
+}
+```
+
+A `LayerMetricsSnapshot` has these values, cumulative from the creation of the layer's map:
+
+- `time`: the time of the snapshot on a monotonic clock; compute rates from the difference between two snapshots.
+- `displayedFrames`: the map frames given to Flutter for display. On macOS and iOS, a frame counts when Flutter takes it for display. On Android, a frame counts when the map has queued it for display; every rendered frame is queued, so `displayedFrames` equals `renderedFrames` there.
+- `renderedFrames`: the frames the map rendered.
+- `renderTime`: the total time the map spent rendering. It includes render calls that rendered nothing, so `renderTime` divided by `renderedFrames` is an upper bound of the average render time of a frame.
+
+Before the layer has a map, and when the map can't be created, every value except `time` is 0. A style change keeps the map and its counts. When the layer is removed, the `LayerMetrics` keeps the last values that it read. Give each layer its own `LayerMetrics`. A new `key` gives the layer a new map: create a new `LayerMetrics` with the new key; an object given to the new layer counts from 0.
+
 ## HTTP headers
 
 To send an access key or other headers to a tile server, give `httpHeaders` a list of `HttpHeaderRule`s:

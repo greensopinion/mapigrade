@@ -3,6 +3,7 @@ import 'dart:ffi' hide Size;
 import 'dart:ui';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'bindings.dart';
 import 'native_library.dart';
@@ -135,6 +136,34 @@ class MapTextureStats {
       renderAheadFrames = s.renderAheadFrames,
       intervalWaits = s.intervalWaits;
 
+  /// Counters with the given values, for tests that have no native map
+  /// (design D113).
+  @visibleForTesting
+  const MapTextureStats.forTesting({
+    this.renderedFrames = 0,
+    this.skippedRenders = 0,
+    this.waitsForDisplay = 0,
+    this.renderUpdateCount = 0,
+    this.renderUpdateTotal = Duration.zero,
+    this.renderUpdateMax = Duration.zero,
+    this.copyCount = 0,
+    this.copyTotal = Duration.zero,
+    this.copyMax = Duration.zero,
+    this.presentedFrames = 0,
+    this.renderUpdateAvailableEvents = 0,
+    this.needsRepaintFrames = 0,
+    this.pausedRenders = 0,
+    this.memoryReductions = 0,
+    this.frameCycleCount = 0,
+    this.frameCycleTotal = Duration.zero,
+    this.pickupWaitCount = 0,
+    this.pickupWaitTotal = Duration.zero,
+    this.presentToRenderCount = 0,
+    this.presentToRenderTotal = Duration.zero,
+    this.renderAheadFrames = 0,
+    this.intervalWaits = 0,
+  });
+
   /// Frames the map rendered.
   final int renderedFrames;
 
@@ -163,7 +192,10 @@ class MapTextureStats {
   /// The longest of the copies counted by [copyCount].
   final Duration copyMax;
 
-  /// Frames Flutter took for display.
+  /// Frames given to Flutter for display. On macOS and iOS, a frame counts
+  /// when Flutter takes it for display. On Android, a frame counts when the
+  /// map has queued it on the surface for display, so this equals
+  /// [renderedFrames].
   final int presentedFrames;
 
   /// `MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE` events received.

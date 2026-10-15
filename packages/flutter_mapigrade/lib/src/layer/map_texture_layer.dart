@@ -3,8 +3,8 @@
 /// change), its alignment option (D43 of the camera-prediction-default
 /// change, D47 of the remove-camera-transform change, which removed the
 /// compensating transform of D23), and its callbacks and failure reports (D66
-/// and D67 of the public-api change), and D80 of the http-headers-and-assets
-/// change.
+/// and D67 of the public-api change), D80 of the http-headers-and-assets
+/// change, and its metrics (D111 of the layer-metrics change).
 ///
 /// Only files in `lib/src/layer/` may import `package:flutter_map` (design
 /// D9).
@@ -23,6 +23,7 @@ import 'camera_projection.dart';
 import 'http_header_rule.dart';
 import 'layer_alignment.dart';
 import 'layer_exception.dart';
+import 'layer_metrics.dart';
 
 /// Creates the map of a [MapTextureLayer]; the signature of
 /// [MapTextureController.create], with [HttpHeaderRule]s.
@@ -46,6 +47,7 @@ class MapTextureLayer extends StatefulWidget {
     this.onError,
     this.httpHeaders = const [],
     this.copyFree = true,
+    this.metrics,
     this.onController,
     this.createController,
   }) : assert(
@@ -77,6 +79,9 @@ class MapTextureLayer extends StatefulWidget {
   /// default); see [MapTextureController.create]. Read when the layer creates
   /// its map. Has no effect on Android.
   final bool copyFree;
+
+  /// Reports the frame counts of the layer's map.
+  final LayerMetrics? metrics;
 
   /// Called with the layer's controller after it is created, for tests and
   /// measurements.
@@ -137,6 +142,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       return;
     }
     _controller = controller;
+    if (widget.metrics case final metrics?) bindMetrics(metrics, controller);
     _events = controller.events.listen(_onEvent);
     // With camera prediction, the rebuild after a new displayed frame, once
     // the camera has stopped, finds the camera unchanged and sets the
@@ -156,6 +162,11 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     }
     if (widget.alignment != oldWidget.alignment) {
       _predictor = CameraPredictor();
+    }
+    if (_controller case final controller?
+        when !identical(widget.metrics, oldWidget.metrics)) {
+      if (oldWidget.metrics case final old?) releaseMetrics(old, controller);
+      if (widget.metrics case final metrics?) bindMetrics(metrics, controller);
     }
   }
 
@@ -204,7 +215,14 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   void dispose() {
     _events?.cancel();
     _frames?.cancel();
-    _controller?.dispose();
+    if (_controller case final controller?) {
+      // The values kept by the metrics can lack a frame that the map renders
+      // between this read and the dispose (design D111).
+      if (widget.metrics case final metrics?) {
+        releaseMetrics(metrics, controller);
+      }
+      controller.dispose();
+    }
     super.dispose();
   }
 

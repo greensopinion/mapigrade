@@ -10,4 +10,5 @@ export 'src/layer/layer_exception.dart'
         LayerException,
         LayerLoadException,
         LayerRenderException;
+export 'src/layer/layer_metrics.dart' show LayerMetrics, LayerMetricsSnapshot;
 export 'src/layer/mapigrade_layer.dart' show MapigradeLayer;

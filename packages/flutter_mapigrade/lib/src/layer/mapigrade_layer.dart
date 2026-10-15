@@ -6,6 +6,7 @@ import '../texture/native_library.dart';
 import 'http_header_rule.dart';
 import 'layer_alignment.dart';
 import 'layer_exception.dart';
+import 'layer_metrics.dart';
 import 'map_texture_layer.dart';
 
 /// Displays a MapLibre map as the base layer of a `FlutterMap`. Place it first
@@ -21,6 +22,7 @@ final class MapigradeLayer extends StatelessWidget {
     this.httpHeaders = const [],
     this.onStyleLoaded,
     this.onError,
+    this.metrics,
   }) : assert(
          (styleUrl == null) != (styleJson == null),
          'give exactly one of styleUrl and styleJson',
@@ -65,6 +67,11 @@ final class MapigradeLayer extends StatelessWidget {
   /// [FlutterError.reportError].
   final void Function(LayerException exception)? onError;
 
+  /// Reports the frame counts and render time of the layer's map; see
+  /// [LayerMetrics]. Give each layer its own object, and a new object with a
+  /// new [key].
+  final LayerMetrics? metrics;
+
   @override
   Widget build(BuildContext context) => MapTextureLayer(
     styleUrl: styleUrl,
@@ -73,5 +80,6 @@ final class MapigradeLayer extends StatelessWidget {
     httpHeaders: httpHeaders,
     onStyleLoaded: onStyleLoaded,
     onError: onError,
+    metrics: metrics,
   );
 }

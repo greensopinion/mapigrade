@@ -11,9 +11,11 @@ import 'package:latlong2/latlong.dart';
 
 void main() {
   test('exported names resolve without hiding names of other libraries', () {
-    const layer = MapigradeLayer(
+    final metrics = LayerMetrics();
+    final layer = MapigradeLayer(
       styleUrl: 'https://example.com/style.json',
       alignment: LayerAlignment.none,
+      metrics: metrics,
     );
     final map = FlutterMap(
       options: const MapOptions(initialCenter: LatLng(0, 0)),
@@ -30,6 +32,8 @@ void main() {
       _ => const LayerCreateException('create'),
     };
     expect(exception, isA<LayerRenderException>());
+    final LayerMetricsSnapshot snapshot = metrics.snapshot();
+    expect(snapshot.renderedFrames, 0);
     expect(<Type>[
       MapigradeLayer,
       LayerAlignment,
@@ -38,6 +42,7 @@ void main() {
       LayerRenderException,
       LayerCreateException,
       MaterialApp,
-    ], hasLength(7));
+      HttpHeaderRule,
+    ], hasLength(8));
   });
 }

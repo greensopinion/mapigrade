@@ -174,7 +174,7 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
   CHECK(owner->Present() == nullptr);
   auto stats = Stats(handle);
   CHECK(stats.rendered_frames == 1);
-  CHECK(stats.presented_frames == 0);
+  CHECK(stats.presented_frames == 1);
   CHECK(stats.waits_for_display == 0);
   CHECK(stats.copy_count == 0);
   owner.reset();

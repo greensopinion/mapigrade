@@ -69,6 +69,9 @@ typedef struct map_texture_stats {
   int64_t copy_count;
   int64_t copy_total_ns;
   int64_t copy_max_ns;
+  // Frames given to Flutter for display. On macOS and iOS: frames that
+  // Flutter took for display. On Android: frames queued on the surface for
+  // display, so every rendered frame.
   int64_t presented_frames;
   // MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE events received.
   int64_t render_update_available_events;
