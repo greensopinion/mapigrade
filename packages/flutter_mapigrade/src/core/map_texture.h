@@ -134,6 +134,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   bool RenderAhead();
   void MaybeNotifyAfterResize();
 
+  // The process-global MapLibre log callback. MapLibre reports a failed glyph
+  // load only as an error record, not as a map event; the record is passed to
+  // the map whose thread logged it, as a load failure.
+  static uint32_t OnLogRecord(void* user_data, uint32_t severity,
+                              uint32_t event, int64_t code,
+                              const char* message);
+
   void Emit(int32_t type, const char* message = nullptr,
             const FrameInfo* frame = nullptr, int64_t display_time_us = 0);
   void ReportStatus(const char* what, mln_status status);

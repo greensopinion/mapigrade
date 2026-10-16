@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace map_texture {
@@ -42,6 +44,25 @@ constexpr int64_t kResizeSettledNs = 1'100'000'000;
 // The refresh interval a surface target paces by until the display's refresh
 // rate is set (design D53): 60 Hz.
 constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
+
+// The map whose map thread this is; null on other threads. MapLibre logs
+// error records synchronously, on the thread that runs the failed work, and
+// each map's resource responses run on its own map thread, in
+// mln_runtime_pump().
+thread_local MapTexture* map_thread_owner = nullptr;
+
+// Sets map_thread_owner for the lifetime of the map thread.
+struct MapThreadOwnerScope {
+  explicit MapThreadOwnerScope(MapTexture* map) { map_thread_owner = map; }
+  ~MapThreadOwnerScope() { map_thread_owner = nullptr; }
+};
+
+// The start of the error record of MapLibre's RenderOrchestrator::
+// onGlyphsError. MapLibre has no map event for a failed glyph load, and the
+// FFI's map observer doesn't forward onGlyphsError.
+constexpr std::string_view kGlyphFailurePrefix = "Failed to load glyph range";
+
+std::once_flag log_callback_once;
 
 int64_t NowNs() {
   if (auto clock = test_clock.load()) return clock();
@@ -286,6 +307,7 @@ map_texture_stats MapTexture::stats() {
 // Map thread.
 
 void MapTexture::Run() {
+  MapThreadOwnerScope owner(this);
   bool ok = false;
   RunInPlatformScope([&] { ok = Init(); });
   {
@@ -371,6 +393,19 @@ bool MapTexture::Init() {
   runtime_options.cache_path = cache_path.empty() ? nullptr : cache_path.c_str();
   runtime_options.asset_path = asset_path.empty() ? nullptr : asset_path.c_str();
   runtime_options.event_mask = MLN_RUNTIME_EVENT_MASK_NONE;
+
+  // Installed once for the process, before the first map loads a style. The
+  // callback is process-global, so it replaces any other that the app set
+  // through the FFI. If the call fails, the map renders without reporting
+  // glyph failures.
+  std::call_once(log_callback_once, [this] {
+    mln_status log_status =
+        mln_log_set_callback(&MapTexture::OnLogRecord, nullptr);
+    if (log_status != MLN_STATUS_OK) {
+      ReportStatus("mln_log_set_callback", log_status);
+    }
+  });
+
   mln_status status = mln_runtime_create(&runtime_options, &runtime_);
   if (status != MLN_STATUS_OK) {
     ReportInitStatus("mln_runtime_create", status);
@@ -864,6 +899,21 @@ std::string StatusMessage(const char* what, mln_status status) {
 }
 
 }  // namespace
+
+// MapLibre may hold its logging lock here, so this only queues an event for
+// Dart and calls no FFI function. Returning 0 lets MapLibre's platform logger
+// write the record as well.
+uint32_t MapTexture::OnLogRecord(void*, uint32_t severity, uint32_t event,
+                                 int64_t, const char* message) {
+  MapTexture* map = map_thread_owner;
+  if (map == nullptr || message == nullptr ||
+      severity != MLN_LOG_SEVERITY_ERROR || event != MLN_LOG_EVENT_STYLE ||
+      !std::string_view(message).starts_with(kGlyphFailurePrefix)) {
+    return 0;
+  }
+  map->Emit(MAP_TEXTURE_EVENT_LOADING_FAILED, message);
+  return 0;
+}
 
 void MapTexture::ReportStatus(const char* what, mln_status status) {
   Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, StatusMessage(what, status).c_str());

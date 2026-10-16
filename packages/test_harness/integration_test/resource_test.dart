@@ -325,6 +325,56 @@ void main() {
       );
     });
 
+    testWidgets('glyphs that fail to load report a load failure', (
+      tester,
+    ) async {
+      // Answers every glyph request with 404.
+      final server = await LoopbackServer.start({});
+      addTearDown(server.close);
+      final failed = Completer<LayerException>();
+      await tester.pumpWidget(
+        appWith(
+          MapigradeLayer(
+            styleJson: jsonEncode({
+              'version': 8,
+              'glyphs': server.url('/fonts/{fontstack}/{range}.glyphs'),
+              'sources': {
+                'area': {
+                  'type': 'vector',
+                  'url': 'pmtiles://asset://assets/area.pmtiles',
+                },
+              },
+              'layers': [
+                {
+                  'id': 'label',
+                  'type': 'symbol',
+                  'source': 'area',
+                  'source-layer': 'area',
+                  'layout': {
+                    'text-field': 'A',
+                    'text-font': ['Missing Font'],
+                  },
+                },
+              ],
+            }),
+            onError: (e) {
+              if (!failed.isCompleted) failed.complete(e);
+            },
+          ),
+        ),
+      );
+      final exception = await failed.future.timeout(
+        const Duration(seconds: 20),
+      );
+      expect(exception, isA<LayerLoadException>());
+      expect(exception.message, contains('glyph'));
+      expect(exception.message, contains('Missing Font'));
+      expect(
+        server.requests.map((r) => r.path),
+        contains(startsWith('/fonts/')),
+      );
+    });
+
     testWidgets('a missing asset reports a load failure', (tester) async {
       final failed = Completer<LayerException>();
       await tester.pumpWidget(

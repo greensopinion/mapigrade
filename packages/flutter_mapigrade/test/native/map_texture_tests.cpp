@@ -86,6 +86,7 @@ struct Event {
   double zoom;
   int32_t physical_width;
   int64_t display_time_us;
+  std::string message;
 };
 std::mutex events_mutex;
 std::vector<Event> events;
@@ -94,9 +95,22 @@ void OnEvent(map_texture_event* event) {
   {
     std::lock_guard lock(events_mutex);
     events.push_back({event->type, event->frame_id, event->zoom,
-                      event->physical_width, event->display_time_us});
+                      event->physical_width, event->display_time_us,
+                      event->message == nullptr ? "" : event->message});
   }
   map_texture_event_free(event);
+}
+
+// The messages of the load failures received.
+std::vector<std::string> LoadFailures() {
+  std::lock_guard lock(events_mutex);
+  std::vector<std::string> messages;
+  for (const auto& event : events) {
+    if (event.type == MAP_TEXTURE_EVENT_LOADING_FAILED) {
+      messages.push_back(event.message);
+    }
+  }
+  return messages;
 }
 
 std::vector<Event> FrameEvents() {
@@ -505,6 +519,41 @@ void FailedInitReportsMessage() {
   CHECK(error.find("no runtime") != std::string::npos);
 }
 
+constexpr const char* kGlyphFailure =
+    "Failed to load glyph range 0-255 for font stack Noto Sans Regular:( "
+    "HTTP status code 404)";
+
+void GlyphFailureIsReportedAsLoadFailure() {
+  int64_t handle = CreateMap();
+  // Once for the process, however many maps are created.
+  CHECK(fake_mln::LogCallbackRegistrations() == 1);
+  fake_mln::QueueLogRecord({.message = kGlyphFailure});
+  CHECK(WaitFor([] { return !LoadFailures().empty(); }));
+  auto reported = LoadFailures();
+  CHECK(reported.size() == 1);
+  CHECK(reported[0] == kGlyphFailure);
+  map_texture_dispose(handle);
+}
+
+void OtherLogRecordsAreNotReported() {
+  int64_t handle = CreateMap();
+  fake_mln::QueueLogRecord({.message = "Failed to load tile 1/0/0"});
+  fake_mln::QueueLogRecord(
+      {.severity = MLN_LOG_SEVERITY_WARNING, .message = kGlyphFailure});
+  fake_mln::QueueLogRecord(
+      {.event = MLN_LOG_EVENT_GLYPH, .message = kGlyphFailure});
+  // Logged off the map thread, so it belongs to no map.
+  fake_mln::Log({.message = kGlyphFailure});
+  // The last record shows that the pump has passed the others on.
+  fake_mln::QueueLogRecord({.message = std::string(kGlyphFailure) + " last"});
+  CHECK(WaitFor([] { return !LoadFailures().empty(); }));
+  Sleep(50);
+  auto reported = LoadFailures();
+  CHECK(reported.size() == 1);
+  CHECK(reported[0] == std::string(kGlyphFailure) + " last");
+  map_texture_dispose(handle);
+}
+
 }  // namespace
 
 namespace map_texture {
@@ -545,6 +594,8 @@ int main() {
   RejectedHeaderFailsCreate();
   InvalidRuleArraysFailCreate();
   FailedInitReportsMessage();
+  GlyphFailureIsReportedAsLoadFailure();
+  OtherLogRecordsAreNotReported();
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

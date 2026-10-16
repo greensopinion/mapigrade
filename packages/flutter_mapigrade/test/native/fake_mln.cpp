@@ -27,6 +27,11 @@ std::string runtime_create_message;
 mln_status validate_status = MLN_STATUS_OK;
 mln_status runtime_create_status = MLN_STATUS_OK;
 std::string last_asset_path;
+// Read without the mutex, as MapLibre does.
+std::atomic<mln_log_callback> log_callback{nullptr};
+std::atomic<int> log_callback_registrations{0};
+// Records the next pump logs on its thread.
+std::vector<fake_mln::LogRecord> pending_log_records;
 // What mln_thread_last_error_message returns.
 thread_local std::string last_error;
 
@@ -63,7 +68,25 @@ void Reset() {
   header_transform_registrations = 0;
   header_transform = {};
   last_asset_path.clear();
+  pending_log_records.clear();
 }
+
+void QueueLogRecord(LogRecord record) {
+  {
+    std::lock_guard lock(mutex);
+    pending_log_records.push_back(std::move(record));
+  }
+  Wake();
+}
+
+void Log(const LogRecord& record) {
+  if (auto callback = log_callback.load()) {
+    callback(nullptr, record.severity, record.event, -1,
+             record.message.c_str());
+  }
+}
+
+int LogCallbackRegistrations() { return log_callback_registrations.load(); }
 
 void QueueRenderUpdate() {
   {
@@ -230,6 +253,18 @@ mln_status mln_runtime_pump(mln_runtime, int64_t timeout_ms,
   cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
               [] { return woken || pending_render_updates > 0; });
   woken = false;
+  // As MapLibre does for a resource response that the pump runs.
+  std::vector<fake_mln::LogRecord> records;
+  records.swap(pending_log_records);
+  lock.unlock();
+  for (const auto& record : records) fake_mln::Log(record);
+  return MLN_STATUS_OK;
+}
+
+mln_status mln_log_set_callback(mln_log_callback callback,
+                                void*) MLN_NOEXCEPT {
+  ++log_callback_registrations;
+  log_callback.store(callback);
   return MLN_STATUS_OK;
 }
 

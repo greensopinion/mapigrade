@@ -75,6 +75,23 @@ void SetHeaderValidateResult(std::string name, mln_status status,
 // The last asset path given to mln_runtime_create, or "<null>".
 std::string LastAssetPath();
 
+// A MapLibre log record.
+struct LogRecord {
+  uint32_t severity = MLN_LOG_SEVERITY_ERROR;
+  uint32_t event = MLN_LOG_EVENT_STYLE;
+  std::string message;
+};
+
+// Queues `record`, which the next mln_runtime_pump passes to the log callback
+// on its thread, and wakes the pump.
+void QueueLogRecord(LogRecord record);
+
+// Passes `record` to the log callback on the calling thread.
+void Log(const LogRecord& record);
+
+// Calls of mln_log_set_callback since the process started.
+int LogCallbackRegistrations();
+
 // The status and message of mln_runtime_create. Not reset by Reset().
 void SetRuntimeCreateResult(mln_status status, std::string message);
 
