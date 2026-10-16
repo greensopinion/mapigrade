@@ -86,15 +86,16 @@ During the flyover's follow (D118), a rider marker sits on the route: a yellow d
 | hold at finish | 2 s | (skipped for a loop) |
 | to next start | 6 s | zoom out, pan, zoom in |
 
-The follow is a chase camera. A rider moves along the route; the camera turns the map so that the rider's direction of travel points up, and puts its center ahead of the rider by 20% of the viewport height, so that the rider is in the lower part of the screen and the view shows the road ahead. Zoom 16 (about 1.7 m per logical pixel at the latitude of the stages) shows the road and the buildings beside it.
+The follow is a chase camera. A rider moves along the route, keeping strictly to it. The camera is a drone that flies a smoothed version of the rider's track: it turns the map so that its course points up, and puts its center ahead of the rider by 20% of the viewport height, so that the rider is in the lower part of the screen and the view shows the road ahead. On tight bends the drone cuts the corner and turns gradually instead of turning with the road, so the rider drifts a little around its place below the center, by at most 20% of the viewport's shorter side. Zoom 16 (about 1.7 m per logical pixel at the latitude of the stages) shows the road and the buildings beside it.
 
-The follow is precomputed when the flyover is built, at samples 16 px apart at zoom 16 (about 28 m):
+The follow is precomputed when the flyover is built:
 
-- Heading: the direction from 80 px behind the sample to 320 px ahead of it, unwrapped so that it doesn't jump at ±180°, then averaged over 320 px on either side. A raw road direction would flip by 180° on every hairpin; the smoothed heading turns through a bend over about 1 km.
-- Time: the rider moves at 500 px/s at zoom 16 (about 0.86 km/s on the ground), slowed over the first and last 1,200 px to no less than 15% of that speed, so that the follow starts and stops smoothly. Where the heading changes faster than 45° per second at that speed, the rider slows down so that the map turns at 45° per second.
-- `camera(t)` during the follow finds the sample by time and interpolates the rider's position and the heading between it and the next one. `rider(t)` returns the rider's position, and returns null outside a follow, so that the marker is shown only then (D117).
+- Course: at samples 16 px apart at zoom 16 (about 28 m), the direction from 80 px behind the sample to 320 px ahead of it, unwrapped so that it doesn't jump at ±180°, then smoothed with a Gaussian of 480 px. A raw road direction would flip by 180° on every hairpin.
+- Rider's speed: 500 px/s at zoom 16 (about 0.86 km/s on the ground), lower where the course turns faster than 25° per second at that speed, 15% of it at both ends, and changing by no more than 100 px/s², so that the rider speeds up and slows down gradually rather than stepping between speeds.
+- Drone: the rider's position and course at 60 frames per second of follow time, each smoothed over time with a Gaussian (1.2 s for the position, 1.5 s for the heading). A symmetric smoothing of a straight track at a steady speed is the track itself, so the drone doesn't lag the rider; it only rounds corners, and its turn rate changes gradually. Where the drone would drift further than the limit from the rider, the rider slows down on that bend and the flight is planned again (at most 8 times); a final clamp keeps the rider on screen.
+- `camera(t)` during the follow interpolates between the two drone frames around `t`. `rider(t)` finds the rider's sample by time and interpolates its position, and returns null outside a follow, so that the marker is shown only then (D117).
 
-With the committed routes the follows take 65.4 s (stage 9, which traces the circuit once), 200.0 s (stage 7) and 34.4 s (stage 4), and the flyover 342.8 s. The speed is a constant in `flyover.dart`, `followSpeed`, and sets most of that length; the parts where the turn rate limits the speed don't change with it.
+With the committed routes the follows take 72.5 s (stage 9, which traces the circuit once), 251.0 s (stage 7) and 37.5 s (stage 4), and the flyover 404.0 s. The speed is a constant in `flyover.dart`, `followSpeed`, and sets most of that length; the parts where the turn rate or the drift limits the speed don't change with it. In the unit test the drone's turn rate changes by under 15°/s² and its speed on screen by under 200 px/s²; a camera locked to the smoothed road heading, as first built, reached 6,000–9,000 px/s² on tight bends, which showed as jerks.
 
 Other segments interpolate with an ease-in-out curve: the center in Web Mercator coordinates, the zoom linearly, the rotation by the shorter angle. A transition between stages adds a dip to the zoom, `z(s) = lerp(z0, z1, s) − d · sin(π s)`, where `d` lowers the zoom at mid-way to the zoom at which both points fit in the viewport. The camera therefore moves at low zoom over most of the distance and doesn't load street-level tiles along the way.
 
@@ -103,6 +104,7 @@ Other segments interpolate with an ease-in-out curve: the center in Web Mercator
 *Alternatives:*
 - MapLibre's `flyTo` curve (van Wijk and Nuij) looks smoother over long distances, but it adds a parameterised curve for a sequence that has two long transitions.
 - Showing each whole route north up, with a fixed 20° rotation and back, or following it north up at zoom 12: both were tried, and neither looks like a flight along the course.
+- Locking the camera to the rider with a heading smoothed along the route, and a 45° per second limit: it jerked on tight bends, where the heading's turn rate and the camera's speed changed abruptly, and the map turned too quickly.
 - Aiming the camera at a point 400 px further along the route instead of using a smoothed heading: it turns earlier into bends, but it missed the direction of travel more often on the circuit of stage 9 in the unit test that checks that the rider moves up the screen.
 - Pitch, which a drone view would also have: the package supports center, zoom and bearing only (proposal, non-goals).
 
@@ -125,8 +127,8 @@ The map screen builds its `MapOptions` in `build` with method tear-offs as callb
 - [The FOSSGIS bicycle profile avoids roads that the race uses, such as main roads closed for the race, so a route leaves the race route.] → More waypoints on the official route for that section; the routes are labelled approximate.
 - [The routing service changes or goes away.] → The asset is committed, so the demo doesn't depend on the service; only regenerating does.
 - [The OpenFreeMap or demo tile servers are down or slow.] → The demo reports load failures through `onError`; recordings need a warm-up pass.
-- [At zoom 16 the follow crosses new tiles all the time, about 0.86 km/s on the ground, and on a slow network the first run shows tiles loading.] → The warm-up pass. The warm-up doubles the playback to about 11 min 26 s.
-- [Turning the map during the follow shows corners that MapLibre hasn't rendered yet.] → The layer fills the viewport when rotated (map-layer, "Rotated map"); the 45° per second limit keeps the change between frames under 0.4° at 120 Hz.
-- [The flyover, at about 5 min 43 s, is long for a recording.] → `followSpeed` sets most of the length; a later change can make it a setting.
-- [The smoothed heading lags the road on tight bends, so the rider briefly moves diagonally on screen.] → The unit test requires that the rider moves within 45° of straight up in more than 90% of the follow's samples on each stage.
+- [At zoom 16 the follow crosses new tiles all the time, about 0.86 km/s on the ground, and on a slow network the first run shows tiles loading.] → The warm-up pass. The warm-up doubles the playback to about 13 min 28 s.
+- [Turning the map during the follow shows corners that MapLibre hasn't rendered yet.] → The layer fills the viewport when rotated (map-layer, "Rotated map"); the 25° per second limit keeps the change between frames under 0.25° at 120 Hz.
+- [The flyover, at about 6 min 44 s, is long for a recording.] → `followSpeed` sets most of the length; a later change can make it a setting.
+- [The drone rounds tight bends, so the rider briefly moves diagonally on screen and drifts from its place below the center.] → The drift is limited by slowing the rider; the unit test requires that the rider moves within 60° of straight up in more than 90% of the follow's samples on each stage, and stays within the drift limit.
 - [The `publish-readiness` change changes the example's Android settings (local FFI property, ABIs).] → The demo's Android settings follow the example's; whichever change is archived second updates the demo too.

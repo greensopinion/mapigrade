@@ -31,6 +31,9 @@ MapCamera _view(FlyoverCamera c) =>
 /// Where the rider is on screen: below the center by the look-ahead.
 const _riderOnScreen = Offset(600, 400 + 800 * lookAhead);
 
+/// How far the rider may drift from [_riderOnScreen], in pixels.
+const _maxDrift = 800 * maxDrift;
+
 /// The distance in metres from [p] to the polyline [route].
 double _distanceToRoute(LatLng p, List<LatLng> route) {
   final cosLat = math.cos(p.latitudeInRad);
@@ -138,8 +141,7 @@ void main() {
       final stage = stages[n];
       final s = flyover.segments[i];
       expect(s.stage, stage.number);
-      LatLng rider(Duration t) =>
-          _view(flyover.cameraAt(t)).screenOffsetToLatLng(_riderOnScreen);
+      LatLng rider(Duration t) => flyover.riderAt(t)!;
 
       expect(
         distance.distance(rider(flyover.startOf(i)), stage.route.first),
@@ -154,7 +156,8 @@ void main() {
       );
       for (var ms = 0; ms < s.duration.inMilliseconds; ms += 200) {
         final t = flyover.startOf(i) + Duration(milliseconds: ms);
-        expect(flyover.cameraAt(t).zoom, followZoom);
+        final camera = flyover.cameraAt(t);
+        expect(camera.zoom, followZoom);
         // The rider moves on chords between samples 16 px (about 28 m)
         // apart, which cut a hairpin's corner by a few metres.
         expect(
@@ -162,6 +165,14 @@ void main() {
           lessThan(10),
           reason: 'stage ${stage.number} at $ms ms',
         );
+        // Below the center, where the drone's smoothing lets it drift.
+        final onScreen = _view(camera).latLngToScreenOffset(rider(t));
+        expect(
+          (onScreen - _riderOnScreen).distance,
+          lessThanOrEqualTo(_maxDrift + 0.5),
+          reason: 'stage ${stage.number} at $ms ms',
+        );
+        expect(onScreen.dy, greaterThan(_viewport.height / 2));
       }
     }
   });
@@ -174,10 +185,13 @@ void main() {
           expect(rider, isNull, reason: '${s.stage} ${s.kind}');
           continue;
         }
-        // At the point below the screen's center by the look-ahead.
+        // Near the point below the screen's center by the look-ahead.
         final onScreen = _view(flyover.cameraAt(t))
             .latLngToScreenOffset(rider!);
-        expect((onScreen - _riderOnScreen).distance, lessThan(0.5));
+        expect(
+          (onScreen - _riderOnScreen).distance,
+          lessThanOrEqualTo(_maxDrift + 0.5),
+        );
       }
     }
   });
@@ -189,15 +203,16 @@ void main() {
       for (var ms = 0; ms + 500 < s.duration.inMilliseconds; ms += 200) {
         final t = flyover.startOf(i) + Duration(milliseconds: ms);
         final view = _view(flyover.cameraAt(t));
-        final later = _view(
-          flyover.cameraAt(t + const Duration(milliseconds: 500)),
-        ).screenOffsetToLatLng(_riderOnScreen);
+        final later = flyover.riderAt(t + const Duration(milliseconds: 500))!;
         // Where the rider will be in 0.5 s, seen from the camera now.
-        final move = view.latLngToScreenOffset(later) - _riderOnScreen;
+        final move =
+            view.latLngToScreenOffset(later) -
+            view.latLngToScreenOffset(flyover.riderAt(t)!);
         if (move.distance < 1) continue;
         samples++;
-        // Within 45° of straight up.
-        if (-move.dy > move.dx.abs()) up++;
+        // Within 60° of straight up: the drone rounds tight bends rather
+        // than turning with the road, so the rider briefly moves diagonally.
+        if (-move.dy > move.dx.abs() * math.tan(math.pi / 6)) up++;
       }
       expect(samples, greaterThan(0));
       expect(
@@ -223,6 +238,40 @@ void main() {
           reason: 'stage ${s.stage} at $t',
         );
       }
+    }
+  });
+
+  test('the drone turns and moves smoothly', () {
+    for (final i in follows()) {
+      final s = flyover.segments[i];
+      // Measured over 100 ms steps, from rate changes between steps.
+      const dt = Duration(milliseconds: 100);
+      double? lastTurn;
+      Offset? lastMove;
+      var maxTurnChange = 0.0, maxMoveChange = 0.0;
+      for (var t = flyover.startOf(i); t + dt <= end(i); t += dt) {
+        final a = flyover.cameraAt(t), b = flyover.cameraAt(t + dt);
+        // Degrees per second, signed.
+        final turn = ((b.rotation - a.rotation + 180) % 360 - 180) * 10;
+        // Screen pixels per second at the follow zoom.
+        final move =
+            _view(a).latLngToScreenOffset(b.center) -
+            _view(a).latLngToScreenOffset(a.center);
+        final moveRate = move * 10;
+        if (lastTurn != null) {
+          maxTurnChange = math.max(maxTurnChange, (turn - lastTurn).abs() * 10);
+          maxMoveChange = math.max(
+            maxMoveChange,
+            (moveRate - lastMove!).distance * 10,
+          );
+        }
+        lastTurn = turn;
+        lastMove = moveRate;
+      }
+      // The turn rate and the speed change gradually: no jerk on tight
+      // corners. (A camera locked to the road reaches thousands of px/s².)
+      expect(maxTurnChange, lessThan(15), reason: 'stage ${s.stage} deg/s²');
+      expect(maxMoveChange, lessThan(200), reason: 'stage ${s.stage} px/s²');
     }
   });
 
