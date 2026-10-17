@@ -229,6 +229,38 @@ Against the go/no-go values: the Pixel meets the 30 fps minimum and is close to 
 
 Memory (`integration_test/memory_measurement.dart`, debug build, PSS from `/proc/self/smaps_rollup`, design D58): 223 MiB before the map was created, 346 MiB before the memory reduction, 341 MiB 2 s and 342 MiB 7 s after it. During 300 resizes PSS stayed between 280 and 298 MiB, and it was 265 MiB 2 s after dispose.
 
+### Android display slots (android-layer-children-alignment change, tasks 1.1 and 5.1)
+
+Measured 2026-10-17 on the Pixel 4a (5G), with the setup and procedure above, 3 runs each. "One slot" is a build of commit `e345d67`, before the change; "six slots" is the change with six display slots, renders paced by the display refresh interval (design D134), and Dart choosing the newest ready frame in each Flutter frame. With one slot, a frame counts as displayed when the map queued it; with six slots, when Dart chose it.
+
+| Metric | One slot | Six slots |
+| --- | --- | --- |
+| Displayed map frames per second, average over 30 s | 57.7–58.3 | 50.8–51.7 |
+| Displayed map frames per second, per-second min / p10 / p50 / p90 | 44–56 / 56–57 / 58–59 / 59–60 | 36–42 / 45–47 / 51–52 / 56–58 |
+| Displayed map frame interval, median / p95 / p99 / max | 16.91–16.95 / 27.3–30.5 / 36.5–40.7 / 52.2–67.4 ms | 16.79–16.81 / 35.1–35.8 / 66.0–68.0 / 189.5–206.5 ms |
+| Map frames rendered | 1,730–1,748 | 1,735–1,746 |
+| Map frames displayed | 1,730–1,748 | 1,523–1,552 |
+| Flutter frames rasterized | 1,641–1,713 | 1,762–1,826 |
+| Flutter frame interval, p95 / p99 / max | 33.38–33.40 / 33.49–50.07 / 66.8–100.2 ms | 16.76 / 16.78–16.79 / 33.4–50.1 ms |
+| `render_update`, average (maximum) | 8.96–9.58 ms (39.4–56.9 ms) | 8.65–8.77 ms (38.3–54.2 ms) |
+| Skipped renders | 0 | 0 |
+
+With one slot, Flutter rasterized fewer Flutter frames than the map queued, so it showed at most 55 to 57 map frames per second. With six slots, about 12% of rendered frames were replaced before Dart chose them, and some Flutter frames showed the frame of the previous Flutter frame again: the map renders by its own clock, which drifts against the display refresh (design D134). Flutter itself rasterized a frame on almost every refresh.
+
+Two other configurations of the change, one run set each, were rejected: renders paced by Dart's choice displayed 25.7–27.4 map frames per second, and five slots with interval pacing displayed 48.3–50.1 with 203–266 skipped renders per run (design corrections of D133 and D134).
+
+Memory (`integration_test/memory_measurement.dart`, profile build because `flutter drive` doesn't run release builds, PSS from `/proc/self/smaps_rollup`, 3 runs):
+
+| PSS | One slot | Six slots |
+| --- | --- | --- |
+| Before the map was created | 97–102 MiB | 86–88 MiB |
+| Before the memory reduction | 231–235 MiB | 219–222 MiB |
+| 7 s after the memory reduction | 222–226 MiB | 210–221 MiB |
+| At the start of the resizes / after 300 resizes | 179–180 / 162–163 MiB | 161–164 / 145–147 MiB |
+| 2 s after dispose | 144–147 MiB | 123–129 MiB |
+
+This PSS doesn't include the graphics buffers. `dumpsys meminfo` 10 s into the measured pan of the benchmark (release build, one run each) reported Graphics 215 MB with one slot and 203 MB with six slots, of which EGL mtrack 108 MB and 98 MB: the six slots use one buffer fewer than Flutter's `SurfaceProducer` did.
+
 The app size increase is in `limitations.md`.
 
 ### Slower GPU (task 6.4)

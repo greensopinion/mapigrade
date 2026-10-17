@@ -559,16 +559,22 @@ void main() {
       expect(controller.selected, isEmpty);
     });
 
-    testWidgets('get the live camera with one texture id', (tester) async {
-      final fake = _FakeController();
+    // Android: six slots share one texture id (design D135 of the
+    // android-layer-children-alignment change).
+    testWidgets('get the chosen frame camera with one shared texture id', (
+      tester,
+    ) async {
+      final fake = _FakeController(textureIds: const [7, 7, 7, 7, 7, 7]);
       await tester.pumpWidget(map(fake: fake));
-      await ready(tester, 1, 0, 1, fake);
+      await ready(tester, 1, 4, 1, fake);
+      final sent = seen['child'];
       mapController.move(const LatLng(49.3, -123.0), 10);
       await tester.pump();
-      expect(fake.selected, isEmpty);
-      expect(seen['child'], same(mapController.camera));
-      expect(childCameras.last.$1, isNull);
-      expect(displayedTexture(tester), 1);
+      expect(fake.selected, hasLength(1));
+      expect(childCameras.last.$1, 1);
+      expect(seen['child'], isNot(same(mapController.camera)));
+      expect(seen['child'], same(sent));
+      expect(displayedTexture(tester), 7);
     });
 
     testWidgets("get flutter_map's controller and options", (tester) async {

@@ -68,33 +68,48 @@ Android uses the same core, C ABI and Dart API. The core has two kinds of render
  Android main thread (also Dart's UI thread)          map thread (one per map)
  ───────────────────────────────────────────          ────────────────────────
  MapTextureController.create / resize
-   createSurfaceProducer, setSize, getSurface (JNI)
+   createImageTexture; a new ImageReader per size
+   (MapSurface, JNI)
    ANativeWindow ─────────────── ordered queue ─────►  create the EGL window surface, or switch the
                                                        session to it (mln_opengl_surface_set_target)
  setCamera, loadStyleUrl ───► camera slot, queue ──►   loop as on macOS and iOS; render at most once
-                                                       per display refresh interval:
+                                                       per display refresh interval, into a free slot:
+                                                         set the frame id as presentation time,
                                                          render_update → eglSwapBuffers queues the
                                                          frame in the ImageReader
-   frames stream ◄── NativeCallable.listener ◄──────────  frame displayed (no display time)
- ImageReader listener: acquire the image,
-   schedule an engine frame                            Flutter raster thread samples the newest image
- onSurfaceCleanup ──► park on a 1x1 pbuffer surface ─►  done; the main thread waits for it
- onSurfaceAvailable ──► new ANativeWindow ──────────►  switch to the new window surface
- onActivityStopped / onActivityStarted ─────────────►  pause / resume rendering
+
+                         image listener thread (one per map)
+                         ───────────────────────────────────
+                         acquire the image, OnFrameImage: the frame's slot keeps
+                         the image, and the frame is published
+   readyFrames stream ◄── NativeCallable.listener ◄── frame ready (slot, camera, seq)
+ layer build: select(frame) ──► pushImage of the slot's image into the image texture,
+   frames stream ◄── frame displayed (no display time)
+                                                       Flutter raster thread takes the pushed image
+ onActivityStopped ──► pause, park on a 1x1 pbuffer ─►  done; the main thread waits for it, then closes
+   surface, close the images and the readers           the images and the readers
+ onActivityStarted ──► new ImageReader, resume ─────►  switch to the new window surface
  onTrimMemory(≥ BACKGROUND), onLowMemory ───────────►  release cached renderer resources
 ```
 
-`MapTextureController.create` and `resize` run on Android's main thread, because Dart's UI thread is merged with it. The surface target calls the `SurfaceProducer` through JNI there, and sends its `Surface` to the map thread as an `ANativeWindow`. The map thread never calls into Java and never waits for the main thread. The main thread waits for the map thread only in surface cleanup and dispose; to keep these waits short, each window surface has swap interval 0, so that `eglSwapBuffers` never waits for Flutter (design D53).
+`MapTextureController.create` and `resize` run on Android's main thread, because Dart's UI thread is merged with it. The surface target calls `MapSurface` through JNI there: it creates the image texture and, for each physical size, an `ImageReader`, whose `Surface` goes to the map thread as an `ANativeWindow` (designs D130 and D136 of the android-layer-children-alignment change). The map thread never calls into Java and never waits for the main thread. The main thread waits for the map thread only when the activity stops and at dispose; to keep these waits short, each window surface has swap interval 0, so that `eglSwapBuffers` never waits for a buffer (design D53 of the android-texture-vertical-slice change).
 
-The plugin class registers activity lifecycle callbacks and pauses rendering while the Flutter activity is stopped. The producer uses `SurfaceLifecycle.resetInBackground`, so Flutter removes the surface when the activity stops and provides a new one when it resumes. The map, its style and its loaded tiles stay in place while the surface is gone.
+Each `ImageReader` has a listener on a thread of its own, which passes each image to the native target (`MapTexture::OnFrameImage`). The target keeps a global reference to the image of each display slot. It gives an image to Flutter with `pushImage`, and closes it when its slot becomes free, under the `BufferState` lock, so the three are ordered (design D135).
+
+The plugin class registers activity lifecycle callbacks. When the Flutter activity stops, it pauses rendering, parks the session on a pbuffer surface, and closes the slots' images and the readers; when the activity starts again, it creates a reader and resumes rendering (design D137). The map, its style and its loaded tiles stay in place.
 
 ### Frame path
 
 ```
-MapLibre (OpenGL ES) ──render──► EGL window surface on the SurfaceProducer's Surface
-                     ──eglSwapBuffers──► ImageReader HardwareBuffer ──► Flutter samples it as a Texture widget
+MapLibre (OpenGL ES) ──render──► EGL window surface on the ImageReader's Surface
+                     ──eglSwapBuffers──► ImageReader HardwareBuffer ──► listener acquires the Image
+                                         ──► slot ──select──► pushImage ──► Flutter samples it as a Texture widget
 ```
 
-The session is dedicated (FFI preset `android-arm64-egl`): it owns the map thread's EGL context and renders directly into the `ImageReader`'s `HardwareBuffer`s, so the plugin makes no copy and no pixels pass through CPU memory. `copyFree: false` has no effect on Android. Flutter gives the plugin no call when it takes an image, so the map thread paces itself: it starts a render no earlier than one display refresh interval after the previous one, and counts deferred renders in `interval_waits`. The frame report is sent when `eglSwapBuffers` has queued the frame, and has no display time (`FrameCamera.displayTime` is null). The surface target has one display slot and sends no frame-ready report, so `MapTextureController.textureIds` has one id, `map_texture_select` does nothing, and `MapigradeLayer` draws its `children` at the live `flutter_map` camera (design D128 of the layer-children-alignment change).
+The session is dedicated (FFI preset `android-arm64-egl`): it owns the map thread's EGL context and renders directly into the `ImageReader`'s `HardwareBuffer`s, so the plugin makes no copy and no pixels pass through CPU memory. `copyFree: false` has no effect on Android.
+
+Android has six display slots, which share the one image texture, so `MapTextureController.textureIds` has six equal ids (designs D133 and D135). Before each render, the map thread records the frame id in the slot and sets it as the frame's presentation time. The listener matches each image to its slot by that timestamp. The image can arrive before `render_update` returns; the map thread then publishes the frame when the render returns (design D131). When a frame is published, Dart receives the frame-ready report, and the layer chooses the newest ready frame in its next build, as on macOS and iOS. `map_texture_select` gives the frame's image to the texture on the main thread, before the Flutter frame is rasterized, and sends the frame-displayed report, which has no display time (design D132).
+
+Flutter gives the plugin no call when it has finished with an image, so a chosen slot becomes free when Dart has chosen three later frames; its image is then closed (design D133). The map thread starts a render no earlier than one display refresh interval after the previous one, and doesn't wait for Dart's choice; a ready frame that Dart hasn't chosen is replaced by the next one (design D134). Deferred renders are counted in `interval_waits`.
 
 Dart finds the plugin's functions through the build hook `hook/build.dart`, which names `libflutter_mapigrade.so` as the bindings' code asset. [packaging.md](packaging.md) describes how the APK contains the libraries.

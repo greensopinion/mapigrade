@@ -89,11 +89,9 @@ final class LayerMetricsSnapshot {
   /// has a meaning.
   final Duration time;
 
-  /// The map frames given to Flutter for display. On macOS and iOS, a frame
-  /// counts when Flutter takes it for display, so this is at most
-  /// [renderedFrames]. On Android, a frame counts when the map has queued it
-  /// for display; every rendered frame is queued, so this equals
-  /// [renderedFrames].
+  /// The map frames given to Flutter for display, at most [renderedFrames].
+  /// On macOS and iOS, a frame counts when Flutter takes it for display; on
+  /// Android, when Dart chooses it for display.
   final int displayedFrames;
 
   /// The frames the map rendered.

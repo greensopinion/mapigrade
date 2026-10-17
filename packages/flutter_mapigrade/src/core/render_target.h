@@ -10,9 +10,11 @@
 //   the session's target with set_target before each render (design D20).
 //   Otherwise the session renders into one render texture, and each frame is
 //   copied on the GPU into a free buffer (design D3b).
-// - A surface target (Android) renders into a surface whose buffers Flutter
-//   displays. The session presents each frame itself, so the target has no
-//   buffers, no copy and no Present().
+// - A surface target (Android) renders into a surface whose buffers the
+//   plugin receives as images, one per frame. The session presents each frame
+//   itself, so there is no copy and no Present(). Display slots refer to the
+//   images, and all slots share one Flutter texture: when Dart chooses a
+//   frame, the target gives its image to Flutter (designs D130 to D135).
 //
 // The core in this directory has no platform dependencies. Each platform
 // implements one kind of target and the four functions at the end of this
@@ -127,14 +129,30 @@ class BufferRenderTarget : public RenderTarget {
   virtual void ReleaseBuffersLocked() = 0;
 };
 
-// A target that presents through a surface whose buffers Flutter displays
-// (Android). Each render_update that renders a frame also queues it for
-// display, and Flutter schedules a frame for each queued one, so the target
-// has no FrameAvailable(). It has one display slot, and Dart can't choose the
-// frame to display (design D128).
+// A target that presents through a surface whose buffers the plugin receives
+// as images (Android). Each render_update that renders a frame also queues it
+// on the surface. When the frame's image arrives, the target calls
+// MapTexture::OnFrameImage, which publishes the frame into its slot (design
+// D131).
 class SurfaceRenderTarget : public RenderTarget {
  public:
   SurfaceRenderTarget* AsSurfaceTarget() override { return this; }
+
+  // Map thread, before a render_update: the frame the session presents next
+  // has the id `frame_id`, which the target attaches to the frame so that it
+  // can tell which frame an image holds.
+  virtual void WillRender(uint64_t frame_id) {}
+
+  // The platform thread, under the BufferState lock, from MapTexture::Select:
+  // Dart chose the frame in `slot`, so give its image to Flutter for the
+  // Flutter frame that Dart is building (design D132).
+  virtual void FrameAvailable(int slot) = 0;
+
+  // Under the BufferState lock, on the thread that freed the slot: `slot` no
+  // longer holds a frame that Flutter may display, so release its image, if
+  // it has one (design D133). The map thread frees only slots without an
+  // image.
+  virtual void SlotFreed(int slot) = 0;
 
   // Attach() and SetTarget() make the session present through the current
   // surface.

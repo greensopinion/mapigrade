@@ -352,6 +352,112 @@ void NoFreeSlotWithoutPresent() {
   CHECK(state.max_in_use() == 4);
 }
 
+// Android's release rule (design D133): Dart chooses A, B, C and D in order.
+void HeldUntilThreeLaterChoices() {
+  BufferState state(map_texture::kChoiceReleasedBufferCount,
+                    BufferState::ReleaseRule::kLaterChoices);
+  for (int slot = 0; slot < 4; ++slot) {
+    CHECK(PublishAt(state, slot, slot + 1));
+    CHECK(state.Select(slot, slot + 1));
+    CHECK(state.slot(0) == (slot < 3 ? Slot::kHeld : Slot::kFree));
+  }
+  CHECK(state.slot(1) == Slot::kHeld);
+  CHECK(state.slot(2) == Slot::kHeld);
+  CHECK(state.slot(3) == Slot::kHeld);
+}
+
+void RepeatedChoiceDoesNotCountWithLaterChoices() {
+  BufferState state(map_texture::kChoiceReleasedBufferCount,
+                    BufferState::ReleaseRule::kLaterChoices);
+  CHECK(PublishAt(state, 0, 1));
+  CHECK(state.Select(0, 1));
+  CHECK(PublishAt(state, 1, 2));
+  CHECK(state.Select(1, 2));
+  CHECK(PublishAt(state, 2, 3));
+  for (int i = 0; i < 5; ++i) CHECK(state.Select(2, 3));
+  CHECK(state.slot(0) == Slot::kHeld);
+  CHECK(PublishAt(state, 3, 4));
+  CHECK(state.Select(3, 4));
+  CHECK(state.slot(0) == Slot::kFree);
+  CHECK(state.slot(1) == Slot::kHeld);
+}
+
+void PresentFreesNothingWithLaterChoices() {
+  BufferState state(map_texture::kChoiceReleasedBufferCount,
+                    BufferState::ReleaseRule::kLaterChoices);
+  CHECK(PublishAt(state, 0, 1));
+  CHECK(state.Select(0, 1));
+  CHECK(PublishAt(state, 1, 2));
+  CHECK(state.Select(1, 2));
+  CHECK(PresentIndex(state, 1) == 1);
+  CHECK(state.slot(0) == Slot::kHeld);
+}
+
+// Android (design D133): in each Flutter frame Dart chooses the newest ready
+// frame. The map, paced by its own clock, renders two frames in some Flutter
+// frames, and each frame's image arrives only after the next render has
+// started. Then three slots are held, one is ready, one queued and one
+// rendering.
+void SixSlotsAlwaysHaveAFreeSlotWithLaterChoices() {
+  BufferState state(map_texture::kChoiceReleasedBufferCount,
+                    BufferState::ReleaseRule::kLaterChoices);
+  uint64_t next_frame = 1;
+  uint64_t queued_frame = 0;
+  for (int flutter_frame = 0; flutter_frame < 50; ++flutter_frame) {
+    int renders = flutter_frame % 2 == 0 ? 2 : 1;
+    for (int render = 0; render < renders; ++render) {
+      int index = state.AcquireFree(-1);
+      CHECK(index >= 0);
+      if (index < 0) return;
+      uint64_t frame = next_frame++;
+      state.Expect(index, frame);
+      CHECK(!state.Queue(index, Frame(frame)));
+      // The image of the frame queued before arrives.
+      if (queued_frame != 0) {
+        int published = -1;
+        FrameInfo info;
+        bool known = false;
+        CHECK(state.OnImage(queued_frame, &published, &info, &known,
+                            [](int) {}) ==
+              BufferState::ImageResult::kPublished);
+      }
+      queued_frame = frame;
+    }
+    // Dart chooses the newest ready frame, the one published last.
+    for (int i = 0; i < map_texture::kChoiceReleasedBufferCount; ++i) {
+      if (state.slot(i) == Slot::kReady) {
+        CHECK(state.Select(i, queued_frame - 1));
+      }
+    }
+  }
+  CHECK(state.max_in_use() == 6);
+}
+
+void FreedSlotsAreReported() {
+  BufferState state(map_texture::kChoiceReleasedBufferCount,
+                    BufferState::ReleaseRule::kLaterChoices);
+  std::vector<int> freed;
+  state.set_on_freed([&](int slot) { freed.push_back(slot); });
+  // A ready frame replaced by a newer one.
+  CHECK(PublishAt(state, 0, 1));
+  CHECK(PublishAt(state, 1, 2));
+  CHECK((freed == std::vector<int>{0}));
+  // The release rule.
+  CHECK(state.Select(1, 2));
+  for (int slot = 2; slot < 5; ++slot) {
+    CHECK(PublishAt(state, slot, slot + 1));
+    CHECK(state.Select(slot, slot + 1));
+  }
+  CHECK((freed == std::vector<int>{0, 1}));
+  // A render that published nothing.
+  CHECK(state.AcquireFree(0) == 0);
+  state.Release(0);
+  CHECK((freed == std::vector<int>{0, 1, 0}));
+  // A reset reports each slot in use.
+  state.WithLock([&](int) { state.ResetLocked(); });
+  CHECK((freed == std::vector<int>{0, 1, 0, 2, 3, 4}));
+}
+
 void LatestReadyChosenPacesRendering() {
   BufferState state;
   CHECK(state.LatestReadyChosen());  // No frame yet.
@@ -469,6 +575,11 @@ int main() {
       {"NewFramesHaveIncreasingDisplayTime", NewFramesHaveIncreasingDisplayTime},
       {"FourSlotsAlwaysHaveAFreeSlot", FourSlotsAlwaysHaveAFreeSlot},
       {"NoFreeSlotWithoutPresent", NoFreeSlotWithoutPresent},
+      {"HeldUntilThreeLaterChoices", HeldUntilThreeLaterChoices},
+      {"RepeatedChoiceDoesNotCountWithLaterChoices", RepeatedChoiceDoesNotCountWithLaterChoices},
+      {"PresentFreesNothingWithLaterChoices", PresentFreesNothingWithLaterChoices},
+      {"SixSlotsAlwaysHaveAFreeSlotWithLaterChoices", SixSlotsAlwaysHaveAFreeSlotWithLaterChoices},
+      {"FreedSlotsAreReported", FreedSlotsAreReported},
       {"LatestReadyChosenPacesRendering", LatestReadyChosenPacesRendering},
       {"ResetFreesAllSlots", ResetFreesAllSlots},
       {"ReduceMemoryUseKeepsOrder", ReduceMemoryUseKeepsOrder},

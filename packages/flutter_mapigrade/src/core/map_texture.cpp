@@ -37,13 +37,13 @@ constexpr int64_t kIdlePumpTimeoutMs = 250;
 // Drain budget per pump, so that style parsing and tile work don't hold up a
 // pending frame for long.
 constexpr int64_t kPumpBudgetMs = 8;
+// The refresh interval a surface target paces by until the display's refresh
+// rate is set (design D53): 60 Hz.
+constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 // Delay after the last resize before Flutter is told once more that a frame
 // is available. Longer than the default maximum texture age (1 s) of a
 // CVMetalTextureCache; see MaybeNotifyAfterResize().
 constexpr int64_t kResizeSettledNs = 1'100'000'000;
-// The refresh interval a surface target paces by until the display's refresh
-// rate is set (design D53): 60 Hz.
-constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 
 // The map whose map thread this is; null on other threads. MapLibre logs
 // error records synchronously, on the thread that runs the failed work, and
@@ -172,6 +172,13 @@ bool MapTexture::Start(bool copy_free, std::string* out_error) {
     *out_error = "failed to create the render target";
     return false;
   }
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    // Flutter doesn't report when it has finished with an image (design
+    // D133).
+    buffers_.Configure(surface->slot_count(),
+                       BufferState::ReleaseRule::kLaterChoices);
+    buffers_.set_on_freed([surface](int slot) { surface->SlotFreed(slot); });
+  }
   thread_ = std::thread([this] { Run(); });
   std::unique_lock lock(init_mutex_);
   init_cv_.wait(lock, [this] { return init_done_; });
@@ -246,6 +253,11 @@ void MapTexture::RunTargetTask(TargetTask task, bool wait) {
     commands_.Push(Command::TargetTask(
         [this, task = std::move(task), completion = std::move(completion)] {
           task(session_, size_);
+          // A task replaces or removes the surface, so the images of frames
+          // queued on the previous one may never arrive; their slots are
+          // freed, and the pending render no longer waits for them.
+          buffers_.ReleaseQueued();
+          waiting_for_buffer_.store(false);
           if (session_ != MLN_HANDLE_NULL) render_pending_ = true;
         }));
   }
@@ -278,17 +290,75 @@ void MapTexture::Signal() {
 }
 
 bool MapTexture::Select(int slot, uint64_t frame_id) {
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    bool new_choice = false;
+    FrameInfo info;
+    bool selected = buffers_.Select(
+        slot, frame_id, [&](bool is_new, const FrameInfo& selected_info) {
+          new_choice = is_new;
+          info = selected_info;
+          if (is_new) surface->FrameAvailable(slot);
+        });
+    if (!selected) return false;
+    int64_t now = NowNs();
+    selected_at_ns_.store(now);
+    if (new_choice) {
+      int64_t published = published_at_ns_.load();
+      {
+        std::lock_guard lock(stats_mutex_);
+        ++stats_.presented_frames;
+        if (published != 0) {
+          ++stats_.pickup_wait_count;
+          stats_.pickup_wait_total_ns += now - published;
+        }
+      }
+      Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &info, -1, slot);
+    }
+    if (waiting_for_buffer_.exchange(false)) Signal();
+    return true;
+  }
   auto* target = target_->AsBufferTarget();
-  if (target == nullptr) return true;
   // The first choice of a frame of a new set releases the frame kept from
   // before the resize (design D126).
-  bool selected = buffers_.Select(slot, frame_id,
-                                  [target] { target->ReleaseFallbackLocked(); });
+  bool selected = buffers_.Select(
+      slot, frame_id,
+      [target](bool, const FrameInfo&) { target->ReleaseFallbackLocked(); });
   if (!selected) return false;
   selected_at_ns_.store(NowNs());
   target->FrameAvailable(slot);
   if (waiting_for_buffer_.exchange(false)) Signal();
   return true;
+}
+
+void MapTexture::ResetSlots() {
+  buffers_.WithLock([this](int) { buffers_.ResetLocked(); });
+}
+
+bool MapTexture::OnFrameImage(
+    uint64_t frame_id, const std::function<void(int slot)>& on_published) {
+  FrameInfo info;
+  bool known = false;
+  int slot = -1;
+  switch (buffers_.OnImage(frame_id, &slot, &info, &known, on_published)) {
+    case BufferState::ImageResult::kPublished:
+      published_at_ns_.store(NowNs());
+      Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, slot);
+      // Publishing frees the slots of the replaced ready and queued frames.
+      if (waiting_for_buffer_.exchange(false)) Signal();
+      return true;
+    case BufferState::ImageResult::kEarly:
+      // The map thread publishes the frame when its render returns.
+      return true;
+    case BufferState::ImageResult::kUnknown:
+      break;
+  }
+  // An image of a frame that was replaced or reset is expected; one that no
+  // slot ever expected means that the frame id didn't reach the image.
+  if (!known && !unknown_frame_reported_.exchange(true)) {
+    ReportRenderError("received an image of unknown frame " +
+                      std::to_string(frame_id));
+  }
+  return false;
 }
 
 void* MapTexture::Present(int slot) {
@@ -318,8 +388,7 @@ void* MapTexture::Present(int slot) {
 }
 
 map_texture_stats MapTexture::stats() {
-  int max_in_use =
-      target_->AsBufferTarget() != nullptr ? buffers_.max_in_use() : 0;
+  int max_in_use = buffers_.max_in_use();
   std::lock_guard lock(stats_mutex_);
   map_texture_stats stats = stats_;
   stats.max_slots_in_use = max_in_use;
@@ -355,7 +424,7 @@ bool MapTexture::RenderWanted() {
     return false;
   }
   if (auto* surface = target_->AsSurfaceTarget()) {
-    return surface->CanPresent();
+    if (!surface->CanPresent()) return false;
   }
   return !waiting_for_buffer_.load();
 }
@@ -365,8 +434,8 @@ bool MapTexture::RunOnce() {
   int64_t timeout_ms = render_now ? 0 : kIdlePumpTimeoutMs;
   if (render_now && target_->AsSurfaceTarget() != nullptr) {
     // A surface target's render waits for the end of the refresh interval
-    // (design D53). The pump parks in whole milliseconds, so the part of the
-    // wait below one millisecond is slept here.
+    // (designs D53 and D134). The pump parks in whole milliseconds, so the
+    // part of the wait below one millisecond is slept here.
     int64_t remaining = IntervalRemainingNs();
     if (remaining > 0 && remaining < 1'000'000) {
       std::this_thread::sleep_for(std::chrono::nanoseconds(remaining));
@@ -695,30 +764,30 @@ void MapTexture::MaybeRender() {
   }
 }
 
-void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
-  // Normally the next frame renders only after Dart has chosen the latest
-  // one, and Select() signals the wake source to retry this render (design
-  // D124). While a frame takes longer than a display refresh interval,
-  // waiting would cost a whole refresh interval per frame, so the next frame
-  // renders right away; a frame Dart hasn't chosen yet is then replaced
-  // (design D19).
+// Normally the next frame renders only after Dart has chosen the latest one,
+// and Select() signals the wake source to retry the render (design D124). While a frame takes longer than a display refresh interval, waiting
+// would cost a whole refresh interval per frame, so the next frame renders
+// right away; a frame Dart hasn't chosen yet is then replaced (design D19).
+bool MapTexture::MayRender(bool* render_ahead) {
   bool latest_chosen = buffers_.LatestReadyChosen();
-  bool render_ahead = !latest_chosen && RenderAhead();
-  if (!latest_chosen && !render_ahead) {
-    render_waited_for_display_ = true;
-    {
-      std::lock_guard lock(stats_mutex_);
-      ++stats_.waits_for_display;
-    }
-    waiting_for_buffer_.store(true);
-    // Select() may have run between the check and the store, and found no
-    // wait to end.
-    if (buffers_.LatestReadyChosen() && waiting_for_buffer_.exchange(false)) {
-      Signal();
-    }
-    return;
+  *render_ahead = !latest_chosen && RenderAhead();
+  if (latest_chosen || *render_ahead) return true;
+  render_waited_for_display_ = true;
+  {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.waits_for_display;
   }
-  // Present() frees held slots and then wakes the map thread.
+  waiting_for_buffer_.store(true);
+  // Select() may have run between the check and the store, and found no wait
+  // to end.
+  if (buffers_.LatestReadyChosen() && waiting_for_buffer_.exchange(false)) {
+    Signal();
+  }
+  return false;
+}
+
+// Present() and Select() free held slots and then wake the map thread.
+int MapTexture::AcquireSlot() {
   int index = buffers_.AcquireFree(-1);
   if (index < 0) {
     {
@@ -726,8 +795,28 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
       ++stats_.skipped_renders;
     }
     waiting_for_buffer_.store(true);
-    return;
   }
+  return index;
+}
+
+void MapTexture::RecordRenderStart(int64_t start, bool render_ahead) {
+  {
+    std::lock_guard lock(stats_mutex_);
+    if (render_ahead) ++stats_.render_ahead_frames;
+    int64_t selected = selected_at_ns_.load();
+    if (render_waited_for_display_ && selected != 0 && selected <= start) {
+      ++stats_.present_to_render_count;
+      stats_.present_to_render_total_ns += start - selected;
+    }
+  }
+  render_waited_for_display_ = false;
+}
+
+void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
+  bool render_ahead = false;
+  if (!MayRender(&render_ahead)) return;
+  int index = AcquireSlot();
+  if (index < 0) return;
 
   if (target.RendersIntoBuffers()) {
     mln_status select_status = target.SelectBuffer(session_, index);
@@ -739,16 +828,7 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   }
 
   int64_t start = NowNs();
-  {
-    std::lock_guard lock(stats_mutex_);
-    if (render_ahead) ++stats_.render_ahead_frames;
-    int64_t selected = selected_at_ns_.load();
-    if (render_waited_for_display_ && selected != 0 && selected <= start) {
-      ++stats_.present_to_render_count;
-      stats_.present_to_render_total_ns += start - selected;
-    }
-  }
-  render_waited_for_display_ = false;
+  RecordRenderStart(start, render_ahead);
   bool needs_repaint = false;
   if (!RenderUpdate(start, &needs_repaint)) {
     buffers_.Release(index);
@@ -794,9 +874,12 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
 
-// Queueing a frame on the surface never blocks, so renders are paced to one
-// per display refresh interval (design D53). The frame-displayed event is sent
-// when render_update has queued the frame, and has no display time.
+// A surface target's session queues each frame on the surface, and the frame
+// is published when its image arrives (design D131). Renders are paced to one
+// per display refresh interval, not by Dart's choice: on Android a frame
+// reaches Dart only after its image arrives, and Dart chooses it in the next
+// Flutter frame, so waiting for the choice would cost a refresh interval per
+// frame (design D134). A ready frame that Dart hasn't chosen is replaced.
 void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
   if (!target.CanPresent()) return;
   if (IntervalRemainingNs() > 0) {
@@ -808,19 +891,29 @@ void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
     return;
   }
   interval_wait_counted_ = false;
+  int index = AcquireSlot();
+  if (index < 0) return;
 
+  int64_t start = NowNs();
+  buffers_.Expect(index, next_frame_id_);
+  target.WillRender(next_frame_id_);
   bool needs_repaint = false;
-  if (!RenderUpdate(NowNs(), &needs_repaint)) return;
-
+  if (!RenderUpdate(start, &needs_repaint)) {
+    buffers_.Release(index);
+    return;
+  }
   FrameInfo info = RenderedFrameInfo();
+  bool published = buffers_.Queue(index, info);
   {
     std::lock_guard lock(stats_mutex_);
     ++stats_.rendered_frames;
-    // RenderUpdate has queued the frame on the surface (design D112).
-    ++stats_.presented_frames;
     if (needs_repaint) ++stats_.needs_repaint_frames;
   }
-  Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &info, -1);
+  // The listener may receive the image before render_update returns.
+  if (published) {
+    published_at_ns_.store(NowNs());
+    Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
+  }
 }
 
 int64_t MapTexture::IntervalRemainingNs() {

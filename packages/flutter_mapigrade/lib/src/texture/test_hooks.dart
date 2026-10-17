@@ -52,10 +52,10 @@ int memoryFootprintForTesting() => mapTextureMemoryFootprint();
   }
 }
 
-/// On Android, makes Flutter remove the surfaces the maps render into, as it
-/// does when the activity stops, or with [restore], provide them again, as it
-/// does when the activity resumes. Does nothing on macOS and iOS, where the
-/// plugin owns the display buffers.
+/// On Android, releases the image readers the maps render into, as the plugin
+/// does when the activity stops, or with [restore], creates them again, as it
+/// does when the activity starts (design D137 of the
+/// android-layer-children-alignment change). Does nothing on macOS and iOS.
 void trimSurfacesForTesting({required bool restore}) =>
     mapTextureTrimSurfacesForTesting(restore ? 1 : 0);
 

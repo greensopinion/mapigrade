@@ -51,11 +51,11 @@ typedef struct map_texture_event {
   double scale_factor;
   // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED. On macOS and iOS: the time at
   // which Flutter took the frame for display, in microseconds on the clock of
-  // Flutter's FrameTiming. On Android, the event is sent when the frame has
-  // been queued for display, and this is -1 (no display time).
+  // Flutter's FrameTiming. On Android, the event is sent when Dart first
+  // chooses the frame (design D132), and this is -1 (no display time).
   int64_t display_time_us;
   // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED and MAP_TEXTURE_EVENT_FRAME_READY:
-  // the display slot that holds the frame (always 0 on Android), and the
+  // the display slot that holds the frame, and the
   // sequence number of the camera update the frame was rendered with (the
   // `seq` of map_texture_set_camera(), or 0 before the first).
   int32_t slot;
@@ -83,8 +83,7 @@ typedef struct map_texture_stats {
   int64_t copy_total_ns;
   int64_t copy_max_ns;
   // Frames given to Flutter for display. On macOS and iOS: frames that
-  // Flutter took for display. On Android: frames queued on the surface for
-  // display, so every rendered frame.
+  // Flutter took for display. On Android: frames that Dart chose.
   int64_t presented_frames;
   // MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE events received.
   int64_t render_update_available_events;
@@ -99,7 +98,8 @@ typedef struct map_texture_stats {
   // less than 100 ms apart (continuous rendering).
   int64_t frame_cycle_count;
   int64_t frame_cycle_total_ns;
-  // Time from publishing a frame until Flutter takes it (Present).
+  // Time from publishing a frame until Flutter takes it (Present), or on
+  // Android until Dart chooses it.
   int64_t pickup_wait_count;
   int64_t pickup_wait_total_ns;
   // Time from Dart choosing the latest frame until the next render_update
@@ -109,10 +109,10 @@ typedef struct map_texture_stats {
   // Renders started before Dart had chosen the latest frame (design D19).
   int64_t render_ahead_frames;
   // Renders deferred until one display refresh interval after the start of
-  // the previous render (Android, design D53).
+  // the previous render (Android, designs D53 and D134).
   int64_t interval_waits;
-  // The most display slots in use (rendering, ready or held) at once (macOS
-  // and iOS; 0 on Android).
+  // The most display slots in use (rendering, queued, ready or held) at
+  // once.
   int64_t max_slots_in_use;
 } map_texture_stats;
 
@@ -145,19 +145,20 @@ MAP_TEXTURE_EXPORT void map_texture_string_free(char* string);
 MAP_TEXTURE_EXPORT int32_t map_texture_set_maximum_cache_size(int64_t bytes);
 
 // Writes the Flutter texture id of each display slot, at most `capacity`, to
-// `out_ids` and returns the number of slots (4 on macOS and iOS, 1 on
-// Android), or a negative error.
+// `out_ids` and returns the number of slots (4 on macOS and iOS; 6 on
+// Android, which share one texture id), or a negative error.
 MAP_TEXTURE_EXPORT int32_t map_texture_texture_ids(int64_t handle,
                                                    int64_t* out_ids,
                                                    int32_t capacity);
 
 // Platform thread. Dart chose the frame `frame_id` in display slot `slot` for
-// the Flutter frame it builds. Marks the texture available before the Flutter
-// frame is rasterized (design D123) and returns MAP_TEXTURE_OK; Dart then
+// the Flutter frame it builds. Marks the texture available, or on Android
+// gives the frame's image to the texture, before the Flutter frame is
+// rasterized (designs D123 and D132) and returns MAP_TEXTURE_OK; Dart then
 // displays that slot's texture. Returns MAP_TEXTURE_NOT_SELECTED and records
 // nothing if the slot no longer holds the frame, because a newer frame
 // replaced it or a resize replaced the slots; Dart then keeps displaying the
-// frame it chose before. Returns MAP_TEXTURE_OK and does nothing on Android.
+// frame it chose before.
 MAP_TEXTURE_EXPORT int32_t map_texture_select(int64_t handle, int32_t slot,
                                               int64_t frame_id);
 
@@ -219,11 +220,10 @@ MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);
 // For tests: ask every map to release cached renderer resources, as the
 // platform does after a memory warning.
 MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
-// For tests, on Android: with `restore` zero, makes Flutter remove the
-// surfaces the maps render into, as it does when the activity stops (it calls
-// onTrimMemory(TRIM_MEMORY_BACKGROUND)); with `restore` non-zero, makes Flutter
-// provide them again, as it does when the activity resumes. Call on the
-// platform thread. Does nothing on macOS and iOS.
+// For tests, on Android: with `restore` zero, releases the image readers the
+// maps render into, as the plugin does when the activity stops; with `restore`
+// non-zero, creates them again, as it does when the activity starts (design
+// D137). Call on the platform thread. Does nothing on macOS and iOS.
 MAP_TEXTURE_EXPORT void map_texture_trim_surfaces_for_testing(int32_t restore);
 
 #ifdef __cplusplus

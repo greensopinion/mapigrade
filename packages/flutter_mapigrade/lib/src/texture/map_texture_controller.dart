@@ -55,7 +55,7 @@ class FrameCamera {
   final MapCamera camera;
 
   /// The display slot that holds the frame: an index into
-  /// [MapTextureController.textureIds]. Always 0 on Android.
+  /// [MapTextureController.textureIds].
   final int slot;
 
   /// The sequence number that [MapTextureController.setCamera] returned for
@@ -75,7 +75,7 @@ class FrameCamera {
   /// displayed it.
   ///
   /// Null on Android, where Flutter reports no time at which it takes a frame.
-  /// There the frame is reported when it has been queued for display. Also
+  /// There the frame is reported when Dart chooses it for display. Also
   /// null for the frames of [MapTextureController.readyFrames], which haven't
   /// been displayed.
   final int? displayTime;
@@ -209,9 +209,8 @@ class MapTextureStats {
   final Duration copyMax;
 
   /// Frames given to Flutter for display. On macOS and iOS, a frame counts
-  /// when Flutter takes it for display. On Android, a frame counts when the
-  /// map has queued it on the surface for display, so this equals
-  /// [renderedFrames].
+  /// when Flutter takes it for display. On Android, a frame counts when Dart
+  /// chooses it with [MapTextureController.select].
   final int presentedFrames;
 
   /// `MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE` events received.
@@ -256,8 +255,8 @@ class MapTextureStats {
   /// the previous render. Only Android paces renders this way.
   final int intervalWaits;
 
-  /// The most display slots in use (rendering, ready or chosen) at once, on
-  /// macOS and iOS; 0 on Android.
+  /// The most display slots in use (rendering, queued, ready or chosen) at
+  /// once.
   final int maxSlotsInUse;
 
   @override
@@ -421,15 +420,18 @@ class MapTextureController {
     }
   }
 
-  static const _maxSlots = 4;
+  // kMaxBufferCount in src/core/buffer_state.h.
+  static const _maxSlots = 6;
 
   final int _handle;
   final NativeCallable<MapTextureEventCallback> _callable;
 
   /// The ids for `Texture` widgets, one per display slot (design D122 of the
-  /// layer-children-alignment change): four on macOS and iOS, where Dart
-  /// chooses the frame to display with [select], and one on Android, where
-  /// Flutter displays the latest frame.
+  /// layer-children-alignment change). Dart chooses the frame to display with
+  /// [select]. There are four slots on macOS and iOS, each with its own
+  /// texture, and six on Android, which share one texture, so that all six
+  /// ids are equal there (design D135 of the android-layer-children-alignment
+  /// change).
   final List<int> textureIds;
 
   /// Whether the map was created to render directly into the displayed
@@ -446,16 +448,16 @@ class MapTextureController {
   /// Style, loading, render and idle events.
   Stream<MapEvent> get events => _events.stream;
 
-  /// The camera of each frame when Flutter takes it for display.
+  /// The camera of each frame when Flutter takes it for display, or on
+  /// Android when Dart chooses it for display.
   Stream<FrameCamera> get frames => _frames.stream;
 
   /// The camera of the frame displayed last, if any.
   FrameCamera? get displayedFrame => _displayedFrame;
   FrameCamera? _displayedFrame;
 
-  /// On macOS and iOS, each frame when it has finished rendering into a
-  /// display slot, before Flutter displays it. Choose one with [select].
-  /// Nothing is added on Android.
+  /// Each frame when it has finished rendering into a display slot, before
+  /// Flutter displays it. Choose one with [select].
   Stream<FrameCamera> get readyFrames => _readyFrames.stream;
 
   /// The frame added to [readyFrames] last, if any.
@@ -507,7 +509,7 @@ class MapTextureController {
   /// because the map replaced it with a newer frame after reporting it, or a
   /// resize replaced the slots. Then keep displaying [selectedFrame], the
   /// frame chosen before (design D123 of the layer-children-alignment
-  /// change). Does nothing and returns true on Android.
+  /// change).
   bool select(FrameCamera frame) {
     if (_disposed) throw const MapTextureDisposedException();
     final status = mapTextureSelect(_handle, frame.slot, frame.frameId);

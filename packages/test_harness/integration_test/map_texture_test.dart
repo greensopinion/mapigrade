@@ -89,10 +89,12 @@ void main() {
   testWidgets('create and dispose', (tester) async {
     final controller =
         MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
-    // One texture per display slot: four on macOS and iOS, one on Android.
-    expect(controller.textureIds, hasLength(Platform.isAndroid ? 1 : 4));
+    // Four slots with a texture each on macOS and iOS; six slots that share
+    // one texture on Android (design D135).
+    expect(controller.textureIds, hasLength(Platform.isAndroid ? 6 : 4));
     expect(controller.textureIds, everyElement(greaterThanOrEqualTo(0)));
-    expect(controller.textureIds.toSet(), hasLength(controller.textureIds.length));
+    expect(controller.textureIds.toSet(),
+        hasLength(Platform.isAndroid ? 1 : controller.textureIds.length));
     controller.dispose();
     expect(controller.isDisposed, isTrue);
   });
@@ -228,8 +230,9 @@ void main() {
     expect(caughtUp.elapsed, lessThan(const Duration(milliseconds: 500)));
     final stats = controller.stats();
     if (Platform.isAndroid) {
-      // Renders are paced to one per display refresh interval (design D53),
-      // so camera updates that arrive between renders are coalesced.
+      // Renders are paced to one per display refresh interval (designs D53
+      // and D134), so camera updates that arrive between renders are
+      // coalesced.
       final refreshRate = tester.view.display.refreshRate;
       final seconds = (stopwatch.elapsedMilliseconds +
               caughtUp.elapsedMilliseconds) /
@@ -238,14 +241,15 @@ void main() {
           lessThanOrEqualTo((seconds * refreshRate).ceil() + 1));
       expect(stats.intervalWaits, greaterThan(0));
     } else {
-      // The map renders at most one frame ahead of what Flutter displays, so
+      // The map renders at most one frame ahead of what Dart chooses, so
       // camera updates that arrive between frames are coalesced. Renders that
-      // start before Flutter took the latest frame (while frames take longer
+      // start before Dart chose the latest frame (while frames take longer
       // than a refresh interval, design D19) can replace an undisplayed
       // frame.
       expect(stats.renderedFrames,
           lessThanOrEqualTo(
               stats.presentedFrames + stats.renderAheadFrames + 1));
+      expect(stats.intervalWaits, 0);
     }
     // From the first frame that shows a sent camera on, displayed cameras
     // never go backwards: no stale camera is shown after a newer one. Camera
@@ -514,13 +518,13 @@ void main() {
     expect(errors, isEmpty);
   });
 
-  // Flutter removes the surface when the activity stops and provides it again
-  // when the activity resumes. The test hook makes it do both while the
-  // activity runs.
+  // The plugin releases the image reader when the activity stops and creates
+  // one when the activity starts (design D137). The test hook makes it do both
+  // while the activity runs.
   testWidgets('surface removal and restore keep the map and its style',
       (tester) async {
     if (!Platform.isAndroid) {
-      markTestSkipped('Flutter removes surfaces only on Android');
+      markTestSkipped('the plugin releases surfaces only on Android');
       return;
     }
     final controller = await showMap(tester);
@@ -530,8 +534,13 @@ void main() {
     final events = <MapEvent>[];
     final sub = controller.events.listen(events.add);
 
+    final chosen = controller.selectedFrame;
     trimSurfacesForTesting(restore: false);
     final removed = controller.stats();
+    // The release frees the slots, so the frame chosen before can't be chosen
+    // again.
+    expect(chosen, isNotNull);
+    expect(controller.select(chosen!), isFalse);
     // Camera changes while the surface is removed render nothing.
     const camera = MapCamera(latitude: 20, longitude: 30, zoom: 4);
     controller.setCamera(camera);
@@ -816,8 +825,42 @@ void main() {
 
   // Design D123: the texture of the chosen slot is marked available
   // synchronously, so the Flutter frame displays the frame Dart chose.
+  // On Android the plugin closes each image it gives to Flutter (design
+  // D133). If it didn't, the image reader would run out of images and the map
+  // would stop rendering long before 600 frames.
+  testWidgets('a pan of 600 Flutter frames keeps rendering', (tester) async {
+    final controller = await showMap(tester);
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await loaded;
+    final errors = <RenderError>[];
+    final sub = controller.events
+        .where((e) => e is RenderError)
+        .cast<RenderError>()
+        .listen(errors.add);
+    for (var i = 0; i < 600; i++) {
+      controller.setCamera(
+          MapCamera(latitude: 0, longitude: -10 + i * 0.01, zoom: 3));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    // A map that ran out of images would never display this camera.
+    const last = MapCamera(latitude: 5, longitude: 5, zoom: 3);
+    final shown = waitFor<FrameCamera>(
+        controller.frames,
+        (f) =>
+            near(f.camera.latitude, last.latitude) &&
+            near(f.camera.longitude, last.longitude));
+    controller.setCamera(last);
+    await shown;
+    await sub.cancel();
+    final stats = controller.stats();
+    debugPrint('600 frames: $stats');
+    expect(stats.presentedFrames, greaterThan(1));
+    expect(errors, isEmpty);
+  });
+
   testWidgets('a selected frame is displayed', (tester) async {
-    if (skipOnAndroid('Dart chooses no frame on Android')) return;
     final controller = MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
@@ -841,7 +884,18 @@ void main() {
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    // The map may still render the last cameras, and the view choose their
+    // frames; wait until the frame chosen last has been displayed.
+    bool lastSelectedDisplayed() {
+      final selected = log.lastWhere((e) => e.selected);
+      return log.any((e) =>
+          !e.selected && e.frame.frameId == selected.frame.frameId);
+    }
+    final settle = Stopwatch()..start();
+    do {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    } while (!lastSelectedDisplayed() &&
+        settle.elapsed < const Duration(seconds: 10));
     await displayed.cancel();
     final selectedIds = {
       for (final e in log)
@@ -866,10 +920,10 @@ void main() {
   });
 
   // Design D126: during a resize the texture keeps showing the frame Dart
-  // chose last, until Dart chooses a frame of the new size.
+  // chose last, until Dart chooses a frame of the new size. On Android the
+  // image texture keeps the image Dart chose last (design D136).
   testWidgets('resize keeps the selected frame until a new-size selection',
       (tester) async {
-    if (skipOnAndroid('Dart chooses no frame on Android')) return;
     final controller = MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);

@@ -126,3 +126,12 @@ The layer-children-alignment change took options 6 and 4 together: the overlays 
 - Decision: the children's lag is acceptable, and `predict1` stays the default on both platforms.
 - Taps: a tap on a marker of the stopped map hit the marker. A tap during a pan was too hard to coordinate by hand, and we judged it an unusual pattern; the widget test "a polyline hit-tests where it is drawn" covers hit tests while the displayed camera differs from the live one.
 - Skipped renders: in one of 72 benchmark phases (task 5.3), the map skipped 2 renders in a stall of about 117 ms. We accepted it; it doesn't show that four slots are too few.
+
+## Manual check on Android (android-layer-children-alignment change, task 5.2)
+
+The android-layer-children-alignment change brought children to Android: six display slots share one image texture, and the map renders once per display refresh interval (designs D130 to D138). On 2026-10-17 we checked the harness's `flutter_map` page on the Pixel 4a (5G), release build, with the polyline and the markers as children and `predict1`.
+
+- Alignment: the overlays stayed exactly on the map. With the children switch off, the overlays floated over the map during pans, as before the change.
+- Smoothness: the map stutters now and then during pans. The map renders by its own clock, which drifts against the display refresh, so some Flutter frames show the previous map frame again (design D134; about 51 displayed map frames per second in the benchmark). We accepted it.
+- Tearing: none seen, so freeing a slot after three later choices (design D133) is enough on this device.
+- Decision: `predict1` stays the default on Android.

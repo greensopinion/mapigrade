@@ -5,7 +5,6 @@
 //   cd packages/test_harness && flutter test integration_test/map_layer_test.dart -d macos
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -511,11 +510,7 @@ void main() {
     expect(second.displayedFrames, greaterThan(first.displayedFrames));
     expect(second.renderedFrames, greaterThan(first.renderedFrames));
     expect(second.renderTime, greaterThan(first.renderTime));
-    if (Platform.isAndroid) {
-      expect(second.displayedFrames, second.renderedFrames);
-    } else {
-      expect(second.displayedFrames, lessThanOrEqualTo(second.renderedFrames));
-    }
+    expect(second.displayedFrames, lessThanOrEqualTo(second.renderedFrames));
   });
 
   testWidgets('metrics stay the same while the map is at rest', (

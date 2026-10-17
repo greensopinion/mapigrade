@@ -4,10 +4,10 @@
     <init>(io.flutter.view.TextureRegistry, long);
     long id();
     android.view.Surface resize(int, int);
+    void push(android.media.Image);
+    void closeImage(android.media.Image);
+    void releaseReaders();
     void release();
-}
--keepclassmembers class com.greensopinion.flutter_mapigrade.MapigradePlugin {
-    public static void trimSurfacesForTesting(boolean);
 }
 -keepclasseswithmembernames class com.greensopinion.flutter_mapigrade.** {
     native <methods>;

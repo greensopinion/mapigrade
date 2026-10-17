@@ -1,14 +1,23 @@
-// Android render target (designs D51, D54 and D58). MapLibre renders through
-// an EGL window surface on the Surface of a Flutter SurfaceProducer, whose
-// buffers are the ImageReader's HardwareBuffers that Flutter samples, so no
-// pixels are copied and none pass through CPU memory. The session is dedicated:
-// it owns the map thread's EGL context.
+// Android render target (designs D51, D54 and D58 of the
+// android-texture-vertical-slice change, D130 to D137 of the
+// android-layer-children-alignment change). MapLibre renders through an EGL
+// window surface on the Surface of an ImageReader that MapSurface owns. Its
+// buffers are HardwareBuffers that Flutter samples through an image texture,
+// so no pixels are copied and none pass through CPU memory. The session is
+// dedicated: it owns the map thread's EGL context.
 //
-// Threads: the SurfaceProducer is created, resized and released on Android's
-// main thread, which is also Dart's UI thread. Its Surface goes to the map
+// Each frame carries its frame id as its presentation time. MapSurface's
+// listener thread passes each image to OnFrameImage, which publishes the frame
+// into its display slot; the target keeps a global reference to the image of
+// each slot. When Dart chooses a frame, FrameAvailable gives its image to
+// Flutter, and SlotFreed closes the image when the slot becomes free. Both run
+// under the BufferState lock.
+//
+// Threads: MapSurface is created, resized and released on Android's main
+// thread, which is also Dart's UI thread. The reader's Surface goes to the map
 // thread as an ANativeWindow in a target task, and the map thread creates the
-// EGL objects. While Flutter has removed the surface, the session presents to a
-// 1x1 pbuffer surface and no frame is rendered. The map thread never calls into
+// EGL objects. While the activity is stopped, the session presents to a 1x1
+// pbuffer surface and no frame is rendered. The map thread never calls into
 // Java.
 #include <EGL/egl.h>
 #include <android/log.h>
@@ -24,7 +33,9 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "map_texture.h"
 #include "map_texture_api.h"
@@ -46,8 +57,9 @@ jmethodID map_surface_init = nullptr;
 jmethodID map_surface_id = nullptr;
 jmethodID map_surface_resize = nullptr;
 jmethodID map_surface_release = nullptr;
-jclass plugin_class = nullptr;
-jmethodID plugin_trim_surfaces = nullptr;
+jmethodID map_surface_push = nullptr;
+jmethodID map_surface_close_image = nullptr;
+jmethodID map_surface_release_readers = nullptr;
 std::mutex cache_dir_mutex;
 std::string cache_dir;
 
@@ -82,6 +94,8 @@ WindowRef WindowFromSurface(JNIEnv* env, jobject surface) {
   return WindowRef(window, ANativeWindow_release);
 }
 
+using PresentationTimeFn = EGLBoolean (*)(EGLDisplay, EGLSurface, int64_t);
+
 std::string EglError(const char* what) {
   char message[96];
   std::snprintf(message, sizeof(message), "%s failed with EGL error 0x%x", what,
@@ -89,81 +103,147 @@ std::string EglError(const char* what) {
   return message;
 }
 
+class AndroidSurfaceTarget;
+
+// The live targets, so that the plugin can release and restore their readers
+// when the activity stops and starts (design D137). Main thread only.
+std::set<AndroidSurfaceTarget*>& Targets() {
+  static std::set<AndroidSurfaceTarget*> targets;
+  return targets;
+}
+
 class AndroidSurfaceTarget : public SurfaceRenderTarget {
  public:
   AndroidSurfaceTarget(std::weak_ptr<MapTexture> owner)
-      : owner_(std::move(owner)) {}
+      : owner_(std::move(owner)) {
+    Targets().insert(this);
+  }
 
   ~AndroidSurfaceTarget() override {
-    // Unregister() released the producer; this covers a failed create.
+    Targets().erase(this);
+    // Unregister() released MapSurface; this covers a failed create.
     if (map_surface_ != nullptr) {
       if (JNIEnv* env = Env()) env->DeleteGlobalRef(map_surface_);
     }
   }
 
-  // Main thread. Creates the SurfaceProducer through MapSurface.
+  // Main thread. Creates the image texture through MapSurface.
   bool Init(JNIEnv* env) {
     jobject local = env->NewObject(map_surface_class, map_surface_init,
                                    texture_registry,
                                    reinterpret_cast<jlong>(this));
-    if (CheckException(env, "creating the SurfaceProducer") ||
+    if (CheckException(env, "creating the image texture") ||
         local == nullptr) {
       return false;
     }
     map_surface_ = env->NewGlobalRef(local);
     env->DeleteLocalRef(local);
     texture_id_ = env->CallLongMethod(map_surface_, map_surface_id);
-    return !CheckException(env, "SurfaceProducer.id");
+    return !CheckException(env, "MapSurface.id");
   }
 
-  // One display slot (design D128).
+  // Six display slots share the one image texture (designs D133 and D135).
+  int slot_count() const override { return kChoiceReleasedBufferCount; }
   int64_t texture_id(int) const override { return texture_id_; }
 
-  // Main thread. A new physical size makes Flutter's producer create buffers of
-  // that size behind a new Surface, which replaces the window on the map
-  // thread before the map thread applies the resize.
+  // Main thread. A new physical size makes MapSurface create a reader of that
+  // size, whose Surface replaces the window on the map thread before the map
+  // thread applies the resize (design D136).
   void WillResize(const TargetSize& size) override {
     if (size.physical_width == requested_width_ &&
         size.physical_height == requested_height_) {
       return;
     }
-    JNIEnv* env = Env();
-    if (env == nullptr || map_surface_ == nullptr) return;
     requested_width_ = size.physical_width;
     requested_height_ = size.physical_height;
-    jobject surface = env->CallObjectMethod(
-        map_surface_, map_surface_resize,
-        static_cast<jint>(size.physical_width),
-        static_cast<jint>(size.physical_height));
-    if (CheckException(env, "SurfaceProducer.setSize") || surface == nullptr) {
+    if (!released_) CreateReader();
+  }
+
+  // Main thread, when the activity stops (design D137). Returns when the map
+  // thread no longer uses the reader's surface, and the slots' images and
+  // the readers are closed.
+  void ReleaseReader() {
+    if (released_) return;
+    released_ = true;
+    auto owner = owner_.lock();
+    if (!owner) return;
+    owner->RunTargetTask(
+        [this](mln_render_session session, const TargetSize& size) {
+          Park(session, size);
+        },
+        /*wait=*/true);
+    owner->ResetSlots();
+    JNIEnv* env = Env();
+    if (env == nullptr || map_surface_ == nullptr) return;
+    CloseDeferredImages(env);
+    env->CallVoidMethod(map_surface_, map_surface_release_readers);
+    CheckException(env, "MapSurface.releaseReaders");
+    LOGI("released the reader of texture %lld",
+         static_cast<long long>(texture_id_));
+  }
+
+  // Main thread, when the activity starts: creates a reader for the map to
+  // render into again.
+  void RestoreReader() {
+    if (!released_) return;
+    released_ = false;
+    CreateReader();
+    LOGI("restored the reader of texture %lld",
+         static_cast<long long>(texture_id_));
+  }
+
+  // MapSurface's listener thread: the image of frame `frame_id` arrived.
+  // Returns whether a slot keeps it; otherwise the caller closes it.
+  bool OnFrameImage(JNIEnv* env, uint64_t frame_id, jobject image) {
+    auto owner = owner_.lock();
+    if (!owner) return false;
+    return owner->OnFrameImage(frame_id, [&](int slot) {
+      CloseDeferredImages(env);
+      images_[slot] = env->NewGlobalRef(image);
+    });
+  }
+
+  // Main thread, under the BufferState lock (design D132).
+  void FrameAvailable(int slot) override {
+    JNIEnv* env = Env();
+    if (env == nullptr || map_surface_ == nullptr) return;
+    CloseDeferredImages(env);
+    if (images_[slot] == nullptr) return;
+    env->CallVoidMethod(map_surface_, map_surface_push, images_[slot]);
+    CheckException(env, "MapSurface.push");
+  }
+
+  // Under the BufferState lock, on the main thread, the listener thread or
+  // the map thread (design D133). The map thread frees a slot with an image
+  // when render_update queued a frame on the surface but reported none; it
+  // doesn't call into Java, so the image is closed by the next call on another
+  // thread.
+  void SlotFreed(int slot) override {
+    if (images_[slot] == nullptr) return;
+    JNIEnv* env = Env();
+    if (env == nullptr) {
+      std::lock_guard lock(deferred_mutex_);
+      deferred_images_.push_back(images_[slot]);
+      images_[slot] = nullptr;
       return;
     }
-    SendWindow(WindowFromSurface(env, surface));
-    env->DeleteLocalRef(surface);
-  }
-
-  // Main thread: SurfaceProducer.Callback.onSurfaceAvailable.
-  void OnSurfaceAvailable(JNIEnv* env, jobject surface) {
-    LOGI("surface available for texture %lld",
-         static_cast<long long>(texture_id_));
-    SendWindow(WindowFromSurface(env, surface));
-  }
-
-  // Main thread: SurfaceProducer.Callback.onSurfaceCleanup. Returns when the
-  // map thread no longer uses the surface (design D54).
-  void OnSurfaceCleanup() {
-    LOGI("surface cleanup for texture %lld",
-         static_cast<long long>(texture_id_));
-    if (auto owner = owner_.lock()) {
-      owner->RunTargetTask(
-          [this](mln_render_session session, const TargetSize& size) {
-            Park(session, size);
-          },
-          /*wait=*/true);
-    }
+    CloseImage(env, slot);
   }
 
   // Map thread.
+
+  // Sets the frame id as the presentation time of the next frame that the
+  // session queues on the window, so that the image tells which frame it
+  // holds (design D131).
+  void WillRender(uint64_t frame_id) override {
+    if (window_surface_ == EGL_NO_SURFACE || presentation_time_ == nullptr) {
+      return;
+    }
+    if (!presentation_time_(display_, window_surface_,
+                            static_cast<int64_t>(frame_id))) {
+      Report(EglError("eglPresentationTimeANDROID"));
+    }
+  }
 
   mln_status Attach(mln_map map, const TargetSize& size,
                     mln_render_session* out_session) override {
@@ -203,17 +283,44 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     eglReleaseThread();
   }
 
-  // The thread that disposes the map (the main thread).
+  // The thread that disposes the map (the main thread), after the map thread
+  // has stopped.
   void Unregister() override {
     JNIEnv* env = Env();
     if (env == nullptr || map_surface_ == nullptr) return;
+    // Stops the listener thread and closes every image.
     env->CallVoidMethod(map_surface_, map_surface_release);
-    CheckException(env, "SurfaceProducer.release");
+    CheckException(env, "MapSurface.release");
+    for (jobject& image : images_) {
+      if (image != nullptr) env->DeleteGlobalRef(image);
+      image = nullptr;
+    }
+    {
+      std::lock_guard lock(deferred_mutex_);
+      for (jobject image : deferred_images_) env->DeleteGlobalRef(image);
+      deferred_images_.clear();
+    }
     env->DeleteGlobalRef(map_surface_);
     map_surface_ = nullptr;
   }
 
  private:
+  // Main thread. Creates a reader of the requested size and sends its
+  // surface to the map thread. Before the first resize there is no size.
+  void CreateReader() {
+    if (requested_width_ == 0 || requested_height_ == 0) return;
+    JNIEnv* env = Env();
+    if (env == nullptr || map_surface_ == nullptr) return;
+    jobject surface = env->CallObjectMethod(
+        map_surface_, map_surface_resize, static_cast<jint>(requested_width_),
+        static_cast<jint>(requested_height_));
+    if (CheckException(env, "MapSurface.resize") || surface == nullptr) {
+      return;
+    }
+    SendWindow(WindowFromSurface(env, surface));
+    env->DeleteLocalRef(surface);
+  }
+
   // Main thread. Queues the replacement of the window for the map thread. If
   // the map thread stops first, the task is dropped and releases the window.
   void SendWindow(WindowRef window) {
@@ -284,12 +391,32 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     if (surface == window_surface_) SetNonBlockingSwap();
   }
 
+  // Closes the images of slots that the map thread freed.
+  void CloseDeferredImages(JNIEnv* env) {
+    std::lock_guard lock(deferred_mutex_);
+    for (jobject image : deferred_images_) {
+      env->CallVoidMethod(map_surface_, map_surface_close_image, image);
+      CheckException(env, "MapSurface.closeImage");
+      env->DeleteGlobalRef(image);
+    }
+    deferred_images_.clear();
+  }
+
+  // Closes the image of `slot`, if it has one.
+  void CloseImage(JNIEnv* env, int slot) {
+    if (images_[slot] == nullptr) return;
+    env->CallVoidMethod(map_surface_, map_surface_close_image, images_[slot]);
+    CheckException(env, "MapSurface.closeImage");
+    env->DeleteGlobalRef(images_[slot]);
+    images_[slot] = nullptr;
+  }
+
   // Map thread, with a window surface current. With swap interval 0 the
   // window queues frames in async mode: a frame replaces a queued frame that
-  // Flutter hasn't taken yet, and eglSwapBuffers never waits for Flutter to
-  // release a buffer. Flutter takes frames on the main thread, so a swap that
-  // waited for it would deadlock with the main thread's waits for the map
-  // thread (dispose, surface cleanup, pause).
+  // the listener hasn't acquired yet, and eglSwapBuffers never waits for a
+  // buffer to be released. A swap that waited could deadlock with the main
+  // thread's waits for the map thread (dispose, activity stop) (design D53;
+  // D131 keeps it).
   void SetNonBlockingSwap() {
     if (!eglSwapInterval(display_, 0)) Report(EglError("eglSwapInterval"));
   }
@@ -335,6 +462,11 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
       return false;
     }
     display_ = display;
+    presentation_time_ = reinterpret_cast<PresentationTimeFn>(
+        eglGetProcAddress("eglPresentationTimeANDROID"));
+    if (presentation_time_ == nullptr) {
+      Report("eglPresentationTimeANDROID isn't available");
+    }
     return true;
   }
 
@@ -376,9 +508,17 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
 
   // Main thread.
   jobject map_surface_ = nullptr;
+  // The image of each slot, guarded by the BufferState lock (and used on the
+  // main thread after the map thread has stopped).
+  jobject images_[kMaxBufferCount] = {};
+  // Images of slots that the map thread freed, to close on another thread.
+  std::mutex deferred_mutex_;
+  std::vector<jobject> deferred_images_;
   int64_t texture_id_ = 0;
   uint32_t requested_width_ = 0;
   uint32_t requested_height_ = 0;
+  // Whether ReleaseReader() released the reader.
+  bool released_ = false;
 
   // Map thread.
   EGLDisplay display_ = EGL_NO_DISPLAY;
@@ -386,13 +526,28 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   WindowRef window_;
   EGLSurface window_surface_ = EGL_NO_SURFACE;
   EGLSurface pbuffer_ = EGL_NO_SURFACE;
+  PresentationTimeFn presentation_time_ = nullptr;
 };
+
+// Main thread. Releases or restores the reader of every map (design D137).
+void SetReadersReleased(bool released) {
+  // A copy: a release waits for the map thread, and no target is created or
+  // destroyed meanwhile, but the set is not iterated across the waits.
+  std::set<AndroidSurfaceTarget*> targets = Targets();
+  for (AndroidSurfaceTarget* target : targets) {
+    if (released) {
+      target->ReleaseReader();
+    } else {
+      target->RestoreReader();
+    }
+  }
+}
 
 }  // namespace
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
     std::weak_ptr<MapTexture> owner, bool copy_free) {
-  // The SurfaceProducer belongs to the main thread, which runs Dart's UI
+  // MapSurface belongs to the main thread, which runs Dart's UI
   // isolate unless the merged platform and UI thread is turned off.
   if (!OnMainThread()) {
     LOGE("map_texture_create must be called on the main thread; is the merged "
@@ -454,15 +609,12 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
     map_surface_resize = env->GetMethodID(map_surface_class, "resize",
                                           "(II)Landroid/view/Surface;");
     map_surface_release = env->GetMethodID(map_surface_class, "release", "()V");
-    jclass plugin =
-        env->FindClass("com/greensopinion/flutter_mapigrade/MapigradePlugin");
-    if (CheckException(env, "FindClass(MapigradePlugin)") || plugin == nullptr) {
-      return;
-    }
-    plugin_class = static_cast<jclass>(env->NewGlobalRef(plugin));
-    env->DeleteLocalRef(plugin);
-    plugin_trim_surfaces =
-        env->GetStaticMethodID(plugin_class, "trimSurfacesForTesting", "(Z)V");
+    map_surface_push =
+        env->GetMethodID(map_surface_class, "push", "(Landroid/media/Image;)V");
+    map_surface_close_image = env->GetMethodID(
+        map_surface_class, "closeImage", "(Landroid/media/Image;)V");
+    map_surface_release_readers =
+        env->GetMethodID(map_surface_class, "releaseReaders", "()V");
   }
   {
     const char* path = env->GetStringUTFChars(cache_dir, nullptr);
@@ -507,25 +659,22 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeReduceMemoryUse(
 }
 
 JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapSurface_nativeSurfaceAvailable(
-    JNIEnv* env, jobject, jlong target, jobject surface) {
-  reinterpret_cast<AndroidSurfaceTarget*>(target)->OnSurfaceAvailable(env,
-                                                                     surface);
+Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeSetReadersReleased(
+    JNIEnv*, jobject, jboolean released) {
+  map_texture::SetReadersReleased(released);
 }
 
-JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapSurface_nativeSurfaceCleanup(
-    JNIEnv*, jobject, jlong target) {
-  reinterpret_cast<AndroidSurfaceTarget*>(target)->OnSurfaceCleanup();
+JNIEXPORT jboolean JNICALL
+Java_com_greensopinion_flutter_1mapigrade_MapSurface_nativeFrameImage(
+    JNIEnv* env, jobject, jlong target, jlong frame_id, jobject image) {
+  return reinterpret_cast<AndroidSurfaceTarget*>(target)->OnFrameImage(
+             env, static_cast<uint64_t>(frame_id), image)
+             ? JNI_TRUE
+             : JNI_FALSE;
 }
 
 void map_texture_trim_surfaces_for_testing(int32_t restore) {
-  using namespace map_texture;
-  JNIEnv* env = Env();
-  if (env == nullptr || plugin_class == nullptr) return;
-  env->CallStaticVoidMethod(plugin_class, plugin_trim_surfaces,
-                            static_cast<jboolean>(restore != 0));
-  CheckException(env, "trimSurfacesForTesting");
+  map_texture::SetReadersReleased(restore == 0);
 }
 
 // Measurement functions (design D58).

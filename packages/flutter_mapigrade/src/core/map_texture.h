@@ -91,12 +91,26 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // delivered.
   void Dispose();
 
-  // The platform thread, for a buffer target: Dart chose the frame
-  // `frame_id` in `slot` (design D123). If the slot still holds the frame,
-  // records the choice, marks the slot's texture available and returns true;
-  // otherwise returns false. Does nothing and returns true for a surface
-  // target.
+  // Any thread except the map thread, for a surface target: marks every slot
+  // free, so that Dart's choice of a frame from before the call is refused.
+  // The target releases the slots' images in SlotFreed (design D137).
+  void ResetSlots();
+
+  // The platform thread: Dart chose the frame `frame_id` in `slot` (design
+  // D123). If the slot still holds the frame, records the choice, marks the
+  // slot's texture available and returns true; otherwise returns false. For a
+  // surface target, the first choice of a frame gives its image to Flutter
+  // and reports a frame-displayed event without a display time (design D132).
   bool Select(int slot, uint64_t frame_id);
+
+  // The thread that receives a surface target's images: the image of the
+  // frame `frame_id` arrived. If a slot queues the frame, publishes it, runs
+  // `on_published(slot)` under the BufferState lock so that the target can
+  // keep the image for the slot, reports a frame-ready event and returns
+  // true. Otherwise returns false, and the caller releases the image
+  // (design D131).
+  bool OnFrameImage(uint64_t frame_id,
+                    const std::function<void(int slot)>& on_published);
 
   // Flutter's raster thread, for a buffer target. Presents `slot` and returns
   // its buffer, retained, through BufferRenderTarget::CopyBufferLocked, or
@@ -132,9 +146,18 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void MaybeRender();
   void RenderIntoBuffer(BufferRenderTarget& target);
   void RenderIntoSurface(SurfaceRenderTarget& target);
+  // Map thread, for a buffer target: whether the next frame may render now,
+  // because Dart has chosen the latest frame or the map renders ahead
+  // (designs D19 and D124). Otherwise records the wait. Sets `render_ahead`.
+  bool MayRender(bool* render_ahead);
   // Map thread, for a surface target: the time until the next render may
-  // start, or 0 if it may start now (design D53).
+  // start, or 0 if it may start now (designs D53 and D134).
   int64_t IntervalRemainingNs();
+  // Map thread: acquires a free slot to render into, or returns -1 and
+  // records the skipped render.
+  int AcquireSlot();
+  // Map thread: records the stats of a render that is about to start.
+  void RecordRenderStart(int64_t start, bool render_ahead);
   // Map thread: runs render_update and records its stats. Returns whether it
   // rendered a frame.
   bool RenderUpdate(int64_t start, bool* needs_repaint);
@@ -231,6 +254,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Map thread, for a surface target: whether the pending render has been
   // counted in interval_waits.
   bool interval_wait_counted_ = false;
+  // Whether a frame id arrived that no slot ever queued, which is reported
+  // once (design D131).
+  std::atomic<bool> unknown_frame_reported_{false};
 
   std::mutex stats_mutex_;
   map_texture_stats stats_{};

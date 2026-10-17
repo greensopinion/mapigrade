@@ -13,13 +13,14 @@ import androidx.lifecycle.LifecycleOwner
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
-import io.flutter.embedding.engine.renderer.FlutterRenderer
 import io.flutter.view.TextureRegistry
 
 /**
  * Loads the plugin's native library, which Dart calls through @Native bindings, and passes it the
  * texture registry and the application context (design D54). Rendering pauses while the Flutter
- * activity is stopped, and the renderers release cached resources under memory pressure (D55).
+ * activity is stopped, and the maps release their image readers then (D137 of the
+ * android-layer-children-alignment change). The renderers release cached resources under memory
+ * pressure (D55).
  *
  * The plugin supports one Flutter engine per process, as on macOS and iOS.
  *
@@ -33,11 +34,17 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     private val activityCallbacks =
         object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(started: Activity) {
-                if (libraryLoaded && started === activity) nativeSetPaused(false)
+                if (libraryLoaded && started === activity) {
+                    nativeSetReadersReleased(false)
+                    nativeSetPaused(false)
+                }
             }
 
             override fun onActivityStopped(stopped: Activity) {
-                if (libraryLoaded && stopped === activity) nativeSetPaused(true)
+                if (libraryLoaded && stopped === activity) {
+                    nativeSetPaused(true)
+                    nativeSetReadersReleased(true)
+                }
             }
 
             override fun onActivityCreated(created: Activity, state: Bundle?) {}
@@ -72,7 +79,6 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
         if (!loadLibrary()) return
         val context = binding.applicationContext
         applicationContext = context
-        renderer = binding.flutterEngine.renderer
         nativeInit(binding.textureRegistry, context, context.cacheDir.absolutePath)
         context.registerComponentCallbacks(memoryCallbacks)
     }
@@ -80,7 +86,6 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext?.unregisterComponentCallbacks(memoryCallbacks)
         applicationContext = null
-        renderer = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -115,10 +120,10 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
 
     private external fun nativeReduceMemoryUse()
 
+    private external fun nativeSetReadersReleased(released: Boolean)
+
     companion object {
         private const val LIBRARY = "flutter_mapigrade"
-
-        private var renderer: FlutterRenderer? = null
 
         // The result of the first load in this process, or null before it. The result applies to
         // the process, so a second engine doesn't load the library again.
@@ -146,22 +151,6 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
                 }
             loadResult = loaded
             return loaded
-        }
-
-        /**
-         * For tests (map_texture_trim_surfaces_for_testing): makes Flutter remove the surfaces of
-         * the surface producers, as FlutterActivity does when it stops, or provide them again, as
-         * it does when it resumes. Called on the main thread.
-         */
-        @JvmStatic
-        fun trimSurfacesForTesting(restore: Boolean) {
-            val renderer = renderer ?: return
-            if (restore) {
-                renderer.restoreSurfaceProducers()
-            } else {
-                @Suppress("DEPRECATION")
-                renderer.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
-            }
         }
     }
 }
