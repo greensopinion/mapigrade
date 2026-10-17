@@ -6,7 +6,7 @@
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS, iOS and Android, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
 
-macOS, iOS and Android (arm64, Android 10 or later) are complete. For how to use the plugin in an app, see [packages/flutter_mapigrade/README.md](packages/flutter_mapigrade/README.md). To try it on your own devices, build the demo app: [packages/demo/README.md](packages/demo/README.md).
+Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. For how to use the plugin in an app, see [packages/flutter_mapigrade/README.md](packages/flutter_mapigrade/README.md). To try it on your own devices, build the demo app: [packages/demo/README.md](packages/demo/README.md).
 
 ## Documentation
 
@@ -15,31 +15,14 @@ macOS, iOS and Android (arm64, Android 10 or later) are complete. For how to use
 - Packaging and release build checks: [docs/packaging.md](docs/packaging.md)
 - Measurements: [docs/benchmarks.md](docs/benchmarks.md)
 - Limitations, licenses and findings: [docs/limitations.md](docs/limitations.md)
-- Follow-up for Flutter: [docs/flutter-texture-cache-followup.md](docs/flutter-texture-cache-followup.md)
-- Requirements: `openspec/specs/` (`map-texture`, `map-layer`, `package-api`, `third-party-notices`); designs of finished changes: `openspec/changes/archive/`
 
 ## Repository layout
 
 ```
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
-  lib/src/texture/                       Dart API: MapTextureController, MapTextureView, @Native bindings
-  lib/src/testing.dart                   test hooks and measurement helpers (not for applications)
-  lib/src/layer/                         flutter_map layer (MapigradeLayer)
-  src/core/                              C++ core: map thread, commands, buffer state, C ABI (no platform dependencies)
-  darwin/flutter_mapigrade/              Swift package shared by macOS and iOS: Metal render target,
-                                         FlutterTexture, plugin class, iOS lifecycle observers
-  android/                               Android plugin: Gradle module, Kotlin plugin class, EGL render target
-                                         (src/main/cpp/), CMake build of the core
-  hook/build.dart                        build hook that names the Android library for @Native
-  example/                               usage example of the public API (Android, iOS, macOS)
-  test/                                  Dart unit tests; test/native/ C++ unit tests for the core
 packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
                                          flyover on your own devices (Android, iOS, macOS)
-  tool/                                  the script that computes the stage routes
 packages/test_harness/                   test harness app: integration tests, benchmarks, color check
-  integration_test/                      spec scenarios (map_texture_test.dart), memory and color
-                                         measurements (run with flutter drive)
-  test_driver/                           driver for flutter drive
 docs/                                    architecture, packaging, measurements, limitations, concept
                                          and follow-up documents
 pubspec.yaml                             pub workspace of the Dart packages
@@ -66,5 +49,5 @@ cd packages/test_harness
 flutter run -d macos
 flutter run -d <simulator id>             # iOS simulator (arm64 only)
 flutter run --release -d <iPhone id>      # iPhone; `flutter devices` lists the ids
-flutter run --release -d <Android id>     # Android device or arm64 emulator, API 29 or later
+flutter run --release -d <Android id>     # Android device or arm64 emulator, API level 29 or later
 ```

@@ -16,8 +16,8 @@ import 'map_texture_layer.dart';
 /// MapLibre renders the map on its own thread, so while the camera moves, for
 /// example during a pan or a zoom, the displayed map lags the `flutter_map`
 /// camera by one to two frames. Layers placed after this one among the
-/// `FlutterMap` children follow the camera without that lag, so they shift
-/// against the map while it moves. To keep overlay layers such as a
+/// `FlutterMap` children are drawn at the live camera, so they move relative
+/// to the map while the camera moves. To keep overlay layers such as a
 /// `MarkerLayer` or a `PolylineLayer` aligned with the map, place them in this
 /// layer's own [children] instead of the `FlutterMap` children.
 final class MapigradeLayer extends StatelessWidget {
@@ -46,7 +46,9 @@ final class MapigradeLayer extends StatelessWidget {
 
   /// The maximum size in bytes of the tile cache for maps created after it is
   /// set; 50 MiB by default. Each map evicts from the shared cache file to its
-  /// own maximum size. A negative value throws an [ArgumentError].
+  /// own maximum size; after a reduction, the cache reaches the new maximum
+  /// size as the map stores new tiles. The server's cache headers determine
+  /// freshness. A negative value throws an [ArgumentError].
   static int get maximumCacheSizeBytes => _maximumCacheSizeBytes;
 
   static set maximumCacheSizeBytes(int bytes) {
@@ -57,9 +59,22 @@ final class MapigradeLayer extends StatelessWidget {
   static int _maximumCacheSizeBytes = 50 * 1024 * 1024;
 
   /// The URL of the style.
+  ///
+  /// In this URL and in every URL in the style, `asset://<asset key>` refers
+  /// to the Flutter asset with that key. An asset of a package `foo` has the
+  /// key `packages/foo/<path>`, for example
+  /// `asset://packages/foo/assets/style.json`. A PMTiles file bundled as an
+  /// asset has the source URL `pmtiles://asset://assets/tiles.pmtiles`.
+  /// MBTiles files can't be loaded from assets, because MapLibre opens them
+  /// only from an absolute file path.
+  ///
+  /// On iOS and macOS, the layer reads assets from the main bundle's
+  /// `App.framework`. In an add-to-app host that loads Flutter from another
+  /// framework, `asset://` URLs fail with a [LayerLoadException].
   final String? styleUrl;
 
-  /// The style as MapLibre style JSON.
+  /// The style as MapLibre style JSON. URLs in the style can refer to Flutter
+  /// assets, as described for [styleUrl].
   final String? styleJson;
 
   /// How the layer aligns the map with the overlays while the camera moves.
@@ -72,8 +87,8 @@ final class MapigradeLayer extends StatelessWidget {
   /// Called each time a style has loaded.
   final VoidCallback? onStyleLoaded;
 
-  /// Called with each failure of the map; when null, failures go to
-  /// [FlutterError.reportError].
+  /// Called with each failure of the map; when null, the layer passes
+  /// failures to [FlutterError.reportError].
   final void Function(LayerException exception)? onError;
 
   /// Reports the frame counts and render time of the layer's map; see

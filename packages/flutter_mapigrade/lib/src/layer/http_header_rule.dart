@@ -1,16 +1,33 @@
 // Designs D80 and D82 of the http-headers-and-assets change.
 
 /// HTTP headers that `MapigradeLayer` adds to requests whose URL matches
-/// [url]. A request gets the headers of the first matching rule, or none.
+/// [url]. Each HTTP request that the map sends gets the headers of the first
+/// rule whose [url] matches the request's complete URL, and no headers when no
+/// rule matches. Requests that the map serves from its cache or from assets
+/// don't get the headers.
 ///
-/// [url] is a case-sensitive glob over the complete URL: `*` matches any
-/// characters except `/`, `**` any characters, `?` one character except `/`,
-/// and `\` escapes the next character.
+/// [url] is a glob, compared with the URL byte for byte and case-sensitively,
+/// after tile URL templates are filled in:
 ///
-/// A header that MapLibre rejects, such as `Host`, makes the layer report a
-/// `LayerCreateException`.
+/// - `*` matches any characters except `/`, so `https://*.example.com/**`
+///   matches `https://a.example.com/x` but not
+///   `https://attacker.example/x.example.com/x`.
+/// - `**` matches any characters.
+/// - `?` matches one character except `/`.
+/// - `\` makes the next character literal.
+///
+/// MapLibre or the platform HTTP client manages these headers, and a rule
+/// can't set them: `Accept-Encoding`, `Connection`, `Content-Length`, `Host`,
+/// `If-Modified-Since`, `If-None-Match`, `Keep-Alive`, `Proxy-Authorization`,
+/// `Proxy-Connection`, `Range`, `TE`, `Trailer`, `Transfer-Encoding`,
+/// `Upgrade` and `User-Agent`. A rule with one of them, an invalid header
+/// name, or a value with a control character other than horizontal tab makes
+/// the layer report a `LayerCreateException`, whose message names the header
+/// and doesn't contain its value.
 final class HttpHeaderRule {
-  /// A rule that keeps a copy of [headers].
+  /// A rule that keeps a copy of [headers]. In debug builds, asserts that each
+  /// header name is valid and that no value contains a control character
+  /// other than horizontal tab.
   HttpHeaderRule({required this.url, required Map<String, String> headers})
     : headers = Map.unmodifiable(headers) {
     assert(_checkHeaders(this.headers));
