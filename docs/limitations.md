@@ -1,6 +1,6 @@
-# Limitations and findings of the macOS and iOS vertical slices
+# Limitations and findings of the macOS, iOS and Android vertical slices
 
-Measured results are in `benchmarks.md`. The designs and their amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md` (macOS) and `openspec/changes/archive/2026-10-10-ios-texture-vertical-slice/design.md` (iOS, decisions D11 to D18).
+Measured results are in `benchmarks.md`. The designs and their amendments are in `openspec/changes/archive/2026-10-09-macos-texture-vertical-slice/design.md` (macOS) `openspec/changes/archive/2026-10-10-ios-texture-vertical-slice/design.md` (iOS, decisions D11 to D18) and the android-texture-vertical-slice change's design (Android, decisions D51 to D60).
 
 ## App bundle size
 
@@ -29,6 +29,20 @@ The rest of the increase is the plugin's native code in the app executable and t
 | of which `MapLibreNativeC.framework` | 12,852 KB |
 
 This is the size of the app bundle, not the App Store download size, which Apple computes after compression and app thinning.
+
+### Android
+
+Release APKs for arm64 (`flutter build apk --release --target-platform android-arm64`), measured on 2026-10-16 with MapLibre Native FFI commit `677a1cfdf1ab2b914f633d4abc790b7136d3a321`:
+
+| APK | Size |
+| --- | --- |
+| `flutter create` template app (baseline) | 15,487,478 bytes |
+| test harness with this plugin | 31,191,841 bytes |
+| increase | 15,704,363 bytes (15.0 MiB) |
+| of which `libmaplibre-native-c.so` | 13,397,064 bytes (5,808,262 bytes with gzip -9) |
+| of which `libflutter_mapigrade.so` | 297,840 bytes (108,048 bytes with gzip -9) |
+
+The APK stores native libraries uncompressed, so the app can map them without extracting them. The rest of the increase is the test harness's Dart code and assets, the plugin's notices (about 78 KB, see Licenses), and `libdartjni.so` for three ABIs (330 KB), which `path_provider_android`, a dependency of `flutter_map`, adds. The Play Store download is compressed and split by ABI, so it is smaller than the APK.
 
 ## Licenses and third-party notices
 
@@ -79,7 +93,7 @@ The engine source asserts the platform thread in `Shell::OnPlatformViewMarkTextu
 
 ### Colors
 
-Map colors match Flutter's within 1/255 per channel on macOS without setting a color space on the IOSurface (`benchmarks.md`, Color check). On the iPhone they match exactly: rendered to an image with `RepaintBoundary.toImage` (`packages/test_harness/integration_test/color_measurement.dart`), the map's fill and background and the Flutter swatches of the same colors had identical RGB values.
+Map colors match Flutter's within 1/255 per channel on macOS without setting a color space on the IOSurface (`benchmarks.md`, Color check). On the iPhone they match exactly: rendered to an image with `RepaintBoundary.toImage` (`packages/test_harness/integration_test/color_measurement.dart`), the map's fill and background and the Flutter swatches of the same colors had identical RGB values. The same measurement on the Pixel 4a (5G) (2026-10-16) also gave identical values (fill 230, 179, 26; background 51, 102, 204).
 
 ### Frame rate on the iPhone over dense areas
 
@@ -109,21 +123,52 @@ The `flutter_map` layer (`MapLibreTextureLayer`, flutter-map-layer change) align
 
 `MapigradeLayer`'s `alignment` parameter selects how the layer aligns the map with the overlays during camera changes: `LayerAlignment.prediction(lead: n)` sets the camera extrapolated n display refresh intervals ahead from its recent velocity; `LayerAlignment.none` sets the current camera (the public-api change renamed `MapLibreTextureLayer` and `CameraAlignment` to these names). The layer draws the map without a transform in both cases. The default is prediction with a lead of 1 (camera-prediction-default change). With a lead of 1, the map uncovers no strips at the edges and, in pans at 1,000 px/s, lags the overlays by 4.2–5.5 px on average on the Mac and 7.9 px on the iPhone (p50 0 or 8.33 px on the Mac, 8.33 px on the iPhone). It runs ahead of them by 7–8 px after an abrupt stop and by 22–25 px after an abrupt reversal. In a manual check on both devices it felt better than the transform, and the overlays floated only while a fling decelerated. We decided on 2026-10-11 to make a lead of 1 the default. Results are in `benchmarks.md`, the decision in the camera-prediction change's design.
 
+### Android frame rate
+
+On the Pixel 4a (5G), the map queued 58–59 frames per second at the median second during the continuous pan over central London, at the display's 60 Hz, with `render_update` at about 9 ms (`benchmarks.md`, Android). The display's refresh interval limits the frame rate, not the map thread. Android reports no display time, so the benchmark counts the frames that the map queued; Flutter rasterized slightly fewer frames than the map queued.
+
+### Android renderers
+
+Flutter 3.47.5 tried Impeller's Vulkan backend on the Pixel 4a (5G) (Adreno 620) and then used Impeller with OpenGL ES. MapLibre renders with OpenGL ES through EGL on every device (design D51). The Vulkan preset of the FFI wasn't compared.
+
+### Android: swap interval 0 avoids a deadlock
+
+With the default swap interval, `eglSwapBuffers` on the map thread waited for a free buffer while the main thread waited for the map thread in dispose, and the app stopped responding (on the emulator). Flutter's `ImageReader` acquires images on the main thread, so a buffer is freed only while the main thread runs. The surface target sets swap interval 0 on each window surface, so that a new frame replaces a queued frame that Flutter hasn't acquired, and the map thread paces itself by the display refresh interval (design D53).
+
+### Android: `@Native` lookup needs a build hook
+
+On Android, `@Native` couldn't find the plugin's functions by process lookup after `System.loadLibrary`, even after the library was opened again with `RTLD_GLOBAL`. The package's build hook names the library as a code asset with link mode `DynamicLoadingSystem` (design D56, `packaging.md`). After the hook was added, `flutter build` skipped its build-hooks step as up to date until `flutter clean`.
+
+### Android emulator
+
+The arm64 emulator (API 37) renders OpenGL ES in software (SwANGLE), so `render_update` takes about 0.4 s there, and the integration test "rapid camera updates do not build up a backlog" fails on it. The test passes on the Pixel 4a (5G). We record frame rates only from devices.
+
+### Alignment on Android (manual check)
+
+On 2026-10-16 we checked alignment by hand on the test harness's `flutter_map` page on the Pixel 4a (5G), whose display runs at 60 Hz (its only mode), in a release build. We compared the three settings (`none`, prediction with a lead of 1 and with a lead of 2), and prediction with a lead of 1, the default, was the best of them. With a lead of 1, the overlays floated over the map during every pan: slow and fast, horizontal and vertical. The polyline moved against the map by about half the width of the "o" in the "City of London" label. Alignment wasn't measured on Android (design D59).
+
+On macOS and iOS at 120 Hz, the overlays floated only while a fling decelerated (see Camera prediction). At 60 Hz a refresh interval is twice as long, so a lead of 1 extrapolates twice as far, and the map frame and the Flutter frame that displays it are further apart. The layer-children-alignment change draws `MapigradeLayer` children at the camera of the displayed map frame on macOS and iOS only; on Android it draws them at the live camera, as now, and a follow-up change covers Android.
+
 ## Known limitations
 
 - arm64 only: the FFI presets are `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal`, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds. On Android the plugin packages `libflutter_mapigrade.so` for `arm64-v8a` only. On a device without an arm64 ABI, the plugin logs a warning that names the device's ABIs and calls no native code, the app starts, `MapigradeLayer.isSupported` is false, and a `MapigradeLayer` reports a `LayerCreateException` (unsupported-architectures change). `packages/test_harness/integration_test/unsupported_test.dart` checks this on an arm64 device with an APK built without the library; a 32-bit device was not tested.
-- iOS 15.5 or later, the FFI's iOS deployment target.
+- iOS 15.5 or later, the FFI's iOS deployment target. Android 10 (API 29) or later, the minimum for the `ImageReader` path of Flutter's `SurfaceProducer`.
 - Swift Package Manager only: the plugin has no podspec.
 - One Flutter engine per process: the plugin keeps the texture registry of the engine that registered it last.
 - The map's sprite and glyph density is fixed when the map is created (`mln_map_options.scale_factor`). After a device pixel ratio change the map renders at the new ratio, but MapLibre logs a warning and keeps sprites at the original density. A map recreated at the new ratio would fix this.
 - We did not test moving the window between displays with different pixel ratios, because only one display was available. Resizing was tested by resizing the map widget on every frame for 10 s in an integration test, and by dragging the example window's edge for about 10 s by hand; after the drag the map filled the window at the correct scale.
 - During camera changes the map in the `flutter_map` layer, with its default alignment, trails the overlays in steady pans by up to about one Flutter frame of movement (4.2–7.9 logical px on average at 1,000 px/s), runs ahead of them briefly after an abrupt stop (7–8 px) or reversal (22–25 px), and the overlays appear to float while a fling decelerates (see Camera prediction).
 - Camera prediction was measured only on 120 Hz displays. At 60 Hz a lead of 1 refresh interval is twice as long, and how far the map lags at that rate isn't known.
+- On Android the overlays of the `flutter_map` layer float over the map during every pan with the default alignment (Pixel 4a (5G), 60 Hz; see Alignment on Android). The alignment there was checked only by hand.
 - The alignment during camera changes was checked against the screen only on the Mac and only with the transform (screen capture), which has since been removed. For camera prediction only the computed error exists.
 - With camera prediction, the best lead in the synthetic benchmark differed by device (1 on the Mac, 2 on the iPhone), and on the iPhone the benchmark's best lead felt worse in a manual check than a lead of 1. The cause is unknown.
 - `render_update` waits on the map thread until the GPU completes, so a frame's CPU encoding and GPU work can't overlap with the next frame's. On the iPhone, rendering ahead keeps the frame rate at about 100 fps over central London despite this (see Frame rate on the iPhone over dense areas).
 - The iOS GPU's clock depends on how busy it is, and the paced map settled in its minimum performance state. Rendering ahead only applies while a frame costs more than a refresh interval; a map whose frames cost slightly less than that is paced and may run at low clocks.
 - During a burst of resizes, Flutter's texture cache keeps the replaced display buffers until the resizing stops (see Replaced display buffers stayed alive after resizes). A continuous resize that lasts long, such as dragging a desktop window edge, holds memory for as long as it lasts.
+- On Android, frame reports have no display time (`FrameCamera.displayTime` is null), and a frame counts as displayed when the map has queued it, because Flutter gives the plugin no call when it takes an image. The display-time and released-buffer integration tests and the timing probe are skipped or exit on Android.
+- On Android, rendering is paced by the display refresh interval, measured on a clock, not by vsync. On the Pixel the queued map frame interval had a p95 of about 28 ms at a 16.7 ms refresh interval (`benchmarks.md`, Android). `AChoreographer` pacing is the planned alternative (design D53).
+- On Android, `copyFree: false` has no effect: every map renders directly into the `SurfaceProducer`'s buffers.
+- On Android, the plugin's own frame path has no CPU readback by design, which we did not trace. When Impeller uses OpenGL ES, Flutter may copy the `HardwareBuffer` on the GPU while it samples it.
 - The plugin exposes only style, camera (center, zoom, bearing), resize and dispose. There are no gestures, pitch or animations.
 
 ## What the Android slice can reuse

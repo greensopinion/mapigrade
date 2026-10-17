@@ -177,6 +177,60 @@ Measured 2026-10-11 at MapLibre Native FFI commit `6f5a662093873a5a690de34fe21f6
 
 Skipped renders: 0 in both. Neither frame rate decreases over the 5 minutes. The thermal state has four levels, so a small difference in heat wouldn't show.
 
+### Android (Pixel 4a (5G), android-texture-vertical-slice task 7.2)
+
+Measured 2026-10-16 over central London (see Path), with the defaults (copy-free; rendering ahead doesn't apply on Android, design D53). On Android the benchmark counts the frames the map queued for display, because Android reports no display time (design D52). The map renders at most one frame per display refresh interval (design D53).
+
+Setup:
+
+| | Android |
+| --- | --- |
+| Device | Pixel 4a (5G) (`bramble`), Qualcomm SM7250 (Snapdragon 765G), Adreno 620, 60 Hz display (its only mode), 4 KB pages |
+| OS | Android 14 (API 34, UP1A.231105.001.B2) |
+| Map size | full screen, portrait, 411x867 logical pixels, pixel ratio 2.625, 1080x2277 physical |
+| Measured Flutter vsync interval | 16.71 ms (median Flutter frame interval) |
+| Renderer | Impeller (OpenGL ES). Flutter tried Impeller's Vulkan backend on the Adreno 620 and then used OpenGL ES (`flutter run` log). MapLibre renders with EGL (FFI preset `android-arm64-egl`, design D51). |
+
+Flutter 3.47.5 stable (framework `6a19cca564`); MapLibre Native FFI commit `677a1cfdf1ab2b914f633d4abc790b7136d3a321`; release builds; style OpenFreeMap Liberty; the test harness's Flutter control panel above the map; the phone on USB power with the screen kept on. Thermal status 0 (none) at the start and end of every run.
+
+Procedure:
+
+```sh
+cd packages/test_harness
+# add --dart-define=BENCHMARK_SUSTAINED_S=300 for the 5-minute run
+flutter build apk --release --dart-define=BENCHMARK=true
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+adb shell am start -S -n com.greensopinion.mapigrade_test_harness/.MainActivity
+adb logcat -s flutter | grep BENCHMARK_
+```
+
+Keep the screen on and unlocked during a run. When the screen turns off, the activity stops and the plugin pauses rendering (design D55), and the run doesn't finish.
+
+30 s continuous pan, 3 runs (ranges over the runs):
+
+| Metric | Pixel 4a (5G) |
+| --- | --- |
+| Queued map frames per second, per-second min / p10 / p50 / p90 | 55–56 / 57 / 58–59 / 59 |
+| Queued map frames per second, average over 30 s | 58.2–58.3 |
+| Queued map frame interval, median / p95 / p99 / max | 16.96–16.97 / 27.6–28.1 / 36.2–36.7 / 49.6–53.3 ms |
+| Map frames rendered | 1,745–1,748 |
+| Flutter frames rasterized | 1,702–1,735 |
+| Flutter frame interval, median / p95 / p99 / max | 16.71 / 33.34–33.40 / 33.47–33.51 / 50.1–83.5 ms |
+| Flutter frame total span, median / p95 / p99 / max | 10.8–10.9 / 21.7–27.0 / 31.2–32.9 / 50.3–57.4 ms |
+| Flutter raster, median / p95 / p99 / max | 3.9–5.9 / 14.0–16.7 / 17.0–18.6 / 32.1–35.0 ms |
+| `render_update`, average (maximum) | 8.97–9.20 ms (39.7–151.9 ms) |
+| Frame cycle, average | 17.16–17.20 ms |
+| Renders deferred to the next refresh interval (`interval_waits`) | 1,680–1,692 |
+| Skipped renders | 0 |
+
+Against the go/no-go values: the Pixel meets the 30 fps minimum and is close to the 60 fps target (the display's refresh rate). `render_update` takes about 9 ms of the 16.7 ms interval, so the refresh interval limits the frame rate, not the map thread. Flutter rasterized fewer frames than the map queued (1,702–1,735 against 1,745–1,748), and more than 5% of Flutter frame intervals were two refresh intervals long, so Flutter didn't display at least 13–44 of the queued map frames. The plugin can't count the frames Flutter displays on Android (design D52).
+
+5-minute run (one run, `BENCHMARK_SUSTAINED_S=300`): queued map frames per second per 30 s interval 58.4, 58.2, 58.3, 58.2, 58.4, 57.9, 58.0, 57.9, 58.3, 58.1; per second p10 57, p50 58, p90 59, lowest 46; 17,449 queued frames; skipped renders 0; thermal state nominal at every interval start and at the end. The frame rate doesn't decrease over the 5 minutes.
+
+Memory (`integration_test/memory_measurement.dart`, debug build, PSS from `/proc/self/smaps_rollup`, design D58): 223 MiB before the map was created, 346 MiB before the memory reduction, 341 MiB 2 s and 342 MiB 7 s after it. During 300 resizes PSS stayed between 280 and 298 MiB, and it was 265 MiB 2 s after dispose.
+
+The app size increase is in `limitations.md`.
+
 ### Slower GPU (task 6.4)
 
 Not run: the iPhone XR (iPhone11,8, A12, 60 Hz) intended as a slower-GPU data point was unavailable (`devicectl` listed it as unavailable on 2026-10-10).

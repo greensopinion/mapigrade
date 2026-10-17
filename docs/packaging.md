@@ -7,3 +7,13 @@ On iOS, Xcode embeds and signs the framework in `Runner.app/Frameworks/`. The te
 iOS release build check (2026-10-10): the executable exports all `map_texture_*` functions that Dart binds (`dyld_info -exports`), it loads `@rpath/MapLibreNativeC.framework/MapLibreNativeC` with `@executable_path/Frameworks` as an `LC_RPATH` entry, and the release build displays the map on an iPhone 15 Pro Max.
 
 Release build check (2026-10-09): `otool -L` on the executable shows `@rpath/MapLibreNativeC.framework/Versions/A/MapLibreNativeC`, the only `LC_RPATH` entries are `/usr/lib/swift` and `@executable_path/../Frameworks`, `codesign --verify --deep --strict` passes, and a copy of the `.app` outside the build directory starts and shows the map. In the release bundle, `MapLibreNativeC.framework` takes 12,884 KB of 49,952 KB.
+
+## Android
+
+`packages/flutter_mapigrade/android/` is a Gradle library module (`minSdk` 29, `ndkVersion` 30.0.16248370, `abiFilters` `arm64-v8a`). Its CMake build (`android/src/main/cpp/CMakeLists.txt`) compiles the C++ core and the Android render target into `libflutter_mapigrade.so`, and links `libmaplibre-native-c.so` from `third_party/maplibre-native-ffi/android-arm64-egl/` as an imported library. Gradle packages both libraries in the APK under `lib/arm64-v8a/`: the plugin's from the CMake build, and the FFI's through a generated `jniLibs` directory. Both libraries link the NDK's C++ runtime statically (`c++_static`); only the C ABI crosses between them. Both have 16 KB segment alignment, which devices and emulators with 16 KB pages require.
+
+The module adds the file-based Maven repository `third_party/maplibre-native-ffi/android-maven/` and depends on the FFI's patched `rustls-platform-verifier` Android component (`org.maplibre.nativeffi:rustls-platform-verifier-android`, versioned by the first 12 characters of the FFI commit). The APK needs it, because `mln_android_init` uses it to verify TLS certificates with the Android platform verifier.
+
+The plugin class loads `libflutter_mapigrade.so` with `System.loadLibrary`. The package's build hook (`hook/build.dart`) declares the same library as a code asset with link mode `DynamicLoadingSystem`, so Flutter adds no file to the APK, and Dart's lookup by name returns the library that is already loaded (design D56 of the android-texture-vertical-slice change).
+
+Android release build check (2026-10-16, FFI commit `677a1cfdf1ab2b914f633d4abc790b7136d3a321`): the release APK contains `libflutter_mapigrade.so` and `libmaplibre-native-c.so` for `arm64-v8a` only, stored uncompressed, and the release build starts on a Pixel 4a (5G) with Android 14, logs a successful `mln_android_init`, and shows the map with a style and tiles loaded over HTTPS. Sizes are in `limitations.md`.
