@@ -6,7 +6,7 @@
 
 A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS, iOS and Android, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
 
-Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. For how to use the plugin in an app, see [packages/flutter_mapigrade/README.md](packages/flutter_mapigrade/README.md). To try it on your own devices, build the demo app: [packages/demo/README.md](packages/demo/README.md).
+Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. For how to use the plugin in an app, see [packages/flutter_mapigrade](packages/flutter_mapigrade/). To try it on your own devices, build the demo app: [packages/demo](packages/demo/).
 
 ## Documentation
 
