@@ -1,5 +1,6 @@
 // Widget tests for the public layer (design D66 of the public-api change, D86
-// of unsupported-architectures, D111 of layer-metrics).
+// of unsupported-architectures, D111 of layer-metrics, D127 of
+// layer-children-alignment).
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
@@ -68,6 +69,32 @@ void main() {
     expect(layer.alignment, const LayerAlignment.prediction());
     expect(layer.httpHeaders, isEmpty);
     expect(layer.metrics, isNull);
+  });
+
+  testWidgets('passes children', (tester) async {
+    final children = [const SizedBox(key: _markerKey)];
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(size: Size.zero),
+        child: MapigradeLayer(styleJson: '{}', children: children),
+      ),
+    );
+
+    final layer = tester.widget<MapTextureLayer>(find.byType(MapTextureLayer));
+    expect(layer.children, same(children));
+    expect(layer.onChildCamera, isNull);
+  });
+
+  testWidgets('passes no children by default', (tester) async {
+    await tester.pumpWidget(
+      const MediaQuery(
+        data: MediaQueryData(size: Size.zero),
+        child: MapigradeLayer(styleJson: '{}'),
+      ),
+    );
+
+    final layer = tester.widget<MapTextureLayer>(find.byType(MapTextureLayer));
+    expect(layer.children, isEmpty);
   });
 
   testWidgets('passes metrics', (tester) async {

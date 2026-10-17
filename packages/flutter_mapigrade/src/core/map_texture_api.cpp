@@ -160,10 +160,29 @@ int32_t map_texture_set_maximum_cache_size(int64_t bytes) {
   return MAP_TEXTURE_OK;
 }
 
-int64_t map_texture_texture_id(int64_t handle) {
+int32_t map_texture_texture_ids(int64_t handle, int64_t* out_ids,
+                                int32_t capacity) {
+  if (capacity < 0 || (capacity > 0 && out_ids == nullptr)) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
-  return texture->texture_id();
+  int32_t count = texture->slot_count();
+  for (int32_t i = 0; i < count && i < capacity; ++i) {
+    out_ids[i] = texture->texture_id(i);
+  }
+  return count;
+}
+
+int32_t map_texture_select(int64_t handle, int32_t slot, int64_t frame_id) {
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  if (slot < 0 || slot >= texture->slot_count()) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  return texture->Select(slot, static_cast<uint64_t>(frame_id))
+             ? MAP_TEXTURE_OK
+             : MAP_TEXTURE_NOT_SELECTED;
 }
 
 int32_t map_texture_load_style_url(int64_t handle, const char* url) {
@@ -183,10 +202,11 @@ int32_t map_texture_load_style_json(int64_t handle, const char* json) {
 }
 
 int32_t map_texture_set_camera(int64_t handle, double latitude,
-                               double longitude, double zoom, double bearing) {
+                               double longitude, double zoom, double bearing,
+                               int64_t seq) {
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
-  texture->SetCamera({latitude, longitude, zoom, bearing});
+  texture->SetCamera({latitude, longitude, zoom, bearing}, seq);
   return MAP_TEXTURE_OK;
 }
 

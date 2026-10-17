@@ -40,6 +40,15 @@
 // positive when the map shows the camera further along the pan than the
 // overlays, negative when it lags behind them.
 //
+// `--dart-define=ALIGNMENT_CHILDREN=1` places the overlays as children of the
+// layer (design D129 of the layer-children-alignment change). The error is
+// then computed against the camera the layer gives its children in each
+// Flutter frame (`onChildCamera`), while the displayed map frame is still
+// found from the display times. Result lines state `children` and also give
+// `lag_px`, the distance at the viewport center between where the displayed
+// map frame draws a coordinate and where the live flutter_map camera places
+// it; `overshoot_ahead_px` is then measured against the live camera.
+//
 // `--dart-define=ALIGNMENT_VIDEO=true` is the screen capture check (design
 // D29): a JSON style draws a grid of red discs, a CircleLayer draws a blue
 // dot at the center of each, and the run is 5 s at rest followed by the pan
@@ -55,6 +64,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
+import 'package:flutter_map/flutter_map.dart' as fm show MapCamera;
 import 'package:flutter_mapigrade/src/testing.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -258,6 +268,11 @@ class AlignmentBenchmarkPage extends StatefulWidget {
   State<AlignmentBenchmarkPage> createState() => _AlignmentBenchmarkPageState();
 }
 
+/// The camera the layer gave its children in its last build, with the
+/// overlays as children, and the id of the map frame it chose then.
+fm.MapCamera? lastChildCamera;
+int? lastChildFrameId;
+
 class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
   final _mapController = MapController();
   final _mode = alignmentMode ?? AlignmentMode.predict1;
@@ -269,6 +284,18 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
     );
   }
 
+  /// The layer, with [overlays] as its children or followed by them.
+  List<Widget> _layers(MapTextureLayer Function(List<Widget> children) layer,
+      Widget overlays) =>
+      alignmentChildren
+          ? [layer([overlays])]
+          : [layer(const []), overlays];
+
+  void _onChildCamera(int? frameId, fm.MapCamera camera) {
+    lastChildCamera = camera;
+    lastChildFrameId = frameId;
+  }
+
   @override
   Widget build(BuildContext context) => FlutterMap(
     mapController: _mapController,
@@ -278,42 +305,53 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
       interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
     ),
     children: [
-      if (alignmentVideo) ...[
-        MapTextureLayer(
-          styleJson: videoStyle(),
-          copyFree: copyFree,
-          alignment: _mode.alignment,
-          onController: _onController,
+      if (alignmentVideo)
+        ..._layers(
+          (children) => MapTextureLayer(
+            styleJson: videoStyle(),
+            copyFree: copyFree,
+            alignment: _mode.alignment,
+            onController: _onController,
+            onChildCamera: _onChildCamera,
+            children: children,
+          ),
+          CircleLayer(
+            circles: [
+              for (final p in videoGrid)
+                CircleMarker(
+                  point: p,
+                  radius: 3,
+                  color: const Color(0xff0000ff),
+                ),
+            ],
+          ),
+        )
+      else
+        ..._layers(
+          (children) => MapTextureLayer(
+            styleUrl: libertyStyleUrl,
+            copyFree: copyFree,
+            alignment: _mode.alignment,
+            onController: _onController,
+            onChildCamera: _onChildCamera,
+            children: children,
+          ),
+          MarkerLayer(
+            markers: [
+              for (final p in const [
+                LatLng(51.5080, -0.1247),
+                LatLng(51.5138, -0.0984),
+                LatLng(51.5081, -0.0759),
+              ])
+                Marker(
+                  point: p,
+                  width: 16,
+                  height: 16,
+                  child: const ColoredBox(color: Colors.orange),
+                ),
+            ],
+          ),
         ),
-        CircleLayer(
-          circles: [
-            for (final p in videoGrid)
-              CircleMarker(point: p, radius: 3, color: const Color(0xff0000ff)),
-          ],
-        ),
-      ] else ...[
-        MapTextureLayer(
-          styleUrl: libertyStyleUrl,
-          copyFree: copyFree,
-          alignment: _mode.alignment,
-          onController: _onController,
-        ),
-        MarkerLayer(
-          markers: [
-            for (final p in const [
-              LatLng(51.5080, -0.1247),
-              LatLng(51.5138, -0.0984),
-              LatLng(51.5081, -0.0759),
-            ])
-              Marker(
-                point: p,
-                width: 16,
-                height: 16,
-                child: const ColoredBox(color: Colors.orange),
-              ),
-          ],
-        ),
-      ],
     ],
   );
 }
@@ -330,8 +368,17 @@ Map<String, double>? percentiles(List<double> values) {
 
 /// The overlays' camera in one Flutter frame build.
 class _Build {
-  const _Build(this.target, this.time, this.east);
+  const _Build(this.target, this.live, this.time, this.east, this.chosen);
+
+  /// The camera the overlays are drawn at: the live camera, or with the
+  /// overlays as children, the camera the layer gave them.
   final ViewCamera target;
+
+  /// The live flutter_map camera.
+  final ViewCamera live;
+
+  /// With the overlays as children, the id of the map frame the layer chose.
+  final int? chosen;
 
   /// The frame's vsync target time since the phase started, in seconds.
   final double time;
@@ -386,6 +433,8 @@ class AlignmentRecorder {
     var noShownFrame = 0;
     var displaysOutsideRaster = 0;
     final drawn = <double>[];
+    final over = <Map<String, Object?>>[];
+    final lags = <double>[];
     final alongPan = <double>[];
     frameErrors.clear();
     final timingNumbers = <int>{};
@@ -418,11 +467,26 @@ class AlignmentRecorder {
         shown: shown.view,
       );
       drawn.add(error.error);
+      if (error.error > 1 && over.length < 10) {
+        over.add({
+          't': (lastBuild.time * 1000).round() / 1000,
+          'error': (error.error * 100).round() / 100,
+          'raster_only': build == null,
+          'shown': shown.id,
+          if (alignmentChildren) 'chosen': lastBuild.chosen,
+        });
+      }
       final center = error.center;
+      // With the overlays as children, the lag and the overshoot ahead are
+      // measured against the live camera (design D129).
+      final live = alignmentChildren
+          ? alignmentError(target: lastBuild.live, shown: shown.view).center
+          : center;
+      if (alignmentChildren) lags.add(live.distance);
       frameErrors.add((
         time: lastBuild.time,
         error: error.error,
-        centerDx: center.dx,
+        centerDx: live.dx,
       ));
       // The pans move east or west at bearing 0. A map behind the overlays
       // draws their center coordinate on the side the camera moves to.
@@ -445,7 +509,10 @@ class AlignmentRecorder {
       // Each display event is a new map frame that Flutter took.
       'map_fps': displays.length / (duration.inMicroseconds / 1e6),
       'display_events_outside_raster': displaysOutsideRaster,
+      'frames_over_1px': drawn.where((e) => e > 1).length,
+      if (alignmentChildren) 'first_frames_over_1px': over,
       'error_drawn_px': percentiles(drawn),
+      if (alignmentChildren) 'lag_px': percentiles(lags),
       if (pan)
         'offset_along_pan_px': alongPan.isEmpty
             ? null
@@ -497,18 +564,23 @@ class AlignmentBenchmark {
     SchedulerBinding.instance.addPersistentFrameCallback((_) {
       final r = _recorder;
       if (r == null || !r.recording) return;
-      final target = viewCameraOf(mapController.camera);
+      final live = viewCameraOf(mapController.camera);
+      final target = alignmentChildren && lastChildCamera != null
+          ? viewCameraOf(lastChildCamera!)
+          : live;
       final now = SchedulerBinding.instance.currentSystemFrameTimeStamp;
       final start = r.start ??= now;
       final previous = r.lastTarget;
-      r.lastTarget = target;
+      r.lastTarget = live;
       r.builds[PlatformDispatcher.instance.frameData.frameNumber] = _Build(
         target,
+        live,
         (now - start).inMicroseconds / 1e6,
         previous == null
             ? 0
-            : _wrapDegrees(target.camera.longitude - previous.camera.longitude)
+            : _wrapDegrees(live.camera.longitude - previous.camera.longitude)
                   .sign,
+        alignmentChildren ? lastChildFrameId : null,
       );
     });
 
@@ -524,7 +596,7 @@ class AlignmentBenchmark {
                 p,
           ];
     stdout.writeln(
-      'ALIGNMENT_CONDITIONS ${jsonEncode({'mode': mode.label, 'platform': Platform.operatingSystem, 'flutter_map': flutterMapVersion, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
+      'ALIGNMENT_CONDITIONS ${jsonEncode({'mode': mode.label, 'children': alignmentChildren, 'platform': Platform.operatingSystem, 'flutter_map': flutterMapVersion, 'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
           '${mapController.camera.nonRotatedSize.height.round()}', 'phase_s': alignmentPhaseDuration.inSeconds, 'copy_free': copyFree, 'thermal_state': thermalStateForTesting()})}',
     );
 
@@ -540,6 +612,7 @@ class AlignmentBenchmark {
       await _waitForIdle(alignmentVideo ? short : const Duration(seconds: 10));
       stdout.writeln('alignment benchmark: phase ${phase.name}');
       final duration = phase.duration ?? alignmentPhaseDuration;
+      final statsBefore = controller.stats();
       final initial = controller.displayedFrame;
       final recorder = _recorder =
           AlignmentRecorder(
@@ -555,6 +628,7 @@ class AlignmentBenchmark {
             ..collectingTimings = true;
       await _move(phase, duration);
       recorder.recording = false;
+      final statsAfter = controller.stats();
       // FrameTimings arrive in batches, up to about 1 s after the frame.
       await Future<void>.delayed(const Duration(milliseconds: 1500));
       recorder.collectingTimings = false;
@@ -570,6 +644,7 @@ class AlignmentBenchmark {
       stdout.writeln(
         'ALIGNMENT_RESULT ${jsonEncode({
           'mode': mode.label,
+          'children': alignmentChildren,
           'phase': phase.name,
           'kind': phase.kind,
           'speed': phase.speed,
@@ -584,6 +659,7 @@ class AlignmentBenchmark {
           'viewport': '${mapController.camera.nonRotatedSize.width.round()}x'
               '${mapController.camera.nonRotatedSize.height.round()}',
           ...result,
+          'map_stats': _statsDelta(statsBefore, statsAfter, duration),
           if (overshoot != null) ...{'motion_changes': overshoot.length, 'overshoot_px': percentiles(overshoot), 'overshoot_ahead_px': percentiles(ahead!)},
           'thermal_state_end': thermalStateForTesting(),
         })}',
@@ -630,6 +706,37 @@ class AlignmentBenchmark {
 
     SchedulerBinding.instance.scheduleFrameCallback(tick);
     return done.future;
+  }
+
+  /// The map thread's counters over a phase of [duration] (task 5.3 of the
+  /// layer-children-alignment change): the share of rendered frames that
+  /// Flutter never displayed, skipped renders per second, and the most
+  /// display slots in use at once since the map was created.
+  static Map<String, Object> _statsDelta(
+    MapTextureStats before,
+    MapTextureStats after,
+    Duration duration,
+  ) {
+    final seconds = duration.inMicroseconds / 1e6;
+    final rendered = after.renderedFrames - before.renderedFrames;
+    final displayed = after.presentedFrames - before.presentedFrames;
+    double r(double v) => (v * 1000).round() / 1000;
+    return {
+      'rendered': rendered,
+      'displayed': displayed,
+      'undisplayed_share': rendered == 0 ? 0 : r(1 - displayed / rendered),
+      'skipped_renders_per_s':
+          r((after.skippedRenders - before.skippedRenders) / seconds),
+      'waits_for_display': after.waitsForDisplay - before.waitsForDisplay,
+      'render_ahead_frames': after.renderAheadFrames - before.renderAheadFrames,
+      'render_update_avg_ms': after.renderUpdateCount == before.renderUpdateCount
+          ? 0
+          : r((after.renderUpdateTotal - before.renderUpdateTotal)
+                    .inMicroseconds /
+                1000 /
+                (after.renderUpdateCount - before.renderUpdateCount)),
+      'max_slots_in_use': after.maxSlotsInUse,
+    };
   }
 
   /// [degrees] moved into [-180, 180) by whole turns.

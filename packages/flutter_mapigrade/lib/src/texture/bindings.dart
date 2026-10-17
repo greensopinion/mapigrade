@@ -15,6 +15,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
+const int mapTextureNotSelected = 1;
 const int mapTextureOk = 0;
 const int mapTextureErrorDisposed = -1;
 const int mapTextureErrorInvalidArgument = -2;
@@ -25,6 +26,7 @@ const int mapTextureEventLoadingFailed = 1;
 const int mapTextureEventRenderError = 2;
 const int mapTextureEventIdle = 3;
 const int mapTextureEventFrameDisplayed = 4;
+const int mapTextureEventFrameReady = 5;
 
 final class MapTextureEventStruct extends Struct {
   @Int64()
@@ -49,6 +51,10 @@ final class MapTextureEventStruct extends Struct {
   external double scaleFactor;
   @Int64()
   external int displayTimeUs;
+  @Int32()
+  external int slot;
+  @Int64()
+  external int seq;
   external Pointer<Utf8> message;
 }
 
@@ -97,6 +103,8 @@ final class MapTextureStatsStruct extends Struct {
   external int renderAheadFrames;
   @Int64()
   external int intervalWaits;
+  @Int64()
+  external int maxSlotsInUse;
 }
 
 typedef MapTextureEventCallback = Void Function(
@@ -130,8 +138,13 @@ external void mapTextureStringFree(Pointer<Utf8> string);
 @Native<Int32 Function(Int64)>(symbol: 'map_texture_set_maximum_cache_size')
 external int mapTextureSetMaximumCacheSize(int bytes);
 
-@Native<Int64 Function(Int64)>(symbol: 'map_texture_texture_id')
-external int mapTextureTextureId(int handle);
+@Native<Int32 Function(Int64, Pointer<Int64>, Int32)>(
+  symbol: 'map_texture_texture_ids',
+)
+external int mapTextureTextureIds(int handle, Pointer<Int64> outIds, int capacity);
+
+@Native<Int32 Function(Int64, Int32, Int64)>(symbol: 'map_texture_select')
+external int mapTextureSelect(int handle, int slot, int frameId);
 
 @Native<Int32 Function(Int64, Pointer<Utf8>)>(
   symbol: 'map_texture_load_style_url',
@@ -143,7 +156,7 @@ external int mapTextureLoadStyleUrl(int handle, Pointer<Utf8> url);
 )
 external int mapTextureLoadStyleJson(int handle, Pointer<Utf8> json);
 
-@Native<Int32 Function(Int64, Double, Double, Double, Double)>(
+@Native<Int32 Function(Int64, Double, Double, Double, Double, Int64)>(
   symbol: 'map_texture_set_camera',
 )
 external int mapTextureSetCamera(
@@ -152,6 +165,7 @@ external int mapTextureSetCamera(
   double longitude,
   double zoom,
   double bearing,
+  int seq,
 );
 
 @Native<Int32 Function(Int64, Double, Double, Double)>(

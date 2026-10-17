@@ -8,19 +8,27 @@ Displays a [MapLibre Native](https://github.com/maplibre/maplibre-native) map as
 
 ## Usage
 
-Place a `MapigradeLayer` first among the children of a `FlutterMap`:
+Place a `MapigradeLayer` first among the children of a `FlutterMap`, and place overlay layers such as markers in the layer's own `children`:
 
 ```dart
 FlutterMap(
   options: const MapOptions(initialCenter: LatLng(49.25, -123.1)),
   children: [
-    MapigradeLayer(styleUrl: 'https://tiles.openfreemap.org/styles/liberty'),
-    MarkerLayer(markers: [
-      Marker(point: const LatLng(49.25, -123.1), child: const Icon(Icons.place)),
-    ]),
+    MapigradeLayer(
+      styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+      children: [
+        MarkerLayer(markers: [
+          Marker(point: const LatLng(49.25, -123.1), child: const Icon(Icons.place)),
+        ]),
+      ],
+    ),
   ],
 )
 ```
+
+MapLibre renders the map on its own thread, so while the camera moves, for example during a pan or a zoom, the displayed map lags the `flutter_map` camera by one to two frames. Layers placed after `MapigradeLayer` among the `FlutterMap` children follow the camera without that lag, so they shift against the map while it moves. To keep overlay layers such as a `MarkerLayer` or a `PolylineLayer` aligned with the map, place them in the layer's own `children`, as in the example, instead of the `FlutterMap` children.
+
+Place widgets that don't move with the map, such as zoom buttons or a scale bar, among the `FlutterMap` children after the layer. On Android the layer draws its own `children` at the live camera, so there they shift against the map as the layers after it do.
 
 Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a different one.
 
@@ -67,7 +75,8 @@ android {
 
 ## Options
 
-- `alignment`: while the camera moves, the default `LayerAlignment.prediction()` keeps the map within about one frame of the overlays; `LayerAlignment.none` within about two.
+- `children`: layers drawn above the map at the camera of the displayed map frame (see Usage).
+- `alignment`: while the camera moves, the default `LayerAlignment.prediction()` keeps the map within about one frame of the live camera, and so of the layers placed after it; `LayerAlignment.none` within about two. The layer's `children` stay on the map with either.
 - `onError`: receives each `LayerException`; when null, failures go to `FlutterError.reportError`.
 - `MapigradeLayer.maximumCacheSizeBytes`: the tile cache's maximum size, 50 MiB by default, for maps created afterwards. Each map evicts from the shared cache file to its own maximum size; after a reduction, the cache reaches the new maximum size as the map stores new tiles. Freshness follows the server's cache headers.
 

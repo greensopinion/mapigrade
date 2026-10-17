@@ -12,3 +12,7 @@ PRODUCT_BUNDLE_IDENTIFIER = com.greensopinion.flutterMapigradeExample
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.greensopinion. All rights reserved.
+
+// MapLibre Native FFI is built for arm64 only (macos-arm64-metal in
+// scripts/maplibre_ffi.lock), so the app is arm64 only.
+ARCHS = arm64

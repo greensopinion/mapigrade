@@ -116,7 +116,8 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     return !CheckException(env, "SurfaceProducer.id");
   }
 
-  int64_t texture_id() const override { return texture_id_; }
+  // One display slot (design D128).
+  int64_t texture_id(int) const override { return texture_id_; }
 
   // Main thread. A new physical size makes Flutter's producer create buffers of
   // that size behind a new Surface, which replaces the window on the map

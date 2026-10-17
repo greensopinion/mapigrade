@@ -89,7 +89,10 @@ void main() {
   testWidgets('create and dispose', (tester) async {
     final controller =
         MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
-    expect(controller.textureId, greaterThanOrEqualTo(0));
+    // One texture per display slot: four on macOS and iOS, one on Android.
+    expect(controller.textureIds, hasLength(Platform.isAndroid ? 1 : 4));
+    expect(controller.textureIds, everyElement(greaterThanOrEqualTo(0)));
+    expect(controller.textureIds.toSet(), hasLength(controller.textureIds.length));
     controller.dispose();
     expect(controller.isDisposed, isTrue);
   });
@@ -810,4 +813,163 @@ void main() {
     await pumpUntil(() => status() == 'Status: idle', 'second style idle');
     expect(find.byKey(const Key('error')), findsNothing);
   });
+
+  // Design D123: the texture of the chosen slot is marked available
+  // synchronously, so the Flutter frame displays the frame Dart chose.
+  testWidgets('a selected frame is displayed', (tester) async {
+    if (skipOnAndroid('Dart chooses no frame on Android')) return;
+    final controller = MapTextureController.create(
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+    controllers.add(controller);
+    final log = <_SlotEntry>[];
+    final displayed = controller.frames
+        .listen((f) => log.add(_SlotEntry(selected: false, frame: f)));
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Center(
+        child: SizedBox(
+            width: 400,
+            height: 300,
+            child: _SelectingView(controller: controller, log: log)),
+      ),
+    ));
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await loaded;
+    for (var i = 0; i < 30; i++) {
+      controller.setCamera(MapCamera(latitude: 10, longitude: i * 0.2, zoom: 4));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await displayed.cancel();
+    final selectedIds = {
+      for (final e in log)
+        if (e.selected) e.frame.frameId,
+    };
+    final displayedFrames = [
+      for (final e in log)
+        if (!e.selected) e.frame,
+    ];
+    debugPrint('select: ${selectedIds.length} frames selected, '
+        '${displayedFrames.length} displayed; ${controller.stats()}');
+    expect(displayedFrames, isNotEmpty);
+    for (final frame in displayedFrames) {
+      expect(selectedIds, contains(frame.frameId),
+          reason: 'displayed $frame was never selected');
+    }
+    // The frame selected last is the frame displayed last.
+    final lastSelected = log.lastWhere((e) => e.selected).frame;
+    expect(displayedFrames.last.frameId, lastSelected.frameId);
+    expect(displayedFrames.last.slot, lastSelected.slot);
+    expect(displayedFrames.last.seq, lastSelected.seq);
+  });
+
+  // Design D126: during a resize the texture keeps showing the frame Dart
+  // chose last, until Dart chooses a frame of the new size.
+  testWidgets('resize keeps the selected frame until a new-size selection',
+      (tester) async {
+    if (skipOnAndroid('Dart chooses no frame on Android')) return;
+    final controller = MapTextureController.create(
+        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+    controllers.add(controller);
+    final log = <_SlotEntry>[];
+    final displayed = controller.frames
+        .listen((f) => log.add(_SlotEntry(selected: false, frame: f)));
+    // Widths up to 400 fit every screen the tests run on.
+    final size = ValueNotifier(const Size(200, 300));
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ValueListenableBuilder<Size>(
+          valueListenable: size,
+          builder: (context, s, _) => SizedBox(
+              width: s.width,
+              height: s.height,
+              child: _SelectingView(controller: controller, log: log)),
+        ),
+      ),
+    ));
+    final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await loaded;
+    final ratio = tester.view.devicePixelRatio;
+    for (var round = 0; round < 5; round++) {
+      final oldWidth = (size.value.width * ratio).roundToDouble();
+      if (controller.displayedFrame?.physicalSize.width != oldWidth) {
+        await waitFor<FrameCamera>(
+            controller.frames, (f) => f.physicalSize.width == oldWidth);
+      }
+      final start = log.length;
+      size.value = Size(size.value.width + 40, 300);
+      final newWidth = (size.value.width * ratio).roundToDouble();
+      final newFrame = waitFor<FrameCamera>(
+          controller.frames, (f) => f.physicalSize.width == newWidth);
+      await tester.pump();
+      await newFrame;
+      final entries = log.sublist(start);
+      final firstNew = entries.indexWhere(
+          (e) => e.selected && e.frame.physicalSize.width == newWidth);
+      expect(firstNew, greaterThanOrEqualTo(0));
+      for (final e in entries.take(firstNew)) {
+        if (e.selected) continue;
+        expect(e.frame.physicalSize.width, oldWidth,
+            reason: 'round $round: displayed ${e.frame} before the first '
+                'selection of a ${newWidth}px frame');
+      }
+    }
+    await displayed.cancel();
+  });
+}
+
+/// A selection or a display, in the order the test saw them.
+class _SlotEntry {
+  _SlotEntry({required this.selected, required this.frame});
+  final bool selected;
+  final FrameCamera frame;
+}
+
+/// Chooses the newest ready frame in each build, as the layer does, displays
+/// the slot of the frame selected last, and logs each recorded selection to
+/// [log].
+class _SelectingView extends StatefulWidget {
+  const _SelectingView({required this.controller, required this.log});
+  final MapTextureController controller;
+  final List<_SlotEntry> log;
+
+  @override
+  State<_SelectingView> createState() => _SelectingViewState();
+}
+
+class _SelectingViewState extends State<_SelectingView> {
+  StreamSubscription<FrameCamera>? _ready;
+
+  @override
+  void initState() {
+    super.initState();
+    _ready = widget.controller.readyFrames.listen((_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _ready?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final ready = controller.readyFrame;
+    // A frame the map replaced after reporting it is refused; the view then
+    // keeps the frame selected before.
+    if (ready != null &&
+        !controller.isDisposed &&
+        ready.frameId > (controller.selectedFrame?.frameId ?? 0) &&
+        controller.select(ready)) {
+      widget.log.add(_SlotEntry(selected: true, frame: ready));
+    }
+    return MapTextureView(
+        controller: controller, slot: controller.selectedFrame?.slot ?? 0);
+  }
 }

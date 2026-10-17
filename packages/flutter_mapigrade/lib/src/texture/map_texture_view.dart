@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import 'map_texture_controller.dart';
@@ -8,26 +10,88 @@ import 'map_texture_controller.dart';
 /// The widget sends its logical size and the device pixel ratio to the
 /// controller, so the map renders one pixel per physical pixel, and the
 /// display's refresh rate, which decides when the map renders ahead.
-class MapTextureView extends StatelessWidget {
+///
+/// With [slot], the view displays that display slot's texture, which the
+/// caller has chosen with [MapTextureController.select]. Without it, the view
+/// chooses the newest ready frame itself in each build and displays the slot
+/// of [MapTextureController.selectedFrame], and rebuilds when a frame is
+/// ready.
+class MapTextureView extends StatefulWidget {
   /// A view of the map of [controller].
-  const MapTextureView({super.key, required this.controller});
+  const MapTextureView({super.key, required this.controller, this.slot});
 
   /// The controller of the map that the view displays.
   final MapTextureController controller;
 
+  /// The display slot to show, an index into
+  /// [MapTextureController.textureIds], or null for the view to choose.
+  final int? slot;
+
+  @override
+  State<MapTextureView> createState() => _MapTextureViewState();
+}
+
+class _MapTextureViewState extends State<MapTextureView> {
+  StreamSubscription<FrameCamera>? _readyFrames;
+
+  @override
+  void initState() {
+    super.initState();
+    _listen();
+  }
+
+  @override
+  void didUpdateWidget(MapTextureView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.controller, oldWidget.controller) ||
+        (widget.slot == null) != (oldWidget.slot == null)) {
+      _readyFrames?.cancel();
+      _readyFrames = null;
+      _listen();
+    }
+  }
+
+  void _listen() {
+    if (widget.slot != null || widget.controller.isDisposed) return;
+    _readyFrames = widget.controller.readyFrames.listen(
+      (_) => setState(() {}),
+    );
+  }
+
+  @override
+  void dispose() {
+    _readyFrames?.cancel();
+    super.dispose();
+  }
+
+  // The slot that the view chooses: that of the newest ready frame, which it
+  // selects unless it selected it already, or if the map refuses the choice,
+  // that of the frame selected before.
+  int _chooseSlot(MapTextureController controller) {
+    final ready = controller.readyFrame;
+    if (ready != null &&
+        !controller.isDisposed &&
+        ready.frameId > (controller.selectedFrame?.frameId ?? 0)) {
+      controller.select(ready);
+    }
+    return controller.selectedFrame?.slot ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     if (!controller.isDisposed) {
       controller.setDisplayRefreshRate(View.of(context).display.refreshRate);
     }
+    final slot = widget.slot ?? _chooseSlot(controller);
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;
         if (size.isFinite && !size.isEmpty && !controller.isDisposed) {
           controller.resize(size, pixelRatio);
         }
-        return Texture(textureId: controller.textureId);
+        return Texture(textureId: controller.textureIds[slot]);
       },
     );
   }

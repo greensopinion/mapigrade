@@ -1,12 +1,20 @@
 // Widget tests for the layer when its map can't be created (design D67 of the
-// public-api change), its header rules (D80 of http-headers-and-assets) and
-// its metrics (D111 of layer-metrics).
+// public-api change), its header rules (D80 of http-headers-and-assets), its
+// metrics (D111 of layer-metrics), and its children (D125 and D127 of
+// layer-children-alignment).
 // The other scenarios need the native map and are integration tests in
 // packages/test_harness/integration_test/.
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera, MapEvent;
+import 'package:flutter_map/flutter_map.dart' as fm show MapCamera;
+// The layer's children read the camera through MapInheritedModel; the test
+// that builds it directly fails when a flutter_map release changes it.
+// ignore: implementation_imports
+import 'package:flutter_map/src/map/inherited_model.dart';
+import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
+import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
 import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
@@ -25,15 +33,48 @@ MapTextureController _failingCreate({
 
 // A controller without a native map.
 class _FakeController implements MapTextureController {
+  _FakeController({this.textureIds = const [1]});
+
   final _events = StreamController<MapEvent>.broadcast();
   final _frames = StreamController<FrameCamera>.broadcast();
+  final _readyFrames = StreamController<FrameCamera>.broadcast();
   bool _disposed = false;
 
   /// The counters that [stats] returns.
   MapTextureStats values = const MapTextureStats.forTesting();
 
+  /// The cameras passed to [setCamera], in order; the sequence number of
+  /// each is its index plus one.
+  final List<MapCamera> cameras = [];
+
+  /// The frames whose choice [select] recorded, in order.
+  final List<FrameCamera> selected = [];
+
+  /// The ids of the frames that [select] refuses, as the map does for a frame
+  /// it replaced.
+  final Set<int> refused = {};
+
   @override
-  int get textureId => 1;
+  final List<int> textureIds;
+  @override
+  FrameCamera? readyFrame;
+  @override
+  FrameCamera? get selectedFrame => selected.lastOrNull;
+  @override
+  Stream<FrameCamera> get readyFrames => _readyFrames.stream;
+
+  /// Reports [frame] as ready, as the native map does after a render.
+  void addReadyFrame(FrameCamera frame) {
+    readyFrame = frame;
+    _readyFrames.add(frame);
+  }
+
+  @override
+  bool select(FrameCamera frame) {
+    if (refused.contains(frame.frameId)) return false;
+    selected.add(frame);
+    return true;
+  }
   @override
   bool get isDisposed => _disposed;
   @override
@@ -45,7 +86,10 @@ class _FakeController implements MapTextureController {
   @override
   void loadStyleJson(String json) {}
   @override
-  void setCamera(MapCamera camera) {}
+  int setCamera(MapCamera camera) {
+    cameras.add(camera);
+    return cameras.length;
+  }
   @override
   void resize(Size logicalSize, double pixelRatio) {}
   @override
@@ -61,6 +105,7 @@ class _FakeController implements MapTextureController {
     _disposed = true;
     _events.close();
     _frames.close();
+    _readyFrames.close();
   }
 
   @override
@@ -346,6 +391,283 @@ void main() {
       expect(controllers, hasLength(1));
       expectValues(metrics, 4, 5, 20);
       expectValues(previous, 2, 3, 10);
+    });
+  });
+
+  group('children', () {
+    const center = LatLng(49.25, -123.1);
+    late _FakeController controller;
+    late MapController mapController;
+    // The cameras that each probe read in its last build.
+    late Map<String, fm.MapCamera> seen;
+    late List<(int?, fm.MapCamera)> childCameras;
+
+    setUp(() {
+      controller = _FakeController(textureIds: const [10, 11, 12, 13]);
+      mapController = MapController();
+      seen = {};
+      childCameras = [];
+    });
+
+    Widget probe(String name) => Builder(
+      builder: (context) {
+        seen[name] = fm.MapCamera.of(context);
+        return const SizedBox.shrink();
+      },
+    );
+
+    Widget map({
+      LayerAlignment alignment = LayerAlignment.none,
+      List<Widget>? children,
+      _FakeController? fake,
+    }) {
+      final layerController = fake ?? controller;
+      return MediaQuery(
+        data: const MediaQueryData(size: Size(800, 600)),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: FlutterMap(
+            mapController: mapController,
+            options: const MapOptions(initialCenter: center, initialZoom: 10),
+            children: [
+              MapTextureLayer(
+                styleUrl: 'https://example.com/style.json',
+                alignment: alignment,
+                createController:
+                    ({
+                      required double pixelRatio,
+                      required bool copyFree,
+                      required List<HttpHeaderRule> httpHeaders,
+                    }) => layerController,
+                onChildCamera: (id, camera) => childCameras.add((id, camera)),
+                children: children ?? [probe('child')],
+              ),
+              probe('sibling'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Reports a frame rendered with the camera of sequence number [seq] as
+    // ready in [slot].
+    Future<void> ready(
+      WidgetTester tester,
+      int frameId,
+      int slot,
+      int seq, [
+      _FakeController? fake,
+    ]) async {
+      final c = fake ?? controller;
+      final camera = c.cameras[seq - 1];
+      c.addReadyFrame(
+        FrameCamera(
+          frameId: frameId,
+          camera: camera,
+          physicalSize: const Size(800, 600),
+          scaleFactor: 1,
+          displayTime: null,
+          slot: slot,
+          seq: seq,
+        ),
+      );
+      // The stream delivers the event in a microtask after the first pump's
+      // frame; the layer's setState builds in the second.
+      await tester.pump();
+      await tester.pump();
+    }
+
+    int displayedTexture(WidgetTester tester) =>
+        tester.widget<Texture>(find.byType(Texture)).textureId;
+
+    testWidgets('get the camera of the chosen frame', (tester) async {
+      await tester.pumpWidget(map());
+      final first = mapController.camera;
+      expect(controller.cameras, hasLength(1));
+      await ready(tester, 1, 2, 1);
+      expect(controller.selected.single.frameId, 1);
+      expect(displayedTexture(tester), 12);
+      expect(seen['child'], same(first));
+      expect(childCameras.last, (1, first));
+
+      // The live camera moves; until a frame of it is ready, the children
+      // keep the camera of the chosen frame.
+      mapController.move(const LatLng(49.3, -123.0), 10);
+      await tester.pump();
+      expect(controller.cameras, hasLength(2));
+      final second = mapController.camera;
+      expect(seen['child'], same(first));
+      expect(seen['sibling'], same(second));
+      expect(displayedTexture(tester), 12);
+
+      await ready(tester, 2, 0, 2);
+      expect(seen['child'], same(second));
+      expect(displayedTexture(tester), 10);
+      expect(controller.selected.map((f) => f.frameId), [1, 2]);
+    });
+
+    testWidgets('keep the frame chosen before when the map refuses one', (
+      tester,
+    ) async {
+      await tester.pumpWidget(map());
+      final first = mapController.camera;
+      await ready(tester, 1, 2, 1);
+      mapController.move(const LatLng(49.3, -123.0), 10);
+      await tester.pump();
+      final second = mapController.camera;
+      // The map replaced frame 2 before the layer chose it.
+      controller.refused.add(2);
+      await ready(tester, 2, 0, 2);
+      expect(controller.selected.map((f) => f.frameId), [1]);
+      expect(seen['child'], same(first));
+      expect(childCameras.last, (1, first));
+      expect(displayedTexture(tester), 12);
+
+      await ready(tester, 3, 3, 2);
+      expect(controller.selected.map((f) => f.frameId), [1, 3]);
+      expect(seen['child'], same(second));
+      expect(displayedTexture(tester), 13);
+    });
+
+    testWidgets('get the predicted camera of the chosen frame', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        map(alignment: const LayerAlignment.prediction()),
+      );
+      // A steady pan, so that the predictor extrapolates.
+      for (var i = 1; i <= 6; i++) {
+        mapController.move(LatLng(49.25, -123.1 + i * 0.01), 10);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final seq = controller.cameras.length;
+      final live = mapController.camera;
+      final predicted = controller.cameras.last;
+      expect(viewCameraOf(live).camera.longitude, isNot(predicted.longitude));
+      await ready(tester, 1, 1, seq);
+      final child = seen['child']!;
+      expect(viewCameraOf(child), ViewCamera(predicted, live.nonRotatedSize));
+      expect(child.crs, live.crs);
+      expect(seen['sibling'], same(live));
+    });
+
+    testWidgets('get the live camera before the first frame', (tester) async {
+      await tester.pumpWidget(map());
+      expect(seen['child'], same(mapController.camera));
+      expect(childCameras.last, (null, mapController.camera));
+      expect(displayedTexture(tester), 10);
+      expect(controller.selected, isEmpty);
+    });
+
+    testWidgets('get the live camera with one texture id', (tester) async {
+      final fake = _FakeController();
+      await tester.pumpWidget(map(fake: fake));
+      await ready(tester, 1, 0, 1, fake);
+      mapController.move(const LatLng(49.3, -123.0), 10);
+      await tester.pump();
+      expect(fake.selected, isEmpty);
+      expect(seen['child'], same(mapController.camera));
+      expect(childCameras.last.$1, isNull);
+      expect(displayedTexture(tester), 1);
+    });
+
+    testWidgets("get flutter_map's controller and options", (tester) async {
+      MapController? childController;
+      MapOptions? childOptions;
+      MapOptions? siblingOptions;
+      await tester.pumpWidget(
+        map(
+          children: [
+            Builder(
+              builder: (context) {
+                childController = MapController.of(context);
+                childOptions = MapOptions.of(context);
+                return const SizedBox.shrink();
+              },
+            ),
+          ],
+        ),
+      );
+      siblingOptions = MapOptions.of(
+        tester.element(find.byType(MapTextureLayer)),
+      );
+      expect(childController, same(mapController));
+      expect(childOptions, same(siblingOptions));
+    });
+
+    testWidgets('fill the viewport above the map', (tester) async {
+      await tester.pumpWidget(
+        map(children: [const SizedBox.expand(key: _markerKey)]),
+      );
+      expect(tester.getSize(find.byKey(_markerKey)), const Size(800, 600));
+      expect(
+        tester.getSize(find.byType(MapTextureLayer)),
+        const Size(800, 600),
+      );
+    });
+
+    testWidgets('a polyline hit-tests where it is drawn', (tester) async {
+      final hits = LayerHitNotifier<String>(null);
+      const line = [LatLng(49.20, -123.1), LatLng(49.30, -123.1)];
+      await tester.pumpWidget(
+        map(
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.deferToChild,
+              onTap: () {},
+              child: PolylineLayer<String>(
+                hitNotifier: hits,
+                polylines: [
+                  Polyline(points: line, strokeWidth: 4, hitValue: 'line'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+      await ready(tester, 1, 1, 1);
+      final drawnAt = mapController.camera.latLngToScreenOffset(center);
+      // The live camera moves 200 px to the east; the polyline stays drawn
+      // at the camera of the chosen frame.
+      mapController.move(
+        mapController.camera.screenOffsetToLatLng(
+          mapController.camera.size.center(Offset.zero) + const Offset(200, 0),
+        ),
+        10,
+      );
+      await tester.pump();
+      final liveAt = mapController.camera.latLngToScreenOffset(center);
+      expect((liveAt - drawnAt).dx, closeTo(-200, 1));
+
+      await tester.tapAt(drawnAt);
+      expect(hits.value?.hitValues, ['line']);
+      hits.value = null;
+      await tester.tapAt(liveAt);
+      expect(hits.value?.hitValues ?? const <String>[], isEmpty);
+      // flutter_map's double-tap timer.
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('MapInheritedModel gives its camera to layers', (
+      tester,
+    ) async {
+      final camera = fm.MapCamera(
+        crs: const Epsg3857(),
+        center: center,
+        zoom: 10,
+        rotation: 0,
+        nonRotatedSize: const Size(800, 600),
+      );
+      const options = MapOptions();
+      final model = MapInheritedModel(
+        camera: camera,
+        controller: mapController,
+        options: options,
+        child: probe('model'),
+      );
+      await tester.pumpWidget(model);
+      expect(seen['model'], same(camera));
+      expect(model.data.options, same(options));
     });
   });
 }

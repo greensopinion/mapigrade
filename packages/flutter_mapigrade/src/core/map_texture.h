@@ -48,12 +48,15 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   ~MapTexture();
 
-  int64_t texture_id() const;
+  // The display slots and the Flutter texture id of each (design D122).
+  int slot_count() const;
+  int64_t texture_id(int slot) const;
 
   // Commands. Any thread; they queue work and wake the map thread.
   void LoadStyleUrl(std::string url);
   void LoadStyleJson(std::string json);
-  void SetCamera(const Camera& camera);
+  // `seq` is the camera's sequence number (design D125).
+  void SetCamera(const Camera& camera, int64_t seq);
   void Resize(const Viewport& viewport);
   // The display's refresh rate in Hz, or 0 if unknown (design D19).
   void SetDisplayRefreshRate(double hz);
@@ -88,11 +91,19 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // delivered.
   void Dispose();
 
-  // Flutter's raster thread, for a buffer target. Marks the latest frame as
-  // presented and returns its buffer, retained, through
-  // BufferRenderTarget::CopyBufferLocked. Reports a frame-displayed event with
-  // the display time when the frame is new.
-  void* Present();
+  // The platform thread, for a buffer target: Dart chose the frame
+  // `frame_id` in `slot` (design D123). If the slot still holds the frame,
+  // records the choice, marks the slot's texture available and returns true;
+  // otherwise returns false. Does nothing and returns true for a surface
+  // target.
+  bool Select(int slot, uint64_t frame_id);
+
+  // Flutter's raster thread, for a buffer target. Presents `slot` and returns
+  // its buffer, retained, through BufferRenderTarget::CopyBufferLocked, or
+  // the fallback if Dart hasn't chosen the slot's frame (design D126).
+  // Reports a frame-displayed event with the display time when the frame is
+  // new.
+  void* Present(int slot);
 
   map_texture_stats stats();
 
@@ -129,7 +140,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   bool RenderUpdate(int64_t start, bool* needs_repaint);
   // Map thread: the frame just rendered, with the camera it was rendered with.
   FrameInfo RenderedFrameInfo();
-  // Map thread: whether to render without waiting until Flutter has taken the
+  // Map thread: whether to render without waiting until Dart has chosen the
   // latest frame (design D19).
   bool RenderAhead();
   void MaybeNotifyAfterResize();
@@ -142,7 +153,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
                               const char* message);
 
   void Emit(int32_t type, const char* message = nullptr,
-            const FrameInfo* frame = nullptr, int64_t display_time_us = 0);
+            const FrameInfo* frame = nullptr, int64_t display_time_us = 0,
+            int slot = 0);
   void ReportStatus(const char* what, mln_status status);
   // ReportStatus() that also sets init_error_.
   void ReportInitStatus(const char* what, mln_status status);
@@ -192,18 +204,22 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   Viewport viewport_{};
   bool render_pending_ = false;
   uint64_t next_frame_id_ = 1;
+  // The sequence number of the camera applied last (design D125).
+  int64_t applied_seq_ = 0;
   // When to tell Flutter once more that a frame is available after the last
   // resize (steady clock, ns), or 0 for not pending.
   int64_t notify_after_resize_at_ns_ = 0;
-  // Set when a render was deferred because Flutter hadn't taken the latest
-  // frame or no buffer was free; Present() wakes the map thread.
+  // Set when a render was deferred because Dart hadn't chosen the latest
+  // frame or no slot was free; Select() and Present() wake the map thread.
   std::atomic<bool> waiting_for_buffer_{false};
-  // Timing stats (steady clock, ns): when the last frame was published and
-  // when Flutter last took a frame, written by different threads.
+  // Timing stats (steady clock, ns): when the last frame was published, when
+  // Flutter last took a frame, and when Dart last chose a frame, written by
+  // different threads.
   std::atomic<int64_t> published_at_ns_{0};
   std::atomic<int64_t> presented_at_ns_{0};
+  std::atomic<int64_t> selected_at_ns_{0};
   // Map thread: when the last render_update started, and whether the next
-  // render waited for Flutter to take the latest frame.
+  // render waited for Dart to choose the latest frame.
   int64_t last_render_start_ns_ = 0;
   // Map thread: the smoothed time of render_update plus the copy, and whether
   // the map currently renders ahead (design D19).
@@ -234,8 +250,8 @@ void ReduceAllMemoryUse();
 // map_texture_api.cpp.
 int64_t TotalRenderedFrames();
 
-// For tests and measurements: when maps render without waiting until Flutter
-// has taken the latest frame. kAuto (the default) renders ahead while a frame
+// For tests and measurements: when maps render without waiting until Dart has
+// chosen the latest frame. kAuto (the default) renders ahead while a frame
 // takes longer than a display refresh interval (design D19).
 enum class RenderAheadMode { kAuto, kNever, kAlways };
 void SetRenderAheadModeForTesting(RenderAheadMode mode);

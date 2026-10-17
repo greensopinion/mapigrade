@@ -3,7 +3,8 @@
 // Style loads, resizes, memory reduction, target tasks and dispose go into an
 // ordered queue and are never dropped or reordered. Consecutive resizes are coalesced so that a window drag
 // doesn't allocate a buffer set per intermediate size (D7). Camera updates go
-// into a single slot where the latest update wins.
+// into a single slot where the latest update wins, with its sequence number
+// (D125).
 //
 // All methods are safe to call from any thread.
 #pragma once
@@ -25,6 +26,13 @@ struct Camera {
   double bearing = 0;
 
   bool operator==(const Camera&) const = default;
+};
+
+// A camera from Dart and the sequence number Dart assigned to it (design
+// D125).
+struct CameraUpdate {
+  Camera camera;
+  int64_t seq = 0;
 };
 
 struct Viewport {
@@ -91,14 +99,14 @@ class CommandQueue {
     return std::exchange(commands_, {});
   }
 
-  void SetCamera(const Camera& camera) {
+  void SetCamera(const Camera& camera, int64_t seq) {
     std::lock_guard lock(mutex_);
-    camera_ = camera;
+    camera_ = CameraUpdate{camera, seq};
   }
 
   // Returns the camera set since the last call, or nothing if no camera was
   // set since then.
-  std::optional<Camera> TakeCamera() {
+  std::optional<CameraUpdate> TakeCamera() {
     std::lock_guard lock(mutex_);
     return std::exchange(camera_, std::nullopt);
   }
@@ -106,7 +114,7 @@ class CommandQueue {
  private:
   std::mutex mutex_;
   std::deque<Command> commands_;
-  std::optional<Camera> camera_;
+  std::optional<CameraUpdate> camera_;
 };
 
 }  // namespace map_texture

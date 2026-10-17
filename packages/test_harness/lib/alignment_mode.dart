@@ -2,7 +2,8 @@
 // (design D34 of the camera-prediction change, D45 of the
 // camera-prediction-default change, D50 of the remove-camera-transform
 // change): no prediction, or camera prediction with a lead of 1, 2 or 3
-// refresh intervals.
+// refresh intervals; and whether the overlays are children of the layer
+// (design D129 of the layer-children-alignment change).
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
 enum AlignmentMode {
@@ -27,3 +28,8 @@ enum AlignmentMode {
     return null;
   }
 }
+
+/// Whether the overlays are children of the layer, which draws them at the
+/// camera of the displayed map frame, instead of layers placed after it:
+/// `--dart-define=ALIGNMENT_CHILDREN=1`.
+const alignmentChildren = int.fromEnvironment('ALIGNMENT_CHILDREN') == 1;

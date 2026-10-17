@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
+import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -16,6 +17,39 @@ Matcher near(Offset expected, [double tolerance = 1e-6]) =>
     );
 
 void main() {
+  group('the built flutter_map camera converts back to the camera', () {
+    for (final (lat, lon, zoom, bearing) in const [
+      (51.5, -0.12, 13.0, 0.0),
+      (48.85, 2.35, 10.5, 30.0),
+      (-33.9, 179.9, 8.0, -30.0),
+      (-33.9, -180.0, 8.0, 30.0),
+      (12.0, 179.999, 4.25, 0.0),
+    ]) {
+      test('lat $lat lon $lon zoom $zoom bearing $bearing', () {
+        final live = fm.MapCamera(
+          crs: const fm.Epsg3857(),
+          center: const LatLng(0, 0),
+          zoom: 3,
+          rotation: 0,
+          nonRotatedSize: viewport,
+          minZoom: 2,
+          maxZoom: 18,
+        );
+        final camera = MapCamera(
+          latitude: lat,
+          longitude: lon,
+          zoom: zoom,
+          bearing: bearing,
+        );
+        final built = flutterMapCameraOf(camera, live);
+        expect(viewCameraOf(built), ViewCamera(camera, viewport));
+        expect(built.crs, live.crs);
+        expect(built.minZoom, 2);
+        expect(built.maxZoom, 18);
+      });
+    }
+  });
+
   group('the converted camera places coordinates where flutter_map does', () {
     for (final (lat, lon, zoom, rotation) in const [
       (51.5, -0.12, 14.0, 0.0),

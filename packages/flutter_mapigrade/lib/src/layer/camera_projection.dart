@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart';
 
 import '../texture/map_texture_controller.dart';
 
@@ -61,6 +62,22 @@ ViewCamera viewCameraOf(fm.MapCamera camera) => ViewCamera(
   ),
   camera.nonRotatedSize,
 );
+
+/// The `flutter_map` camera that [viewCameraOf] converts to [camera]: its
+/// inverse, with the CRS, viewport size and zoom limits of [live] (design D125
+/// of the layer-children-alignment change). The layer builds it for a
+/// predicted camera, to draw its children at the camera of the map frame
+/// rendered with it.
+fm.MapCamera flutterMapCameraOf(MapCamera camera, fm.MapCamera live) =>
+    fm.MapCamera(
+      crs: live.crs,
+      center: LatLng(camera.latitude, camera.longitude),
+      zoom: camera.zoom + 1,
+      rotation: -camera.bearing,
+      nonRotatedSize: live.nonRotatedSize,
+      minZoom: live.minZoom,
+      maxZoom: live.maxZoom,
+    );
 
 /// Web Mercator coordinates of a latitude and longitude, normalized so that
 /// the world is [0, 1) in both directions, with y increasing southwards.

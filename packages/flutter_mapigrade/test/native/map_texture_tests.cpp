@@ -1,7 +1,9 @@
 // Tests of MapTexture with a surface render target (design D52), its pacing by
-// display refresh interval (D53), the maximum size of the tile cache
-// (D61-D63), and the HTTP header rules (D81, D82), on the fake FFI in
+// display refresh interval (D53), the display slots of a buffer target
+// (D122-D126), camera sequence numbers (D125), the maximum size of the tile
+// cache (D61-D63), and the HTTP header rules (D81, D82), on the fake FFI in
 // fake_mln.cpp.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -9,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,6 +21,7 @@
 #include "map_texture_api.h"
 #include "render_target.h"
 
+using map_texture::BufferRenderTarget;
 using map_texture::MapTexture;
 using map_texture::SurfaceRenderTarget;
 using map_texture::TargetSize;
@@ -39,7 +43,7 @@ constexpr int64_t kSessionHandle = 1'000'000;
 
 class FakeSurfaceTarget : public SurfaceRenderTarget {
  public:
-  int64_t texture_id() const override { return 42; }
+  int64_t texture_id(int) const override { return 42; }
 
   mln_status Attach(mln_map, const TargetSize& size,
                     mln_render_session* out_session) override {
@@ -75,8 +79,65 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
   TargetSize attached_size{};
 };
 
+// A copy-free buffer target with four slots. Its buffers are the slot
+// indexes plus one; the fallback is 100.
+class FakeBufferTarget : public BufferRenderTarget {
+ public:
+  int slot_count() const override { return map_texture::kBufferCount; }
+  int64_t texture_id(int slot) const override { return 50 + slot; }
+
+  mln_status Attach(mln_map, const TargetSize&,
+                    mln_render_session* out_session) override {
+    *out_session = kSessionHandle;
+    return MLN_STATUS_OK;
+  }
+  mln_status SetTarget(mln_render_session, const TargetSize&) override {
+    return MLN_STATUS_OK;
+  }
+  void Unregister() override {}
+
+  bool PrepareBuffers(const TargetSize&) override { return true; }
+  void SwapBuffersLocked(int chosen) override {
+    has_fallback = chosen >= 0 || has_fallback;
+  }
+  void* CopyBufferLocked(int index) override {
+    if (index >= 0) return reinterpret_cast<void*>(intptr_t{index + 1});
+    return has_fallback ? reinterpret_cast<void*>(intptr_t{100}) : nullptr;
+  }
+  void ReleaseFallbackLocked() override { has_fallback = false; }
+  bool CopyToBuffer(int) override { return true; }
+  bool RendersIntoBuffers() const override { return true; }
+
+  // Map thread, before each render: counts renders into a slot that the test
+  // records as held by Dart.
+  mln_status SelectBuffer(mln_render_session, int index) override {
+    std::lock_guard lock(mutex);
+    if (held.count(index) > 0) ++renders_into_held;
+    return MLN_STATUS_OK;
+  }
+
+  void FrameAvailable(int slot) override {
+    std::lock_guard lock(mutex);
+    available.push_back(slot);
+  }
+  void FrameAvailable() override {}
+  void ReleaseBuffersLocked() override {}
+
+  std::mutex mutex;
+  // The slots the test has chosen and not seen freed.
+  std::set<int> held;
+  int renders_into_held = 0;
+  // The slots marked available by Select, in order.
+  std::vector<int> available;
+  bool has_fallback = false;
+};
+
+// Whether the next map gets a buffer target instead of a surface target.
+bool use_buffer_target = false;
+
 // The target and owner of the last map created.
 FakeSurfaceTarget* last_target = nullptr;
+FakeBufferTarget* last_buffer_target = nullptr;
 std::weak_ptr<MapTexture> last_owner;
 
 // Events received through the callback.
@@ -87,6 +148,8 @@ struct Event {
   int32_t physical_width;
   int64_t display_time_us;
   std::string message;
+  int32_t slot;
+  int64_t seq;
 };
 std::mutex events_mutex;
 std::vector<Event> events;
@@ -96,7 +159,8 @@ void OnEvent(map_texture_event* event) {
     std::lock_guard lock(events_mutex);
     events.push_back({event->type, event->frame_id, event->zoom,
                       event->physical_width, event->display_time_us,
-                      event->message == nullptr ? "" : event->message});
+                      event->message == nullptr ? "" : event->message,
+                      event->slot, event->seq});
   }
   map_texture_event_free(event);
 }
@@ -113,13 +177,21 @@ std::vector<std::string> LoadFailures() {
   return messages;
 }
 
-std::vector<Event> FrameEvents() {
+std::vector<Event> EventsOfType(int32_t type) {
   std::lock_guard lock(events_mutex);
   std::vector<Event> frames;
   for (const auto& event : events) {
-    if (event.type == MAP_TEXTURE_EVENT_FRAME_DISPLAYED) frames.push_back(event);
+    if (event.type == type) frames.push_back(event);
   }
   return frames;
+}
+
+std::vector<Event> FrameEvents() {
+  return EventsOfType(MAP_TEXTURE_EVENT_FRAME_DISPLAYED);
+}
+
+std::vector<Event> ReadyEvents() {
+  return EventsOfType(MAP_TEXTURE_EVENT_FRAME_READY);
 }
 
 // Waits up to two seconds for `condition`.
@@ -174,7 +246,7 @@ int64_t CreateMap() {
 
 void SurfaceFrameIsReportedWithoutDisplayTime() {
   int64_t handle = CreateMap();
-  map_texture_set_camera(handle, 51.5, -0.1, 12.5, 0);
+  map_texture_set_camera(handle, 51.5, -0.1, 12.5, 0, 1);
   map_texture_resize(handle, 200, 100, 2.0);
   CHECK(last_target->will_resize_width.load() == 400);
   CHECK(WaitFor([] { return !FrameEvents().empty(); }));
@@ -185,7 +257,7 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
   CHECK(last_target->attached_size.physical_height == 200);
   // A surface target has no display buffers for Flutter to take.
   auto owner = last_owner.lock();
-  CHECK(owner->Present() == nullptr);
+  CHECK(owner->Present(0) == nullptr);
   auto stats = Stats(handle);
   CHECK(stats.rendered_frames == 1);
   CHECK(stats.presented_frames == 1);
@@ -297,7 +369,7 @@ void NoRenderWhilePaused() {
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
   map_texture_set_paused_for_testing(1);
-  map_texture_set_camera(handle, 0, 0, 3, 0);
+  map_texture_set_camera(handle, 0, 0, 3, 0, 1);
   Sleep(300);
   CHECK(fake_mln::RenderCount() == 1);
   CHECK(Stats(handle).paused_renders > 0);
@@ -307,6 +379,241 @@ void NoRenderWhilePaused() {
     auto frames = FrameEvents();
     return frames.size() == 2 && frames[1].zoom == 3;
   }));
+  map_texture_dispose(handle);
+}
+
+void FrameReportsLatestCameraSequenceNumber() {
+  int64_t handle = CreateMap();
+  map_texture_set_camera(handle, 0, 0, 1, 0, 1);
+  map_texture_set_camera(handle, 0, 0, 2, 0, 2);
+  map_texture_set_camera(handle, 0, 0, 3, 0, 3);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return FrameEvents().size() == 1; }));
+  CHECK(FrameEvents()[0].seq == 3);
+  CHECK(FrameEvents()[0].zoom == 3);
+  // A frame after a tile load, without a camera change, reports the last
+  // applied number.
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return FrameEvents().size() == 2; }));
+  CHECK(FrameEvents()[1].seq == 3);
+  map_texture_dispose(handle);
+}
+
+int64_t CreateBufferMap() {
+  use_buffer_target = true;
+  int64_t handle = CreateMap();
+  use_buffer_target = false;
+  return handle;
+}
+
+// Dart's part: chooses the frame of `ready` as the test's model records it,
+// then selects it.
+void Choose(int64_t handle, const Event& ready) {
+  {
+    std::lock_guard lock(last_buffer_target->mutex);
+    last_buffer_target->held.insert(ready.slot);
+  }
+  CHECK(map_texture_select(handle, ready.slot, ready.frame_id) ==
+        MAP_TEXTURE_OK);
+}
+
+// The raster thread's part: presents `slot`, then removes from the model the
+// slots chosen before it, which `chosen_order` lists in the order chosen. The
+// model's lock is held across both, so that the map thread doesn't render
+// into a slot that Present() freed before the model has removed it.
+void PresentSlot(MapTexture& owner, int slot, std::vector<int>& chosen_order) {
+  std::lock_guard lock(last_buffer_target->mutex);
+  owner.Present(slot);
+  for (size_t i = 0; i < chosen_order.size(); ++i) {
+    if (chosen_order[i] != slot) continue;
+    for (size_t j = 0; j < i; ++j) {
+      if (std::find(chosen_order.begin() + i, chosen_order.end(),
+                    chosen_order[j]) == chosen_order.end()) {
+        last_buffer_target->held.erase(chosen_order[j]);
+      }
+    }
+    chosen_order.erase(chosen_order.begin(), chosen_order.begin() + i);
+    break;
+  }
+}
+
+void ReadyEventPrecedesDisplayedEvent() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  map_texture_set_camera(handle, 0, 0, 4, 0, 7);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
+  // Not displayed until Dart chooses the frame.
+  CHECK(owner->Present(0) == nullptr);
+  CHECK(FrameEvents().empty());
+  auto ready = ReadyEvents()[0];
+  CHECK(ready.seq == 7);
+  CHECK(ready.zoom == 4);
+  CHECK(ready.display_time_us == 0);
+  Choose(handle, ready);
+  {
+    std::lock_guard lock(last_buffer_target->mutex);
+    CHECK((last_buffer_target->available == std::vector<int>{ready.slot}));
+  }
+  CHECK(owner->Present(ready.slot) ==
+        reinterpret_cast<void*>(intptr_t{ready.slot + 1}));
+  {
+    std::lock_guard lock(events_mutex);
+    int ready_at = -1;
+    int displayed_at = -1;
+    for (size_t i = 0; i < events.size(); ++i) {
+      if (events[i].frame_id != ready.frame_id) continue;
+      if (events[i].type == MAP_TEXTURE_EVENT_FRAME_READY) ready_at = int(i);
+      if (events[i].type == MAP_TEXTURE_EVENT_FRAME_DISPLAYED) {
+        displayed_at = int(i);
+        CHECK(events[i].slot == ready.slot);
+        CHECK(events[i].seq == 7);
+        CHECK(events[i].display_time_us > 0);
+      }
+    }
+    CHECK(ready_at >= 0);
+    CHECK(displayed_at > ready_at);
+  }
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+// Design D123: a frame replaced by rendering ahead after Dart learned of it
+// can't be chosen, and the frame Dart chose before stays displayed.
+void SelectOfReplacedFrameChangesNothing() {
+  int64_t handle = CreateBufferMap();
+  map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAlways);
+  auto owner = last_owner.lock();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
+  auto shown = ReadyEvents()[0];
+  CHECK(map_texture_select(handle, shown.slot, shown.frame_id) ==
+        MAP_TEXTURE_OK);
+  void* shown_buffer = reinterpret_cast<void*>(intptr_t{shown.slot + 1});
+  CHECK(owner->Present(shown.slot) == shown_buffer);
+  // Rendered ahead, the third frame replaces the second, which Dart can no
+  // longer choose.
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return ReadyEvents().size() == 2; }));
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return ReadyEvents().size() == 3; }));
+  auto replaced = ReadyEvents()[1];
+  CHECK(map_texture_select(handle, replaced.slot, replaced.frame_id) ==
+        MAP_TEXTURE_NOT_SELECTED);
+  {
+    std::lock_guard lock(last_buffer_target->mutex);
+    CHECK((last_buffer_target->available == std::vector<int>{shown.slot}));
+  }
+  // The frame chosen before stays displayable, and the map doesn't render
+  // into its slot.
+  CHECK(owner->Present(shown.slot) == shown_buffer);
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([] { return ReadyEvents().size() == 4; }));
+  CHECK(ReadyEvents()[3].slot != shown.slot);
+  CHECK(owner->Present(shown.slot) == shown_buffer);
+  // The newest frame can be chosen.
+  auto newest = ReadyEvents()[3];
+  CHECK(map_texture_select(handle, newest.slot, newest.frame_id) ==
+        MAP_TEXTURE_OK);
+  CHECK(map_texture_select(handle, 4, newest.frame_id) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAuto);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void MapDoesNotRenderIntoHeldSlot() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  map_texture_resize(handle, 100, 100, 2.0);
+  std::vector<int> chosen_order;
+  int previous = -1;
+  for (size_t frame = 1; frame <= 40; ++frame) {
+    CHECK(WaitFor([frame] { return ReadyEvents().size() == frame; }));
+    if (ReadyEvents().size() != frame) break;
+    auto ready = ReadyEvents().back();
+    Choose(handle, ready);
+    chosen_order.push_back(ready.slot);
+    // The next frame renders while Flutter presents the frame chosen
+    // before.
+    fake_mln::QueueRenderUpdate();
+    if (previous >= 0) PresentSlot(*owner, previous, chosen_order);
+    previous = ready.slot;
+  }
+  {
+    std::lock_guard lock(last_buffer_target->mutex);
+    CHECK(last_buffer_target->renders_into_held == 0);
+  }
+  auto stats = Stats(handle);
+  CHECK(stats.rendered_frames >= 40);
+  CHECK(stats.skipped_renders == 0);
+  CHECK(stats.max_slots_in_use <= 4);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void IdleBufferMapRendersNothing() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
+  auto ready = ReadyEvents()[0];
+  Choose(handle, ready);
+  owner->Present(ready.slot);
+  Sleep(10'000);
+  CHECK(fake_mln::RenderCount() == 1);
+  CHECK(Stats(handle).rendered_frames == 1);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void AllSlotsHeldWithoutPresent() {
+  int64_t handle = CreateBufferMap();
+  map_texture_resize(handle, 100, 100, 2.0);
+  // Dart chooses each frame, and Flutter never presents.
+  for (size_t frame = 1; frame <= 4; ++frame) {
+    CHECK(WaitFor([frame] { return ReadyEvents().size() == frame; }));
+    if (ReadyEvents().size() != frame) break;
+    auto ready = ReadyEvents().back();
+    CHECK(map_texture_select(handle, ready.slot, ready.frame_id) ==
+          MAP_TEXTURE_OK);
+    fake_mln::QueueRenderUpdate();
+  }
+  CHECK(WaitFor([handle] { return Stats(handle).skipped_renders > 0; }));
+  auto stats = Stats(handle);
+  CHECK(stats.max_slots_in_use == 4);
+  CHECK(stats.rendered_frames == 4);
+  // A present frees the slots chosen before the presented one.
+  auto owner = last_owner.lock();
+  owner->Present(ReadyEvents().back().slot);
+  CHECK(WaitFor([] { return ReadyEvents().size() == 5; }));
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void SelectAfterDisposeReportsDisposed() {
+  int64_t handle = CreateBufferMap();
+  int64_t ids[4] = {};
+  CHECK(map_texture_texture_ids(handle, ids, 4) == 4);
+  CHECK(ids[0] == 50 && ids[3] == 53);
+  map_texture_dispose(handle);
+  CHECK(map_texture_select(handle, 0, 1) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_texture_ids(handle, ids, 4) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_set_camera(handle, 0, 0, 0, 0, 1) ==
+        MAP_TEXTURE_ERROR_DISPOSED);
+}
+
+void SurfaceMapHasOneSlotAndIgnoresSelect() {
+  int64_t handle = CreateMap();
+  int64_t ids[4] = {};
+  CHECK(map_texture_texture_ids(handle, ids, 4) == 1);
+  CHECK(ids[0] == 42);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return FrameEvents().size() == 1; }));
+  CHECK(map_texture_select(handle, 0, FrameEvents()[0].frame_id) ==
+        MAP_TEXTURE_OK);
+  CHECK(ReadyEvents().empty());
+  CHECK(FrameEvents()[0].slot == 0);
   map_texture_dispose(handle);
 }
 
@@ -560,9 +867,14 @@ namespace map_texture {
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
     std::weak_ptr<MapTexture> owner, bool) {
+  last_owner = std::move(owner);
+  if (use_buffer_target) {
+    auto target = std::make_unique<FakeBufferTarget>();
+    last_buffer_target = target.get();
+    return target;
+  }
   auto target = std::make_unique<FakeSurfaceTarget>();
   last_target = target.get();
-  last_owner = std::move(owner);
   return target;
 }
 
@@ -581,6 +893,14 @@ int main() {
   RendersArePacedByRefreshInterval();
   IdleMapRendersNothing();
   NoRenderWhilePaused();
+  FrameReportsLatestCameraSequenceNumber();
+  ReadyEventPrecedesDisplayedEvent();
+  SelectOfReplacedFrameChangesNothing();
+  MapDoesNotRenderIntoHeldSlot();
+  IdleBufferMapRendersNothing();
+  AllSlotsHeldWithoutPresent();
+  SelectAfterDisposeReportsDisposed();
+  SurfaceMapHasOneSlotAndIgnoresSelect();
   NoCacheSizeWithoutValue();
   CacheSizeIsSetBeforeMapAndStyle();
   CacheSizeAppliesToMapsCreatedAfterIt();

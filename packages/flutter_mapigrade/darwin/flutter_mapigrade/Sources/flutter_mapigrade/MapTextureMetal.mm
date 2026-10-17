@@ -1,9 +1,10 @@
-// macOS and iOS render target (designs D3b, D4 and D20). MapLibre renders
-// through a borrowed-texture session into one private MTLTexture. Each
-// rendered frame is copied on the GPU into one of three IOSurface-backed
-// CVPixelBuffers, each wrapped as an MTLTexture made from its IOSurface, and
-// Flutter samples that IOSurface through FlutterTexture. A copy-free map has no
-// private texture: MapLibre renders directly into the buffers' textures. No
+// macOS and iOS render target (designs D3b, D4, D20 and D122). MapLibre
+// renders through a borrowed-texture session into one private MTLTexture.
+// Each rendered frame is copied on the GPU into one of four IOSurface-backed
+// CVPixelBuffers, one per display slot, each wrapped as an MTLTexture made
+// from its IOSurface. Each slot has its own registered FlutterTexture, and
+// Flutter samples the IOSurface of the slot Dart displays. A copy-free map has
+// no private texture: MapLibre renders directly into the buffers' textures. No
 // pixels pass through CPU memory.
 //
 // The textures are made directly from the IOSurfaces rather than through a
@@ -24,6 +25,7 @@
 
 #include <array>
 #include <functional>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -36,25 +38,30 @@ using map_texture::kBufferCount;
 using map_texture::MapTexture;
 using map_texture::TargetSize;
 
-// The FlutterTexture that Flutter's raster thread asks for frames.
+// The FlutterTexture of one display slot, which Flutter's raster thread asks
+// for frames.
 @interface MLTFlutterTexture : NSObject <FlutterTexture>
-- (instancetype)initWithOwner:(std::weak_ptr<MapTexture>)owner;
+- (instancetype)initWithOwner:(std::weak_ptr<MapTexture>)owner slot:(int)slot;
 @end
 
 @implementation MLTFlutterTexture {
   std::weak_ptr<MapTexture> _owner;
+  int _slot;
 }
 
-- (instancetype)initWithOwner:(std::weak_ptr<MapTexture>)owner {
+- (instancetype)initWithOwner:(std::weak_ptr<MapTexture>)owner slot:(int)slot {
   self = [super init];
-  if (self) _owner = std::move(owner);
+  if (self) {
+    _owner = std::move(owner);
+    _slot = slot;
+  }
   return self;
 }
 
 - (CVPixelBufferRef _Nullable)copyPixelBuffer {
   auto owner = _owner.lock();
   if (!owner) return nullptr;
-  return static_cast<CVPixelBufferRef>(owner->Present());
+  return static_cast<CVPixelBufferRef>(owner->Present(_slot));
 }
 
 @end
@@ -108,18 +115,22 @@ struct BufferSet {
   }
 };
 
+// The registered textures, one per display slot.
+struct SlotTextures {
+  std::array<MLTFlutterTexture*, kBufferCount> textures{};
+  std::array<int64_t, kBufferCount> ids{};
+};
+
 class MetalRenderTarget : public BufferRenderTarget {
  public:
   MetalRenderTarget(id<MTLDevice> device,
                     NSObject<FlutterTextureRegistry>* registry,
-                    MLTFlutterTexture* texture, int64_t texture_id,
-                    bool renders_into_buffers)
+                    SlotTextures slots, bool renders_into_buffers)
       : renders_into_buffers_(renders_into_buffers),
         device_(device),
         queue_([device newCommandQueue]),
         registry_(registry),
-        texture_(texture),
-        texture_id_(texture_id) {}
+        slots_(slots) {}
 
   ~MetalRenderTarget() override {
     current_.Release();
@@ -127,7 +138,9 @@ class MetalRenderTarget : public BufferRenderTarget {
     if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
   }
 
-  int64_t texture_id() const override { return texture_id_; }
+  int slot_count() const override { return kBufferCount; }
+
+  int64_t texture_id(int slot) const override { return slots_.ids[slot]; }
 
   bool PrepareBuffers(const TargetSize& size) override {
     prepared_.Release();
@@ -179,10 +192,12 @@ class MetalRenderTarget : public BufferRenderTarget {
     return true;
   }
 
-  void SwapBuffersLocked(int latest) override {
-    if (latest >= 0 && !current_.empty()) {
+  // Without a chosen slot in the outgoing set, the fallback from before
+  // stays: it is still the frame Dart displays (design D126).
+  void SwapBuffersLocked(int chosen) override {
+    if (chosen >= 0 && !current_.empty()) {
       if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
-      fallback_ = CVPixelBufferRetain(current_.pixel_buffers[latest]);
+      fallback_ = CVPixelBufferRetain(current_.pixel_buffers[chosen]);
     }
     current_.Release();
     current_ = prepared_;
@@ -191,16 +206,17 @@ class MetalRenderTarget : public BufferRenderTarget {
 
   void* CopyBufferLocked(int index) override {
     if (index >= 0 && !current_.empty()) {
-      // A frame of the current set exists, so the frame kept from before the
-      // last resize is no longer needed.
-      if (fallback_ != nullptr) {
-        CVPixelBufferRelease(fallback_);
-        fallback_ = nullptr;
-      }
       return CVPixelBufferRetain(current_.pixel_buffers[index]);
     }
     if (fallback_ != nullptr) return CVPixelBufferRetain(fallback_);
     return nullptr;
+  }
+
+  void ReleaseFallbackLocked() override {
+    if (fallback_ != nullptr) {
+      CVPixelBufferRelease(fallback_);
+      fallback_ = nullptr;
+    }
   }
 
   mln_status Attach(mln_map map, const TargetSize& size,
@@ -239,12 +255,34 @@ class MetalRenderTarget : public BufferRenderTarget {
     return commands.status == MTLCommandBufferStatusCompleted;
   }
 
+  // Dart chooses the slot on the platform thread, which is the main thread,
+  // so the texture is marked before the raster thread composites the Flutter
+  // frame that displays it (design D123). The engine asserts the platform
+  // thread, so a call from another thread is dispatched to it.
+  void FrameAvailable(int slot) override {
+    int64_t texture_id = slots_.ids[slot];
+    if ([NSThread isMainThread]) {
+      [registry_ textureFrameAvailable:texture_id];
+      return;
+    }
+    if (!logged_select_off_main_.exchange(true)) {
+      NSLog(@"flutter_mapigrade: map_texture_select called off the main "
+            @"thread; the slot's texture is marked available asynchronously");
+    }
+    NSObject<FlutterTextureRegistry>* registry = registry_;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [registry textureFrameAvailable:texture_id];
+    });
+  }
+
   void FrameAvailable() override {
     // See design.md, task 3.4, for why this dispatches to the main queue.
     NSObject<FlutterTextureRegistry>* registry = registry_;
-    int64_t texture_id = texture_id_;
+    SlotTextures slots = slots_;
     dispatch_async(dispatch_get_main_queue(), ^{
-      [registry textureFrameAvailable:texture_id];
+      for (int64_t texture_id : slots.ids) {
+        [registry textureFrameAvailable:texture_id];
+      }
     });
   }
 
@@ -257,9 +295,11 @@ class MetalRenderTarget : public BufferRenderTarget {
 
   void Unregister() override {
     NSObject<FlutterTextureRegistry>* registry = registry_;
-    int64_t texture_id = texture_id_;
+    SlotTextures slots = slots_;
     RunOnMainSync(^{
-      [registry unregisterTexture:texture_id];
+      for (int64_t texture_id : slots.ids) {
+        [registry unregisterTexture:texture_id];
+      }
     });
   }
 
@@ -286,13 +326,13 @@ class MetalRenderTarget : public BufferRenderTarget {
   id<MTLDevice> device_;
   id<MTLCommandQueue> queue_;
   NSObject<FlutterTextureRegistry>* registry_;
-  MLTFlutterTexture* texture_;
-  const int64_t texture_id_;
+  const SlotTextures slots_;
+  std::atomic<bool> logged_select_off_main_{false};
 
   BufferSet current_;
   BufferSet prepared_;
-  // The latest frame from before the last resize, shown until a frame of the
-  // new size is published.
+  // The frame of the slot Dart chose last before the last resize, shown until
+  // Dart chooses a frame of the new size (design D126).
   CVPixelBufferRef fallback_ = nullptr;
 };
 
@@ -304,14 +344,18 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
   if (registry == nil) return nullptr;
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
   if (device == nil) return nullptr;
-  MLTFlutterTexture* texture =
-      [[MLTFlutterTexture alloc] initWithOwner:std::move(owner)];
-  __block int64_t texture_id = 0;
+  __block SlotTextures slots;
+  for (int slot = 0; slot < kBufferCount; ++slot) {
+    slots.textures[slot] = [[MLTFlutterTexture alloc] initWithOwner:owner
+                                                                slot:slot];
+  }
   RunOnMainSync(^{
-    texture_id = [registry registerTexture:texture];
+    for (int slot = 0; slot < kBufferCount; ++slot) {
+      slots.ids[slot] = [registry registerTexture:slots.textures[slot]];
+    }
   });
-  return std::make_unique<MetalRenderTarget>(
-      device, registry, texture, texture_id, copy_free);
+  return std::make_unique<MetalRenderTarget>(device, registry, slots,
+                                             copy_free);
 }
 
 // The map thread is a std::thread with no autorelease pool, so objects

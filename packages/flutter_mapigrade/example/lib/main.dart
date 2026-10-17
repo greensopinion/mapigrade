@@ -18,20 +18,22 @@ class ExampleApp extends StatelessWidget {
       body: FlutterMap(
         options: const MapOptions(initialCenter: _vancouver, initialZoom: 12),
         children: [
-          // The base layer: first among the children, so that the layers
-          // after it are drawn above it.
+          // The base layer: first among the children. Its own children are
+          // drawn above the map and stay on it while the camera moves.
           MapigradeLayer(
             styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
             onError: _showError,
-          ),
-          const MarkerLayer(
-            markers: [
-              Marker(
-                point: _vancouver,
-                width: 40,
-                height: 40,
-                alignment: Alignment.topCenter,
-                child: Icon(Icons.location_pin, size: 40, color: Colors.red),
+            children: const [
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _vancouver,
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.topCenter,
+                    child: Icon(Icons.location_pin, size: 40, color: Colors.red),
+                  ),
+                ],
               ),
             ],
           ),

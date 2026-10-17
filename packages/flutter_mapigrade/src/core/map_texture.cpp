@@ -184,7 +184,11 @@ bool MapTexture::Start(bool copy_free, std::string* out_error) {
   return true;
 }
 
-int64_t MapTexture::texture_id() const { return target_->texture_id(); }
+int MapTexture::slot_count() const { return target_->slot_count(); }
+
+int64_t MapTexture::texture_id(int slot) const {
+  return target_->texture_id(slot);
+}
 
 void MapTexture::LoadStyleUrl(std::string url) {
   commands_.Push(Command::StyleUrl(std::move(url)));
@@ -196,8 +200,8 @@ void MapTexture::LoadStyleJson(std::string json) {
   Signal();
 }
 
-void MapTexture::SetCamera(const Camera& camera) {
-  commands_.SetCamera(camera);
+void MapTexture::SetCamera(const Camera& camera, int64_t seq) {
+  commands_.SetCamera(camera, seq);
   Signal();
 }
 
@@ -273,11 +277,25 @@ void MapTexture::Signal() {
   if (wake_ != MLN_HANDLE_NULL) mln_wake_source_signal(wake_);
 }
 
-void* MapTexture::Present() {
+bool MapTexture::Select(int slot, uint64_t frame_id) {
+  auto* target = target_->AsBufferTarget();
+  if (target == nullptr) return true;
+  // The first choice of a frame of a new set releases the frame kept from
+  // before the resize (design D126).
+  bool selected = buffers_.Select(slot, frame_id,
+                                  [target] { target->ReleaseFallbackLocked(); });
+  if (!selected) return false;
+  selected_at_ns_.store(NowNs());
+  target->FrameAvailable(slot);
+  if (waiting_for_buffer_.exchange(false)) Signal();
+  return true;
+}
+
+void* MapTexture::Present(int slot) {
   auto* target = target_->AsBufferTarget();
   if (target == nullptr) return nullptr;
   void* buffer = nullptr;
-  auto presented = buffers_.Present([&](const BufferState::Presented& p) {
+  auto presented = buffers_.Present(slot, [&](const BufferState::Presented& p) {
     buffer = target->CopyBufferLocked(p.index);
   });
   if (presented.is_new) {
@@ -293,15 +311,19 @@ void* MapTexture::Present() {
       }
     }
     Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &presented.info,
-         presented.display_time_us);
+         presented.display_time_us, presented.index);
   }
   if (waiting_for_buffer_.exchange(false)) Signal();
   return buffer;
 }
 
 map_texture_stats MapTexture::stats() {
+  int max_in_use =
+      target_->AsBufferTarget() != nullptr ? buffers_.max_in_use() : 0;
   std::lock_guard lock(stats_mutex_);
-  return stats_;
+  map_texture_stats stats = stats_;
+  stats.max_slots_in_use = max_in_use;
+  return stats;
 }
 
 // Map thread.
@@ -374,8 +396,9 @@ bool MapTexture::RunOnce() {
 // The cache frees an entry only when it creates another texture after the
 // entry's maximum age has passed, so after a series of resizes it keeps the
 // replaced buffers alive until the next new frame, which on an idle map can be
-// much later. Telling Flutter once more that a frame is available, after the
-// maximum age, makes it create a texture and free them.
+// much later. Telling Flutter once more that a frame is available for each
+// slot's texture, after the maximum age, makes it create a texture and free
+// them.
 void MapTexture::MaybeNotifyAfterResize() {
   if (notify_after_resize_at_ns_ == 0 || NowNs() < notify_after_resize_at_ns_ ||
       gate_.paused()) {
@@ -568,8 +591,8 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
       Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to allocate texture buffers");
       return;
     }
-    buffers_.WithLock([buffer_target, this](int latest) {
-      buffer_target->SwapBuffersLocked(latest);
+    buffers_.WithLock([buffer_target, this](int chosen) {
+      buffer_target->SwapBuffersLocked(chosen);
       buffers_.ResetLocked();
     });
     notify_after_resize_at_ns_ = NowNs() + kResizeSettledNs;
@@ -588,17 +611,22 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
 }
 
 void MapTexture::ApplyCamera() {
-  auto camera = commands_.TakeCamera();
-  if (!camera) return;
+  auto update = commands_.TakeCamera();
+  if (!update) return;
+  const Camera& camera = update->camera;
   mln_camera_options options = mln_camera_options_default();
   options.fields =
       MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_BEARING;
-  options.latitude = camera->latitude;
-  options.longitude = camera->longitude;
-  options.zoom = camera->zoom;
-  options.bearing = camera->bearing;
+  options.latitude = camera.latitude;
+  options.longitude = camera.longitude;
+  options.zoom = camera.zoom;
+  options.bearing = camera.bearing;
   mln_status status = mln_map_jump_to(map_, &options);
-  if (status != MLN_STATUS_OK) ReportStatus("mln_map_jump_to", status);
+  if (status != MLN_STATUS_OK) {
+    ReportStatus("mln_map_jump_to", status);
+    return;
+  }
+  applied_seq_ = update->seq;
 }
 
 void MapTexture::DrainEvents() {
@@ -668,22 +696,29 @@ void MapTexture::MaybeRender() {
 }
 
 void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
-  // Normally the next frame renders only after Flutter has taken the latest
-  // one, and Present() signals the wake source to retry this render. While a
-  // frame takes longer than a display refresh interval, waiting would cost a
-  // whole refresh interval per frame, so the next frame renders right away;
-  // a frame Flutter hasn't taken yet is then replaced (design D19).
-  bool latest_presented = buffers_.LatestPresented();
-  bool render_ahead = !latest_presented && RenderAhead();
-  if (!latest_presented && !render_ahead) {
+  // Normally the next frame renders only after Dart has chosen the latest
+  // one, and Select() signals the wake source to retry this render (design
+  // D124). While a frame takes longer than a display refresh interval,
+  // waiting would cost a whole refresh interval per frame, so the next frame
+  // renders right away; a frame Dart hasn't chosen yet is then replaced
+  // (design D19).
+  bool latest_chosen = buffers_.LatestReadyChosen();
+  bool render_ahead = !latest_chosen && RenderAhead();
+  if (!latest_chosen && !render_ahead) {
     render_waited_for_display_ = true;
     {
       std::lock_guard lock(stats_mutex_);
       ++stats_.waits_for_display;
     }
     waiting_for_buffer_.store(true);
+    // Select() may have run between the check and the store, and found no
+    // wait to end.
+    if (buffers_.LatestReadyChosen() && waiting_for_buffer_.exchange(false)) {
+      Signal();
+    }
     return;
   }
+  // Present() frees held slots and then wakes the map thread.
   int index = buffers_.AcquireFree(-1);
   if (index < 0) {
     {
@@ -697,6 +732,7 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   if (target.RendersIntoBuffers()) {
     mln_status select_status = target.SelectBuffer(session_, index);
     if (select_status != MLN_STATUS_OK) {
+      buffers_.Release(index);
       ReportStatus("select buffer", select_status);
       return;
     }
@@ -706,15 +742,18 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   {
     std::lock_guard lock(stats_mutex_);
     if (render_ahead) ++stats_.render_ahead_frames;
-    int64_t presented = presented_at_ns_.load();
-    if (render_waited_for_display_ && presented != 0 && presented <= start) {
+    int64_t selected = selected_at_ns_.load();
+    if (render_waited_for_display_ && selected != 0 && selected <= start) {
       ++stats_.present_to_render_count;
-      stats_.present_to_render_total_ns += start - presented;
+      stats_.present_to_render_total_ns += start - selected;
     }
   }
   render_waited_for_display_ = false;
   bool needs_repaint = false;
-  if (!RenderUpdate(start, &needs_repaint)) return;
+  if (!RenderUpdate(start, &needs_repaint)) {
+    buffers_.Release(index);
+    return;
+  }
 
   int64_t cost = NowNs() - start;
   if (!target.RendersIntoBuffers()) {
@@ -729,6 +768,7 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
       stats_.copy_max_ns = std::max(stats_.copy_max_ns, elapsed);
     }
     if (!copied) {
+      buffers_.Release(index);
       Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to copy the frame");
       return;
     }
@@ -749,8 +789,9 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   }
   // The map publishes another render update by itself while a transition
   // runs, so needs_repaint needs no action here (see
-  // mln_render_session_render_update in render_session.h).
-  target.FrameAvailable();
+  // mln_render_session_render_update in render_session.h). Dart marks the
+  // slot's texture available when it chooses the frame (design D123).
+  Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
 
 // Queueing a frame on the surface never blocks, so renders are paced to one
@@ -821,6 +862,7 @@ bool MapTexture::RenderUpdate(int64_t start, bool* needs_repaint) {
 FrameInfo MapTexture::RenderedFrameInfo() {
   FrameInfo info;
   info.frame_id = next_frame_id_++;
+  info.seq = applied_seq_;
   info.physical_width = size_.physical_width;
   info.physical_height = size_.physical_height;
   info.scale_factor = size_.extent.scale_factor;
@@ -863,7 +905,8 @@ bool MapTexture::RenderAhead() {
 }
 
 void MapTexture::Emit(int32_t type, const char* message,
-                      const FrameInfo* frame, int64_t display_time_us) {
+                      const FrameInfo* frame, int64_t display_time_us,
+                      int slot) {
   std::lock_guard lock(callback_mutex_);
   if (callback_ == nullptr) return;
   auto* event =
@@ -880,6 +923,8 @@ void MapTexture::Emit(int32_t type, const char* message,
     event->physical_height = static_cast<int32_t>(frame->physical_height);
     event->scale_factor = frame->scale_factor;
     event->display_time_us = display_time_us;
+    event->slot = slot;
+    event->seq = frame->seq;
   }
   if (message != nullptr) event->message = strdup(message);
   callback_(event);

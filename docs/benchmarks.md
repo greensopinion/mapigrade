@@ -519,6 +519,84 @@ Conditions: the Setup's iPhone, OS, Xcode and Flutter versions and style; MapLib
 
 Procedure: as for `benchmark.dart` (Setup), with `--dart-define=ALIGNMENT_BENCHMARK=true --dart-define=ALIGNMENT_MODE=<mode>` in the iOS build.
 
+## Alignment with children (layer-children-alignment change)
+
+With the overlays as children of the layer, the layer draws them at the `flutter_map` camera of the map frame it chose for the Flutter frame (designs D122 to D129 of the layer-children-alignment change). The alignment benchmark measures this configuration with `--dart-define=ALIGNMENT_CHILDREN=1` (design D129). It still finds the displayed map frame of each Flutter frame from the display times and Flutter's frame timings, and computes the error against the camera that the layer reports for its children (`onChildCamera`), so an error above 1 px would reveal a fault in the display slots. The lag is the distance at the viewport center between where the displayed map frame draws a coordinate and where the live `flutter_map` camera places it. With children the overshoot ahead is measured against the live camera. All errors and lags are in logical pixels; the phases are those of the camera-prediction change above.
+
+The result lines also give the map thread's counters over each phase: the share of rendered frames that Flutter never displayed, the skipped renders per second (renders that found no free slot), and the most slots in use (rendering, ready or held) at once since the map was created.
+
+Measured 2026-10-16 (macOS) and 2026-10-17 (both), release builds, 3 runs per mode, 20 s per phase, the fling 30 s. Where the runs agree, the tables give one value; otherwise they give the range.
+
+### Frame rate before and after slots (task 5.3)
+
+The frame-rate benchmark (`benchmark.dart`, Setup above) at the commit before this change (`2f092c2`) and with the change, alternating, 3 runs each. With the change, the benchmark's `MapTextureView` chooses the newest ready frame in each build.
+
+| macOS | Before | After |
+| --- | --- | --- |
+| average map fps over 30 s | 103.8–105.4 | 103.8–105.9 |
+| per-second p10 / p50 / p90 | 98–99 / 103–106 / 109–116 | 99–100 / 103–105 / 110–112 |
+| lowest second | 94–96 | 94–98 |
+| `render_update`, frame cycle | 7.57–7.62 ms, 8.99–9.07 ms | 7.60–7.63 ms, 8.97–9.01 ms |
+| rendered frames not displayed | 4.9–6.0% | 5.0–6.5% |
+| skipped renders | 0 | 0 |
+
+| iPhone | Before | After |
+| --- | --- | --- |
+| average map fps over 30 s | 110.0–112.2 | 109.9–111.2 |
+| per-second p10 / p50 / p90 | 104–105 / 108–113 / 117–119 | 105–106 / 110–111 / 115–117 |
+| lowest second | 98–104 | 100–105 |
+| `render_update`, frame cycle | 7.62–8.10 ms, 8.22–8.48 ms | 7.81–8.05 ms, 8.21–8.39 ms |
+| rendered frames not displayed | 6.8–8.0% | 7.5–8.8% |
+| skipped renders | 0 | 0 |
+
+The slots changed neither frame rate beyond the variation between runs. On macOS the two builds alternated, before first. On the iPhone, which ran over Wi-Fi, unplugged and out of its case after cooling, the order was before, after, after, before, after, before; the first install failed, and its before run was repeated last. An earlier series on 2026-10-17, while the iPhone was charging in its case, fell from 112.8 to 90.9 fps over six runs on both builds as the phone heated (`render_update` from 7.7 to 10.2 ms); we discarded it.
+
+### macOS
+
+| Phase | Mode | Frames over 1 px | Error p50 / p95 / max | Lag p50 / p95 / max | Overshoot ahead p50 / max | Map fps | Rendered frames not displayed | Skipped renders per s | Most slots in use |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| pan 100 px/s | `predict1` | 0 of 7363 | 0 / 0 / 0 | 0.83 / 1.67 / 3.33 | – | 101.7–102.2 | 6.8–7.1% | 0 | 4 |
+| pan 500 px/s | `predict1` | 0 of 7398 | 0 / 0 / 0 | 4.17 / 8.33 / 12.53–16.67 | – | 102.8–103.3 | 6.8–7.3% | 0 | 4 |
+| pan 1,000 px/s | `predict1` | 0 of 7394 | 0 / 0 / 0 | 8.33 / 16.67 / 25.01–116.67 | – | 100.5–102.5 | 7.3–7.9% | 0–0.1 | 4 |
+| stop | `predict1` | 0 of 7318 | 0 / 0 / 0 | 0 / 16.67 / 33.33 | 8.27–8.31 / 8.33 | 80.9–81.7 | 7.7–8% | 0 | 4 |
+| fling | `predict1` | 0 of 10940 | 0 / 0 / 0 | 0.81–1 / 16.67–17.64 / 56.37–87.19 | 0.69–0.95 / 0.88–0.96 | 96.3–96.7 | 7.1–7.8% | 0 | 4 |
+| reverse | `predict1` | 0 of 7371 | 0 / 0 / 0 | 8.33 / 16.67 / 33.24–33.32 | 24.85–24.99 / 33.24–33.32 | 98.2–99.2 | 7.9–8% | 0 | 4 |
+| pan 100 px/s | `none` | 0 of 7366 | 0 / 0 / 0 | 1.67 / 2.5 / 3.33–4.17 | – | 101.2–102.4 | 6.7–7.4% | 0 | 4 |
+| pan 500 px/s | `none` | 0 of 7397 | 0 / 0 / 0 | 8.33 / 12.5 / 16.67–20.83 | – | 100.8–104.8 | 6.3–7.2% | 0 | 4 |
+| pan 1,000 px/s | `none` | 0 of 7405 | 0 / 0 / 0 | 16.67 / 25 / 33.33 | – | 101.3–102.2 | 7.2–7.7% | 0 | 4 |
+| stop | `none` | 0 of 7317 | 0 / 0 / 0 | 0.02–0.07 / 25 / 33.33–58.33 | 0 / 0 | 81.2–82.7 | 7.1–7.5% | 0 | 4 |
+| fling | `none` | 0 of 10942 | 0 / 0 / 0 | 8.33 / 27.66–33.33 / 69.24–99.53 | 0 / 0 | 93.9–96.5 | 7.3–7.4% | 0 | 4 |
+| reverse | `none` | 0 of 7373 | 0 / 0 / 0 | 16.67 / 25 / 33.33–41.67 | 25 / 33.33 | 99.1–99.6 | 7.7–8.1% | 0 | 4 |
+
+- No Flutter frame had an error over 1 px: the children were drawn at the camera of the displayed map frame in every frame. Camera prediction changes only the lag: with `predict1` the children trail the live camera by one Flutter frame of movement at p50 in pans (8.33 px at 1,000 px/s), with `none` by two (16.67 px).
+- In one phase, pan 1,000 px/s of the second `predict1` run, the map skipped 2 renders while Flutter presented frames, and the lag reached 116.67 px, a stall of about 117 ms. Every other phase had no skipped render. Every phase used all four slots at some time.
+- Before the fix of design D123, in which Dart keeps the frame it chose before when the map refuses a choice, 10 s runs on 2026-10-16 had 1 frame over 1 px (8.33 px) in each of the fling and reverse phases.
+
+Conditions: the Setup's Mac, OS, Xcode and Flutter versions and style; copy-free rendering; AC power; the display scaled to "More Space"; window 1600x1000, which gave a 1600x917 map viewport. The Android emulator and the iOS simulator were shut down, and `caffeinate -d` kept the display on for the runs on 2026-10-17. Three runs on 2026-10-16 were repeated because the display turned off during them. The thermal state was nominal at the end of every phase.
+
+### iPhone
+
+| Phase | Mode | Frames over 1 px | Error p50 / p95 / max | Lag p50 / p95 / max | Overshoot ahead p50 / max | Map fps | Rendered frames not displayed | Skipped renders per s | Most slots in use |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| pan 100 px/s | `predict1` | 0 of 7224 | 0 / 0 / 0 | 0.83 / 1.67 / 3.34–4.17 | – | 108.7–110.2 | 6.1–10.7% | 0 | 4 |
+| pan 500 px/s | `predict1` | 0 of 7435 | 0 / 0 / 0 | 4.16–4.17 / 8.33–8.35 / 12.57–16.68 | – | 106.6–109.1 | 9.4–10.5% | 0 | 4 |
+| pan 1,000 px/s | `predict1` | 0 of 7473 | 0 / 0 / 0 | 8.32–8.34 / 16.67–16.7 / 33.3–33.38 | – | 105.3–106.7 | 8.3–10.4% | 0 | 4 |
+| stop | `predict1` | 0 of 7314 | 0 / 0 / 0 | 0–0.03 / 16.63–16.7 / 41.67–41.73 | 3.32–6.43 / 7.57–8.01 | 82.4–84.7 | 2.7–9.2% | 0 | 4 |
+| fling | `predict1` | 0 of 10968 | 0 / 0 / 0 | 0.71–1.87 / 13.06–16.67 / 33.36–41.73 | 0.14–0.44 / 0.45–0.7 | 106.2–107.3 | 6.3–11.1% | 0 | 4 |
+| reverse | `predict1` | 0 of 7391 | 0 / 0 / 0 | 8.34 / 16.68–16.69 / 33.36–41.63 | 21.47–24.4 / 25.06–39.03 | 108–109.8 | 8.5–10.6% | 0 | 4 |
+| pan 100 px/s | `none` | 0 of 7292 | 0 / 0 / 0 | 1.67 / 2.5 / 3.34–4.18 | – | 106.2–111.5 | 7.1–8.6% | 0 | 4 |
+| pan 500 px/s | `none` | 0 of 7434 | 0 / 0 / 0 | 8.33 / 12.51 / 16.7–20.85 | – | 106.8–109.2 | 9.7–11% | 0 | 4 |
+| pan 1,000 px/s | `none` | 0 of 7474 | 0 / 0 / 0 | 16.67 / 25–25.02 / 33.4–41.68 | – | 106.7–107.7 | 10.1–10.4% | 0 | 4 |
+| stop | `none` | 0 of 7313 | 0 / 0 / 0 | 0.87–2.64 / 25–25.01 / 41.68–41.72 | 0 / 0 | 85.8–86.9 | 7.3–8.4% | 0 | 4 |
+| fling | `none` | 0 of 10971 | 0 / 0 / 0 | 4.41–4.58 / 21.01–24.98 / 40.35–49.99 | 0 / 0 | 107.1–107.8 | 7.3–8.5% | 0 | 4 |
+| reverse | `none` | 0 of 7396 | 0 / 0 / 0 | 16.67 / 25.03–25.04 / 33.42–33.45 | 25.07–33.33 / 33.42–33.45 | 105.2–109.3 | 6.4–8.4% | 0 | 4 |
+
+- As on macOS, no Flutter frame had an error over 1 px, no phase skipped a render, and every phase used all four slots at some time.
+
+Conditions: the Setup's iPhone, OS, Xcode and Flutter versions and style; copy-free rendering; full screen, portrait, 430x932 logical pixels at pixel ratio 3; connected by cable and charging, in its case, launched with `MLT_KEEP_AWAKE=1`. The thermal state was fair at the start of the first run and serious at the end of every phase, so the map frame rates are lower than at nominal; the errors don't depend on the frame rate.
+
+Procedure: as for the alignment benchmark above, with `--dart-define=ALIGNMENT_CHILDREN=1 --dart-define=ALIGNMENT_MODE=<mode> --dart-define=ALIGNMENT_PHASES=pan100,pan500,pan1000,stop,fling,reverse`.
+
 ## No CPU readback on the frame path
 
 ### macOS (Stage 1, task 7.3)

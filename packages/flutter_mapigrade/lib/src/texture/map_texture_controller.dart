@@ -35,7 +35,7 @@ class MapCamera {
       'MapCamera(lat: $latitude, lon: $longitude, zoom: $zoom, bearing: $bearing)';
 }
 
-/// The camera and viewport size a displayed frame was rendered with.
+/// The camera and viewport size a frame was rendered with, and where it is.
 class FrameCamera {
   /// The camera and viewport size of the frame [frameId].
   const FrameCamera({
@@ -44,6 +44,8 @@ class FrameCamera {
     required this.physicalSize,
     required this.scaleFactor,
     required this.displayTime,
+    this.slot = 0,
+    this.seq = 0,
   });
 
   /// Increases by one for each frame the map renders.
@@ -51,6 +53,15 @@ class FrameCamera {
 
   /// The camera the frame was rendered with.
   final MapCamera camera;
+
+  /// The display slot that holds the frame: an index into
+  /// [MapTextureController.textureIds]. Always 0 on Android.
+  final int slot;
+
+  /// The sequence number that [MapTextureController.setCamera] returned for
+  /// the camera the frame was rendered with, or 0 if the frame was rendered
+  /// before the first call.
+  final int seq;
 
   /// The size of the frame in physical pixels.
   final Size physicalSize;
@@ -64,12 +75,14 @@ class FrameCamera {
   /// displayed it.
   ///
   /// Null on Android, where Flutter reports no time at which it takes a frame.
-  /// There the frame is reported when it has been queued for display.
+  /// There the frame is reported when it has been queued for display. Also
+  /// null for the frames of [MapTextureController.readyFrames], which haven't
+  /// been displayed.
   final int? displayTime;
 
   @override
   String toString() =>
-      'FrameCamera(#$frameId, $camera, ${physicalSize.width.toInt()}x${physicalSize.height.toInt()} @$scaleFactor)';
+      'FrameCamera(#$frameId, $camera, ${physicalSize.width.toInt()}x${physicalSize.height.toInt()} @$scaleFactor, slot $slot, seq $seq)';
 }
 
 /// An event reported by the map.
@@ -134,7 +147,8 @@ class MapTextureStats {
         microseconds: s.presentToRenderTotalNs ~/ 1000,
       ),
       renderAheadFrames = s.renderAheadFrames,
-      intervalWaits = s.intervalWaits;
+      intervalWaits = s.intervalWaits,
+      maxSlotsInUse = s.maxSlotsInUse;
 
   /// Counters with the given values, for tests that have no native map
   /// (design D113).
@@ -162,15 +176,17 @@ class MapTextureStats {
     this.presentToRenderTotal = Duration.zero,
     this.renderAheadFrames = 0,
     this.intervalWaits = 0,
+    this.maxSlotsInUse = 0,
   });
 
   /// Frames the map rendered.
   final int renderedFrames;
 
-  /// Renders deferred because no buffer was free.
+  /// Renders deferred because no display slot was free.
   final int skippedRenders;
 
-  /// Renders deferred because Flutter hadn't taken the latest frame yet.
+  /// Renders deferred because Dart hadn't chosen the latest finished frame
+  /// yet, on macOS and iOS.
   final int waitsForDisplay;
 
   /// Calls of `mln_render_session_render_update`.
@@ -225,20 +241,24 @@ class MapTextureStats {
   /// The total of the times counted by [pickupWaitCount].
   final Duration pickupWaitTotal;
 
-  /// Time from Flutter taking a frame until the next render starts, for
-  /// renders that waited for Flutter to take the latest frame.
+  /// Time from Dart choosing the latest frame until the next render starts,
+  /// for renders that waited for Dart to choose it.
   final int presentToRenderCount;
 
   /// The total of the times counted by [presentToRenderCount].
   final Duration presentToRenderTotal;
 
-  /// Renders started before Flutter had taken the latest frame, because a
-  /// frame took longer than a display refresh interval.
+  /// Renders started before Dart had chosen the latest frame, because a frame
+  /// took longer than a display refresh interval.
   final int renderAheadFrames;
 
   /// Renders deferred until one display refresh interval after the start of
   /// the previous render. Only Android paces renders this way.
   final int intervalWaits;
+
+  /// The most display slots in use (rendering, ready or chosen) at once, on
+  /// macOS and iOS; 0 on Android.
+  final int maxSlotsInUse;
 
   @override
   String toString() =>
@@ -250,7 +270,7 @@ class MapTextureStats {
       'update_available: '
       '$renderUpdateAvailableEvents, needs_repaint: $needsRepaintFrames, '
       'paused: $pausedRenders, memory_reductions: $memoryReductions, '
-      'interval_waits: $intervalWaits)';
+      'interval_waits: $intervalWaits, max_slots_in_use: $maxSlotsInUse)';
 
   static String _avg(Duration total, int count) => count == 0
       ? '-'
@@ -286,7 +306,7 @@ typedef HeaderRule = ({String url, Map<String, String> headers});
 class MapTextureController {
   MapTextureController._(
     this._handle,
-    this.textureId,
+    this.textureIds,
     this.copyFree,
     this._callable,
   );
@@ -370,8 +390,12 @@ class MapTextureController {
         error ?? 'map_texture_create failed with $handle',
       );
     }
-    final textureId = mapTextureTextureId(handle);
-    controller = MapTextureController._(handle, textureId, copyFree, callable);
+    final textureIds = using((arena) {
+      final ids = arena<Int64>(_maxSlots);
+      final count = mapTextureTextureIds(handle, ids, _maxSlots);
+      return [for (var i = 0; i < count && i < _maxSlots; ++i) ids[i]];
+    });
+    controller = MapTextureController._(handle, textureIds, copyFree, callable);
     return controller;
   }
 
@@ -397,11 +421,16 @@ class MapTextureController {
     }
   }
 
+  static const _maxSlots = 4;
+
   final int _handle;
   final NativeCallable<MapTextureEventCallback> _callable;
 
-  /// The id for a `Texture` widget.
-  final int textureId;
+  /// The ids for `Texture` widgets, one per display slot (design D122 of the
+  /// layer-children-alignment change): four on macOS and iOS, where Dart
+  /// chooses the frame to display with [select], and one on Android, where
+  /// Flutter displays the latest frame.
+  final List<int> textureIds;
 
   /// Whether the map was created to render directly into the displayed
   /// buffers; see [MapTextureController.create]. On Android every map does.
@@ -409,8 +438,10 @@ class MapTextureController {
 
   final _events = StreamController<MapEvent>.broadcast();
   final _frames = StreamController<FrameCamera>.broadcast();
+  final _readyFrames = StreamController<FrameCamera>.broadcast();
   bool _disposed = false;
   double? _width, _height, _pixelRatio, _refreshRate;
+  int _seq = 0;
 
   /// Style, loading, render and idle events.
   Stream<MapEvent> get events => _events.stream;
@@ -421,6 +452,19 @@ class MapTextureController {
   /// The camera of the frame displayed last, if any.
   FrameCamera? get displayedFrame => _displayedFrame;
   FrameCamera? _displayedFrame;
+
+  /// On macOS and iOS, each frame when it has finished rendering into a
+  /// display slot, before Flutter displays it. Choose one with [select].
+  /// Nothing is added on Android.
+  Stream<FrameCamera> get readyFrames => _readyFrames.stream;
+
+  /// The frame added to [readyFrames] last, if any.
+  FrameCamera? get readyFrame => _readyFrame;
+  FrameCamera? _readyFrame;
+
+  /// The frame whose choice with [select] the map recorded last, if any.
+  FrameCamera? get selectedFrame => _selectedFrame;
+  FrameCamera? _selectedFrame;
 
   /// Whether [dispose] has been called.
   bool get isDisposed => _disposed;
@@ -433,9 +477,13 @@ class MapTextureController {
   void loadStyleJson(String json) =>
       _withString(json, (p) => mapTextureLoadStyleJson(_handle, p));
 
-  /// Sets the camera. When this is called faster than the map renders, the
-  /// map renders the latest camera only.
-  void setCamera(MapCamera camera) {
+  /// Sets the camera and returns its sequence number, which the frames
+  /// rendered with it report as [FrameCamera.seq]. Numbers start at 1 and
+  /// increase by one per call. When this is called faster than the map
+  /// renders, the map renders the latest camera only.
+  int setCamera(MapCamera camera) {
+    if (_disposed) throw const MapTextureDisposedException();
+    final seq = _seq + 1;
     _check(
       mapTextureSetCamera(
         _handle,
@@ -443,8 +491,30 @@ class MapTextureController {
         camera.longitude,
         camera.zoom,
         camera.bearing,
+        seq,
       ),
     );
+    _seq = seq;
+    return seq;
+  }
+
+  /// Chooses [frame], from [readyFrames], for the Flutter frame being built,
+  /// on the platform thread, and returns whether the map recorded the choice.
+  /// If it did, display `textureIds[frame.slot]` in the same build; the map
+  /// doesn't render into the slot while a Flutter frame may still display it.
+  ///
+  /// Returns false and changes nothing if the slot no longer holds the frame,
+  /// because the map replaced it with a newer frame after reporting it, or a
+  /// resize replaced the slots. Then keep displaying [selectedFrame], the
+  /// frame chosen before (design D123 of the layer-children-alignment
+  /// change). Does nothing and returns true on Android.
+  bool select(FrameCamera frame) {
+    if (_disposed) throw const MapTextureDisposedException();
+    final status = mapTextureSelect(_handle, frame.slot, frame.frameId);
+    if (status == mapTextureNotSelected) return false;
+    _check(status);
+    _selectedFrame = frame;
+    return true;
   }
 
   /// Sets the viewport's logical size and device pixel ratio. Repeated calls
@@ -499,6 +569,7 @@ class MapTextureController {
     _callable.close();
     _events.close();
     _frames.close();
+    _readyFrames.close();
   }
 
   void _withString(String value, int Function(Pointer<Utf8>) call) {
@@ -524,7 +595,8 @@ class MapTextureController {
     final type = e.type;
     final message = e.message == nullptr ? '' : e.message.toDartString();
     FrameCamera? frame;
-    if (type == mapTextureEventFrameDisplayed) {
+    if (type == mapTextureEventFrameDisplayed ||
+        type == mapTextureEventFrameReady) {
       frame = FrameCamera(
         frameId: e.frameId,
         camera: MapCamera(
@@ -538,7 +610,11 @@ class MapTextureController {
           e.physicalHeight.toDouble(),
         ),
         scaleFactor: e.scaleFactor,
-        displayTime: e.displayTimeUs < 0 ? null : e.displayTimeUs,
+        displayTime: type == mapTextureEventFrameReady || e.displayTimeUs < 0
+            ? null
+            : e.displayTimeUs,
+        slot: e.slot,
+        seq: e.seq,
       );
     }
     mapTextureEventFree(pointer);
@@ -556,6 +632,9 @@ class MapTextureController {
       case mapTextureEventFrameDisplayed:
         _displayedFrame = frame;
         _frames.add(frame!);
+      case mapTextureEventFrameReady:
+        _readyFrame = frame;
+        _readyFrames.add(frame!);
     }
   }
 }

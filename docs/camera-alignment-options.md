@@ -115,3 +115,14 @@ MapLibre handles gestures and camera animation, and the Flutter overlays follow 
 | 5. Predict the camera | lead 1: 0 or 8.33 px (Mac), 8.33 px (iPhone); 4.2–7.9 px behind on average | none | none | small | yes |
 | 6. One texture per buffer | expected close to 0 | wider than now; needs 2 | none | large | no |
 | 7. Model B | depends | depends | depends | very large | no |
+
+## Manual check with children (layer-children-alignment change, task 5.4)
+
+The layer-children-alignment change took options 6 and 4 together: the overlays are children of the layer, which draws them at the camera of the map frame it displays. On 2026-10-17 we checked the harness's `flutter_map` page with the polyline and the markers as children, with `predict1` and with `none`: pans, flings, abrupt stops, reversals, and taps on a marker during a pan.
+
+- macOS: the overlays stayed exactly on the map in every motion. Map and overlays together trail the pointer slightly, by an amount that changes with the pointer's speed and acceleration. `predict1` made this trailing least noticeable for natural pointer movements. We kept the lag and `predict1` as the default.
+- iPhone (by finger): the overlays stayed exactly on the map in every motion. The trailing felt the same as on the Mac, and `predict1` was again the best.
+- iPhone, second look: in slow, steady pans `predict2` seemed to track the finger better, though the finger hides part of the map. The camera-prediction change's iPhone measurements agree: in steady pans the map was 0.1 to 0.5 px ahead of the live camera with `predict2` and 0.8 to 7.9 px behind with `predict1`, but at abrupt stops `predict2` ran 14.7 px ahead against 6.7 to 6.9 px. On the Mac `predict1` was closer.
+- Decision: the children's lag is acceptable, and `predict1` stays the default on both platforms.
+- Taps: a tap on a marker of the stopped map hit the marker. A tap during a pan was too hard to coordinate by hand, and we judged it an unusual pattern; the widget test "a polyline hit-tests where it is drawn" covers hit tests while the displayed camera differs from the live one.
+- Skipped renders: in one of 72 benchmark phases (task 5.3), the map skipped 2 renders in a stall of about 117 ms. We accepted it; it doesn't show that four slots are too few.

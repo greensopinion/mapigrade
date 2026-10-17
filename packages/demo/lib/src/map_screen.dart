@@ -127,14 +127,18 @@ class _MapScreenState extends State<MapScreen>
             ),
             children: [
               // The base layer: first among the children, so that the layers
-              // after it are drawn above it.
+              // after it are drawn above it. The route, the pins and the rider
+              // are its children, so that they stay on the map while the
+              // camera moves; the attribution is screen UI and follows it.
               MapigradeLayer(
                 styleUrl: _style.url,
                 onError: _showError,
                 metrics: _metrics,
+                children: [
+                  if (_showStages && stages != null) ...stageLayers(stages),
+                  riderLayer(_player.rider),
+                ],
               ),
-              if (_showStages && stages != null) ...stageLayers(stages),
-              riderLayer(_player.rider),
               attributionOf(_style),
             ],
           ),

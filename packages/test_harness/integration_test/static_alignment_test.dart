@@ -5,7 +5,9 @@
 // The style draws a green circle at a coordinate, and a flutter_map
 // CircleMarker draws a blue circle at the same coordinate. With the camera at
 // rest, the test captures the map twice, without and with the overlay, and
-// compares the centroids of the two colors.
+// compares the centroids of the two colors. Each case runs with the overlay
+// placed after the layer and as a child of the layer (task 5.2 of the
+// layer-children-alignment change).
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -119,80 +121,86 @@ void main() {
   // The default layer (prediction, lead 1). At rest the predicted camera is
   // the converted camera, so the layer with no alignment draws the same frame
   // (design D50 of the remove-camera-transform change).
-  for (final c in cases) {
-    testWidgets('alignment at rest: ${c.name}', (tester) async {
-      final camera = fm.MapCamera(
-        crs: const fm.Epsg3857(),
-        center: c.center,
-        zoom: c.zoom,
-        rotation: c.rotation,
-        nonRotatedSize: c.finalSize,
-      );
-      final point = c.point ?? camera.screenOffsetToLatLng(c.pointAt);
-      final style = styleWithPoint(point);
+  for (final children in [false, true]) {
+    for (final c in cases) {
+      final variant = children ? ' with children' : '';
+      testWidgets('alignment at rest$variant: ${c.name}', (tester) async {
+        final camera = fm.MapCamera(
+          crs: const fm.Epsg3857(),
+          center: c.center,
+          zoom: c.zoom,
+          rotation: c.rotation,
+          nonRotatedSize: c.finalSize,
+        );
+        final point = c.point ?? camera.screenOffsetToLatLng(c.pointAt);
+        final style = styleWithPoint(point);
 
-      final boundaryKey = GlobalKey();
-      MapTextureController? controller;
-      Widget app(Size size, {required bool overlay}) => MaterialApp(
-        home: Align(
-          alignment: Alignment.topLeft,
-          child: RepaintBoundary(
-            key: boundaryKey,
-            child: SizedBox.fromSize(
-              size: size,
-              child: fm.FlutterMap(
-                options: fm.MapOptions(
-                  initialCenter: c.center,
-                  initialZoom: c.zoom,
-                  initialRotation: c.rotation,
-                ),
-                children: [
-                  MapTextureLayer(
-                    styleJson: style,
-                    onController: (x) => controller = x,
-                  ),
-                  if (overlay)
-                    fm.CircleLayer(
-                      circles: [
-                        fm.CircleMarker(
-                          point: point,
-                          radius: radius,
-                          color: const Color(0xff0000ff),
-                        ),
-                      ],
+        final boundaryKey = GlobalKey();
+        MapTextureController? controller;
+        Widget app(Size size, {required bool overlay}) {
+          final circles = fm.CircleLayer(
+            circles: [
+              fm.CircleMarker(
+                point: point,
+                radius: radius,
+                color: const Color(0xff0000ff),
+              ),
+            ],
+          );
+          return MaterialApp(
+            home: Align(
+              alignment: Alignment.topLeft,
+              child: RepaintBoundary(
+                key: boundaryKey,
+                child: SizedBox.fromSize(
+                  size: size,
+                  child: fm.FlutterMap(
+                    options: fm.MapOptions(
+                      initialCenter: c.center,
+                      initialZoom: c.zoom,
+                      initialRotation: c.rotation,
                     ),
-                ],
+                    children: [
+                      MapTextureLayer(
+                        styleJson: style,
+                        onController: (x) => controller = x,
+                        children: [if (overlay && children) circles],
+                      ),
+                      if (overlay && !children) circles,
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-      );
+          );
+        }
 
-      await tester.pumpWidget(app(c.size, overlay: false));
-      final idle = controller!.events
-          .firstWhere((e) => e is MapIdle)
-          .timeout(const Duration(seconds: 20));
-      if (c.resizeTo != null) {
-        await controller!.frames.first.timeout(const Duration(seconds: 20));
-        await tester.pumpWidget(app(c.finalSize, overlay: false));
-      }
-      await idle;
-      await _waitForDisplayedCamera(tester, controller!, camera, c.finalSize);
+        await tester.pumpWidget(app(c.size, overlay: false));
+        final idle = controller!.events
+            .firstWhere((e) => e is MapIdle)
+            .timeout(const Duration(seconds: 20));
+        if (c.resizeTo != null) {
+          await controller!.frames.first.timeout(const Duration(seconds: 20));
+          await tester.pumpWidget(app(c.finalSize, overlay: false));
+        }
+        await idle;
+        await _waitForDisplayedCamera(tester, controller!, camera, c.finalSize);
 
-      final green = await _centroid(boundaryKey, _isGreen);
-      await tester.pumpWidget(app(c.finalSize, overlay: true));
-      await tester.pump();
-      final blue = await _centroid(boundaryKey, _isBlue);
+        final green = await _centroid(boundaryKey, _isGreen);
+        await tester.pumpWidget(app(c.finalSize, overlay: true));
+        await tester.pump();
+        final blue = await _centroid(boundaryKey, _isBlue);
 
-      expect(green, isNotNull, reason: 'no style circle in the capture');
-      expect(blue, isNotNull, reason: 'no overlay circle in the capture');
-      final distance = (green! - blue!).distance;
-      debugPrint(
-        'ALIGNMENT ${c.name}: style $green, overlay $blue, '
-        'distance ${distance.toStringAsFixed(3)} logical px',
-      );
-      expect(distance, lessThanOrEqualTo(1.0));
-    });
+        expect(green, isNotNull, reason: 'no style circle in the capture');
+        expect(blue, isNotNull, reason: 'no overlay circle in the capture');
+        final distance = (green! - blue!).distance;
+        debugPrint(
+          'ALIGNMENT$variant ${c.name}: style $green, overlay $blue, '
+          'distance ${distance.toStringAsFixed(3)} logical px',
+        );
+        expect(distance, lessThanOrEqualTo(1.0));
+      });
+    }
   }
 }
 

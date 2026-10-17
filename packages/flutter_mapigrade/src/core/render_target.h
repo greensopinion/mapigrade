@@ -2,8 +2,10 @@
 // Flutter gets the frames, and the Flutter texture registration. There are two
 // kinds of target (design D52):
 //
-// - A buffer target (macOS and iOS) owns a set of display buffers, and
-//   Flutter's raster thread takes the latest one through MapTexture::Present().
+// - A buffer target (macOS and iOS) owns a set of display buffers, one per
+//   display slot, and registers one Flutter texture per slot (design D122).
+//   Dart chooses the slot to display, and Flutter's raster thread takes its
+//   buffer through MapTexture::Present(slot).
 //   A copy-free map, the default, renders directly into the free buffer, made
 //   the session's target with set_target before each render (design D20).
 //   Otherwise the session renders into one render texture, and each frame is
@@ -46,8 +48,11 @@ class RenderTarget {
   virtual BufferRenderTarget* AsBufferTarget() { return nullptr; }
   virtual SurfaceRenderTarget* AsSurfaceTarget() { return nullptr; }
 
-  // The id of the registered Flutter texture.
-  virtual int64_t texture_id() const = 0;
+  // The number of display slots, each with its own Flutter texture.
+  virtual int slot_count() const { return 1; }
+
+  // The id of the registered Flutter texture of `slot`.
+  virtual int64_t texture_id(int slot) const = 0;
 
   // The thread that calls MapTexture::Resize(), before the resize is queued
   // for the map thread. `size` is the size the map thread will apply.
@@ -62,7 +67,7 @@ class RenderTarget {
                                const TargetSize& size) = 0;
 
   // The thread that disposes the map, after the map thread has stopped.
-  // Unregisters the Flutter texture.
+  // Unregisters the Flutter textures.
   virtual void Unregister() = 0;
 };
 
@@ -77,16 +82,21 @@ class BufferRenderTarget : public RenderTarget {
   virtual bool PrepareBuffers(const TargetSize& size) = 0;
 
   // Map thread, under the BufferState lock. Replaces the current buffer set
-  // with the prepared one. The buffer at index `latest` of the outgoing set
-  // (if `latest` >= 0) stays displayable until a frame of the new set is
-  // published, so that Flutter has a frame to show during a resize.
-  virtual void SwapBuffersLocked(int latest) = 0;
+  // with the prepared one. The buffer of slot `chosen` of the outgoing set,
+  // the slot Dart chose last (if `chosen` >= 0), stays displayable as the
+  // fallback until ReleaseFallbackLocked(), so that Flutter shows the frame
+  // Dart displays during a resize (design D126).
+  virtual void SwapBuffersLocked(int chosen) = 0;
 
-  // Flutter's raster thread. Returns the buffer to display for index `index` (or the
-  // retained buffer from before the last swap if `index` is -1), retained for
-  // the caller. Called under the BufferState lock from MapTexture::Present.
+  // Flutter's raster thread. Returns the buffer to display for slot `index`
+  // (or the fallback if `index` is -1), retained for the caller, or null if
+  // there is none. Called under the BufferState lock from MapTexture::Present.
   // The return type is platform-specific (macOS: CVPixelBufferRef).
   virtual void* CopyBufferLocked(int index) = 0;
+
+  // The platform thread, under the BufferState lock: Dart chose a frame of
+  // the current set, so the fallback is no longer needed.
+  virtual void ReleaseFallbackLocked() = 0;
 
   // Attach() and SetTarget() make the session render into the render
   // texture, or the current set's first buffer.
@@ -104,7 +114,13 @@ class BufferRenderTarget : public RenderTarget {
     return MLN_STATUS_OK;
   }
 
-  // Map thread. Tells Flutter that a new frame is available.
+  // The platform thread, from MapTexture::Select. Tells Flutter that the
+  // texture of `slot` has a new frame, before the Flutter frame that Dart is
+  // building is rasterized (design D123).
+  virtual void FrameAvailable(int slot) = 0;
+
+  // Map thread. Tells Flutter that every slot's texture has a new frame,
+  // after a resize (see MapTexture::MaybeNotifyAfterResize).
   virtual void FrameAvailable() = 0;
 
   // Map thread, after the session is destroyed. Releases all buffers.
@@ -114,7 +130,8 @@ class BufferRenderTarget : public RenderTarget {
 // A target that presents through a surface whose buffers Flutter displays
 // (Android). Each render_update that renders a frame also queues it for
 // display, and Flutter schedules a frame for each queued one, so the target
-// has no FrameAvailable().
+// has no FrameAvailable(). It has one display slot, and Dart can't choose the
+// frame to display (design D128).
 class SurfaceRenderTarget : public RenderTarget {
  public:
   SurfaceRenderTarget* AsSurfaceTarget() override { return this; }

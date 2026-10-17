@@ -12,6 +12,14 @@ import 'map_texture_layer.dart';
 /// Displays a MapLibre map as the base layer of a `FlutterMap`. Place it first
 /// among the map's children, and give exactly one of [styleUrl] and
 /// [styleJson].
+///
+/// MapLibre renders the map on its own thread, so while the camera moves, for
+/// example during a pan or a zoom, the displayed map lags the `flutter_map`
+/// camera by one to two frames. Layers placed after this one among the
+/// `FlutterMap` children follow the camera without that lag, so they shift
+/// against the map while it moves. To keep overlay layers such as a
+/// `MarkerLayer` or a `PolylineLayer` aligned with the map, place them in this
+/// layer's own [children] instead of the `FlutterMap` children.
 final class MapigradeLayer extends StatelessWidget {
   /// A layer that displays [styleUrl] or [styleJson].
   const MapigradeLayer({
@@ -23,6 +31,7 @@ final class MapigradeLayer extends StatelessWidget {
     this.onStyleLoaded,
     this.onError,
     this.metrics,
+    this.children = const [],
   }) : assert(
          (styleUrl == null) != (styleJson == null),
          'give exactly one of styleUrl and styleJson',
@@ -72,6 +81,18 @@ final class MapigradeLayer extends StatelessWidget {
   /// new [key].
   final LayerMetrics? metrics;
 
+  /// Layers drawn above the map, in order, such as a `PolylineLayer` or a
+  /// `MarkerLayer`. On macOS and iOS the layer draws them at the camera of
+  /// the map frame it displays, so that they stay exactly on the map while
+  /// the camera moves; they move with the map, about one to two frames behind
+  /// the gesture. On Android it draws them at the live camera, as the layers
+  /// placed after it.
+  ///
+  /// Place widgets that change the camera, or that read it to decide what to
+  /// do, after this layer among the `FlutterMap` children instead, because
+  /// the children read the camera of the displayed frame.
+  final List<Widget> children;
+
   @override
   Widget build(BuildContext context) => MapTextureLayer(
     styleUrl: styleUrl,
@@ -81,5 +102,6 @@ final class MapigradeLayer extends StatelessWidget {
     onStyleLoaded: onStyleLoaded,
     onError: onError,
     metrics: metrics,
+    children: children,
   );
 }

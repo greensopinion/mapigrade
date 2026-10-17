@@ -1,6 +1,10 @@
 // The map as the base layer of a FlutterMap, with marker and polyline
 // overlays (task 3.3 of the flutter-map-layer change). Open it from the
 // control panel, or at launch with `--dart-define=FLUTTER_MAP_PAGE=true`.
+// The panel's "children" switch places the overlays as children of the layer
+// (task 5.4 of the layer-children-alignment change); it starts on with
+// `--dart-define=ALIGNMENT_CHILDREN=1`. Tapping a marker counts the tap in the
+// panel.
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/src/testing.dart';
@@ -32,12 +36,54 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
   String _camera = '';
   FrameCamera? _frame;
   AlignmentMode _mode = AlignmentMode.predict1;
+  bool _children = alignmentChildren;
+  // The last tapped landmark and the number of marker taps.
+  int? _tapped;
+  int _taps = 0;
 
   void _onController(MapTextureController controller) {
     controller.frames.listen((f) {
       if (mounted) setState(() => _frame = f);
     });
   }
+
+  /// The polyline and the markers, which count taps.
+  List<Widget> _overlays() => [
+    PolylineLayer(
+      polylines: [
+        Polyline(
+          points: landmarks,
+          strokeWidth: 6,
+          color: Colors.deepPurple.withValues(alpha: 0.8),
+        ),
+      ],
+    ),
+    MarkerLayer(
+      markers: [
+        for (final (i, point) in landmarks.indexed)
+          Marker(
+            point: point,
+            width: 24,
+            height: 24,
+            child: GestureDetector(
+              onTap: () => setState(() {
+                _tapped = i;
+                _taps++;
+              }),
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                  border: Border.fromBorderSide(
+                    BorderSide(color: Colors.white, width: 3),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -67,35 +113,9 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
                 copyFree: copyFree,
                 alignment: _mode.alignment,
                 onController: _onController,
+                children: _children ? _overlays() : const [],
               ),
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: landmarks,
-                    strokeWidth: 6,
-                    color: Colors.deepPurple.withValues(alpha: 0.8),
-                  ),
-                ],
-              ),
-              MarkerLayer(
-                markers: [
-                  for (final point in landmarks)
-                    Marker(
-                      point: point,
-                      width: 24,
-                      height: 24,
-                      child: const DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.orange,
-                          shape: BoxShape.circle,
-                          border: Border.fromBorderSide(
-                            BorderSide(color: Colors.white, width: 3),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              if (!_children) ..._overlays(),
             ],
           ),
           Positioned(
@@ -142,6 +162,22 @@ class _FlutterMapPageState extends State<FlutterMapPage> {
                         selected: {_mode},
                         onSelectionChanged: (s) =>
                             setState(() => _mode = s.single),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            key: const Key('flutter-map-children'),
+                            value: _children,
+                            onChanged: (v) => setState(() => _children = v),
+                          ),
+                          const Text('children'),
+                        ],
+                      ),
+                      Text(
+                        _tapped == null
+                            ? 'Tapped: -'
+                            : 'Tapped: landmark ${_tapped! + 1} ($_taps taps)',
                       ),
                       Text('flutter_map: $_camera'),
                       Text(
