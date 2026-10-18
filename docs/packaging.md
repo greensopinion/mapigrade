@@ -4,6 +4,8 @@
 
 On iOS, Xcode embeds and signs the framework in `Runner.app/Frameworks/`. The test harness is arm64 only, because the FFI presets are arm64 only: `ARCHS = arm64` in `packages/test_harness/macos/Runner/Configs/AppInfo.xcconfig`, and `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64` in `packages/test_harness/ios/Flutter/Debug.xcconfig` and `Release.xcconfig`.
 
+Xcode removes every global symbol from the app executable when it archives the app, because `STRIP_STYLE` defaults to `all` and archiving sets `DEPLOYMENT_POSTPROCESSING`. Dart's `@Native` lookup and `nativeLibraryAvailable` then can't find `map_texture_create`, so an app must set `STRIP_STYLE = non-global` for the `Runner` target's Release and Profile configurations (plugin README, Supported platforms). `flutter build` and `flutter run --release` don't set `DEPLOYMENT_POSTPROCESSING`, so their executables keep the symbols. The release build check below used such a build. The examples and the test harness don't set `STRIP_STYLE`.
+
 iOS release build check (2026-10-10): the executable exports all `map_texture_*` functions that Dart binds (`dyld_info -exports`), it loads `@rpath/MapLibreNativeC.framework/MapLibreNativeC` with `@executable_path/Frameworks` as an `LC_RPATH` entry, and the release build displays the map on an iPhone 15 Pro Max.
 
 Release build check (2026-10-09): `otool -L` on the executable shows `@rpath/MapLibreNativeC.framework/Versions/A/MapLibreNativeC`, the only `LC_RPATH` entries are `/usr/lib/swift` and `@executable_path/../Frameworks`, `codesign --verify --deep --strict` passes, and a copy of the `.app` outside the build directory starts and shows the map. In the release bundle, `MapLibreNativeC.framework` takes 12,884 KB of 49,952 KB.
