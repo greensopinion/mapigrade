@@ -272,10 +272,6 @@ void SetAllPaused(bool paused);
 // memory warning. Defined in map_texture_api.cpp.
 void ReduceAllMemoryUse();
 
-// The sum of rendered frames over every live map, for logging. Defined in
-// map_texture_api.cpp.
-int64_t TotalRenderedFrames();
-
 // For tests and measurements: when maps render without waiting until Dart has
 // chosen the latest frame. kAuto (the default) renders ahead while a frame
 // takes longer than a display refresh interval (design D19).

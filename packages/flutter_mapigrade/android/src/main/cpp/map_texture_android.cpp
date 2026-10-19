@@ -44,8 +44,6 @@
 namespace map_texture {
 namespace {
 
-#define LOGI(...) \
-  __android_log_print(ANDROID_LOG_INFO, "flutter_mapigrade", __VA_ARGS__)
 #define LOGE(...) \
   __android_log_print(ANDROID_LOG_ERROR, "flutter_mapigrade", __VA_ARGS__)
 
@@ -178,8 +176,6 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     CloseDeferredImages(env);
     env->CallVoidMethod(map_surface_, map_surface_release_readers);
     CheckException(env, "MapSurface.releaseReaders");
-    LOGI("released the reader of texture %lld",
-         static_cast<long long>(texture_id_));
   }
 
   // Main thread, when the activity starts: creates a reader for the map to
@@ -188,8 +184,6 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     if (!released_) return;
     released_ = false;
     CreateReader();
-    LOGI("restored the reader of texture %lld",
-         static_cast<long long>(texture_id_));
   }
 
   // MapSurface's listener thread: the image of frame `frame_id` arrived.
@@ -625,9 +619,7 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
   // Once per process; later calls return MLN_STATUS_OK at once. The
   // application context outlives every activity.
   mln_status status = mln_android_init(env, nullptr, context);
-  if (status == MLN_STATUS_OK) {
-    LOGI("mln_android_init succeeded");
-  } else {
+  if (status != MLN_STATUS_OK) {
     const char* detail = mln_thread_last_error_message();
     LOGE("mln_android_init failed with status %d: %s", static_cast<int>(status),
          detail != nullptr ? detail : "");
@@ -637,25 +629,13 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
 JNIEXPORT void JNICALL
 Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeSetPaused(
     JNIEnv*, jobject, jboolean paused) {
-  if (paused) {
-    map_texture::SetAllPaused(true);
-    LOGI("paused rendering (rendered frames: %lld)",
-         static_cast<long long>(map_texture::TotalRenderedFrames()));
-  } else {
-    // Read before resuming, so that it equals the count logged at the pause
-    // if nothing rendered while paused.
-    int64_t rendered = map_texture::TotalRenderedFrames();
-    map_texture::SetAllPaused(false);
-    LOGI("resumed rendering (rendered frames before resuming: %lld)",
-         static_cast<long long>(rendered));
-  }
+  map_texture::SetAllPaused(paused);
 }
 
 JNIEXPORT void JNICALL
 Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeReduceMemoryUse(
     JNIEnv*, jobject) {
   map_texture::ReduceAllMemoryUse();
-  LOGI("memory pressure, reducing memory use");
 }
 
 JNIEXPORT void JNICALL

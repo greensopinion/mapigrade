@@ -5,8 +5,6 @@
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
 
-#include <chrono>
-
 #include "core/map_texture.h"
 #endif
 
@@ -27,29 +25,15 @@ NSObject<FlutterTextureRegistry>* MLTTextureRegistry(void) {
 // observers run synchronously, so rendering has stopped before the app is
 // suspended.
 static void MLTPauseRendering(NSNotification*) {
-  auto start = std::chrono::steady_clock::now();
   map_texture::SetAllPaused(true);
-  auto waited = std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::steady_clock::now() - start);
-  NSLog(@"flutter_mapigrade: paused rendering in %lld us "
-        @"(rendered frames: %lld)",
-        static_cast<long long>(waited.count()),
-        static_cast<long long>(map_texture::TotalRenderedFrames()));
 }
 
-// The rendered-frame count is read before resuming, so that it equals the
-// count logged at the pause if nothing rendered in the background.
 static void MLTResumeRendering(NSNotification*) {
-  int64_t rendered = map_texture::TotalRenderedFrames();
   map_texture::SetAllPaused(false);
-  NSLog(@"flutter_mapigrade: resumed rendering "
-        @"(rendered frames before resuming: %lld)",
-        static_cast<long long>(rendered));
 }
 
 static void MLTReduceMemoryUse(NSNotification*) {
   map_texture::ReduceAllMemoryUse();
-  NSLog(@"flutter_mapigrade: memory warning, reducing memory use");
 }
 
 static void MLTObserveApplicationLifecycle(void) {
