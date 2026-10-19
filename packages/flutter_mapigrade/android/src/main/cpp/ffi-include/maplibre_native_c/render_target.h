@@ -1,0 +1,224 @@
+/**
+ * @file maplibre_native_c/render_target.h
+ * Shared public C API declarations for render target descriptors.
+ */
+
+#ifndef MAPLIBRE_NATIVE_C_RENDER_TARGET_H
+#define MAPLIBRE_NATIVE_C_RENDER_TARGET_H
+
+#include <stdint.h>
+
+#include "base.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * Bit pattern of a Vulkan non-dispatchable handle.
+ *
+ * Vulkan defines these handles as pointers on 64-bit targets and as uint64_t
+ * values on 32-bit targets. This fixed-width carrier preserves either native
+ * representation across the C ABI. Zero represents VK_NULL_HANDLE.
+ */
+typedef uint64_t mln_vulkan_non_dispatchable_handle;
+
+/** Null Vulkan non-dispatchable handle. */
+#define MLN_VULKAN_NON_DISPATCHABLE_HANDLE_NULL UINT64_C(0)
+
+/** Logical render target extent in UI pixels. */
+typedef struct mln_render_target_extent {
+  uint32_t size;
+  /** Logical map width in UI pixels. */
+  uint32_t width;
+  /** Logical map height in UI pixels. */
+  uint32_t height;
+  /** UI-to-device pixel scale. Must be positive and finite. */
+  double scale_factor;
+} mln_render_target_extent;
+
+/** Metal backend context fields shared by Metal render targets. */
+typedef struct mln_metal_context_descriptor {
+  uint32_t size;
+  /** id<MTLDevice> / MTL::Device*. Retained when the target requires it. */
+  void* device;
+} mln_metal_context_descriptor;
+
+/** Vulkan backend context fields shared by Vulkan render targets. */
+typedef struct mln_vulkan_context_descriptor {
+  uint32_t size;
+  /** Borrowed VkInstance. Required. */
+  void* instance;
+  /** Borrowed VkPhysicalDevice. Required. */
+  void* physical_device;
+  /** Borrowed VkDevice. Required. */
+  void* device;
+  /** Borrowed graphics VkQueue. Required. */
+  void* graphics_queue;
+  /** Queue family index for graphics_queue. Must support graphics commands. */
+  uint32_t graphics_queue_family_index;
+  /** PFN_vkGetInstanceProcAddr for the loader that created the Vulkan handles.
+   */
+  void* get_instance_proc_addr;
+  /** PFN_vkGetDeviceProcAddr for the loader that created the Vulkan device. */
+  void* get_device_proc_addr;
+} mln_vulkan_context_descriptor;
+
+/** WebGPU backend context fields shared by WebGPU render targets. */
+typedef struct mln_webgpu_context_descriptor {
+  uint32_t size;
+  /** Borrowed WGPUInstance. Optional for texture sessions. */
+  void* instance;
+  /** Borrowed WGPUDevice. Required. */
+  void* device;
+  /**
+   * Borrowed WGPUQueue. Optional; null uses the device default queue. A
+   * non-null queue must belong to device.
+   */
+  void* queue;
+} mln_webgpu_context_descriptor;
+
+/** OpenGL context providers supported by this build. */
+typedef enum mln_opengl_context_provider_flag : uint32_t {
+  MLN_OPENGL_CONTEXT_PROVIDER_FLAG_WGL = 1u << 0u,
+  MLN_OPENGL_CONTEXT_PROVIDER_FLAG_EGL = 1u << 1u,
+  /** Browser WebGL context imported into an Emscripten module. */
+  MLN_OPENGL_CONTEXT_PROVIDER_FLAG_WEBGL = 1u << 2u,
+} mln_opengl_context_provider_flag;
+
+/** OpenGL platform context provider used by a context descriptor. */
+typedef enum mln_opengl_context_platform : uint32_t {
+  /** No OpenGL context provider is selected. */
+  MLN_OPENGL_CONTEXT_PLATFORM_UNSPECIFIED = 0u,
+  MLN_OPENGL_CONTEXT_PLATFORM_WGL = 1u,
+  MLN_OPENGL_CONTEXT_PLATFORM_EGL = 2u,
+  /** Emscripten WebGL context handle. */
+  MLN_OPENGL_CONTEXT_PLATFORM_WEBGL = 3u,
+} mln_opengl_context_platform;
+
+/**
+ * How a session's OpenGL context relates to the thread that attached it.
+ *
+ * A shared session leaves the thread as it found it: every render makes the
+ * session context current and restores whatever was current before. The session
+ * context joins the host share group named by the descriptor, so a host may
+ * hand the session a texture and sample it from its own context.
+ *
+ * A dedicated session owns the thread. It makes its context current once and
+ * keeps it current between renders, and it joins no share group. Use this when
+ * a thread exists to drive one render session and runs no other graphics work,
+ * such as an Android host that renders into a SurfaceView.
+ */
+typedef enum mln_opengl_context_ownership : uint32_t {
+  /** The session shares its thread with host graphics work. */
+  MLN_OPENGL_CONTEXT_OWNERSHIP_SHARED = 0u,
+  /** The session owns its thread's OpenGL context. */
+  MLN_OPENGL_CONTEXT_OWNERSHIP_DEDICATED = 1u,
+} mln_opengl_context_ownership;
+
+/** OpenGL client API a dedicated EGL session creates its context for. */
+typedef enum mln_opengl_client_api : uint32_t {
+  /** No client API is named. */
+  MLN_OPENGL_CLIENT_API_UNSPECIFIED = 0u,
+  /** Desktop OpenGL, as EGL_OPENGL_API names it. */
+  MLN_OPENGL_CLIENT_API_GL = 1u,
+  /** OpenGL ES, as EGL_OPENGL_ES_API names it. */
+  MLN_OPENGL_CLIENT_API_GLES = 2u,
+} mln_opengl_client_api;
+
+/** WGL context fields shared by OpenGL render targets on Windows. */
+typedef struct mln_wgl_context_descriptor {
+  uint32_t size;
+  /** Borrowed HDC used to create the session context. Required. */
+  void* device_context;
+  /**
+   * Borrowed HGLRC whose share group the session context joins. Required under
+   * shared ownership. A dedicated session joins no share group, so it must be
+   * null there.
+   */
+  void* share_context;
+  /** Optional wglGetProcAddress-compatible function for the host loader. */
+  void* get_proc_address;
+} mln_wgl_context_descriptor;
+
+/** EGL context fields shared by OpenGL render targets. */
+typedef struct mln_egl_context_descriptor {
+  uint32_t size;
+  /** Borrowed EGLDisplay. Required. */
+  void* display;
+  /**
+   * Borrowed EGLConfig used to create a shared session context. Required.
+   * OpenGL texture sessions require EGL_SURFACE_TYPE to include
+   * EGL_PBUFFER_BIT.
+   */
+  void* config;
+  /**
+   * Borrowed EGLContext whose share group the session context joins. Required
+   * under shared ownership, where the session also takes its client API from
+   * this context. A dedicated session joins no share group, so it must be null
+   * there and names client_api instead.
+   */
+  void* share_context;
+  /**
+   * Client API the session creates its context for. Required under dedicated
+   * ownership. A shared session queries share_context for it, so this is
+   * ignored there.
+   */
+  mln_opengl_client_api client_api;
+  /** Optional eglGetProcAddress-compatible function for the host loader. */
+  void* get_proc_address;
+} mln_egl_context_descriptor;
+
+/** WebGL context fields shared by OpenGL render targets in the browser. */
+typedef struct mln_webgl_context_descriptor {
+  uint32_t size;
+  /** Borrowed EMSCRIPTEN_WEBGL_CONTEXT_HANDLE. Must be positive. */
+  int32_t context;
+} mln_webgl_context_descriptor;
+
+/** OpenGL backend context fields shared by OpenGL render targets. */
+typedef struct mln_opengl_context_descriptor {
+  uint32_t size;
+  /** WGL or EGL context provider. */
+  mln_opengl_context_platform platform;
+  /**
+   * Whether the session shares its thread with host graphics work. WGL and EGL
+   * surface sessions support both. A WebGL session renders through the host's
+   * own context and a texture session hands its texture to the host, so both
+   * are shared only.
+   */
+  mln_opengl_context_ownership ownership;
+  union {
+    mln_wgl_context_descriptor wgl;
+    mln_egl_context_descriptor egl;
+    mln_webgl_context_descriptor webgl;
+  } data;
+} mln_opengl_context_descriptor;
+
+/**
+ * Computes the physical device-pixel size of a logical render target extent.
+ *
+ * Each dimension is ceil(logical * scale_factor). Session-owned texture targets
+ * and surface targets are sized this way. Caller-owned borrowed texture targets
+ * state their physical size directly; see texture.h.
+ *
+ * Returns:
+ * - MLN_STATUS_OK on success.
+ * - MLN_STATUS_INVALID_ARGUMENT when extent is null or invalid, out_width or
+ *   out_height is null, or the scaled dimensions are too large.
+ */
+MLN_API mln_status mln_render_target_extent_physical_size(
+  const mln_render_target_extent* extent, uint32_t* out_width,
+  uint32_t* out_height
+) MLN_NOEXCEPT;
+
+/**
+ * Returns OpenGL context providers supported by this build.
+ */
+MLN_API uint32_t mln_opengl_supported_context_provider_mask(void) MLN_NOEXCEPT;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // MAPLIBRE_NATIVE_C_RENDER_TARGET_H

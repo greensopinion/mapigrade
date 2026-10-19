@@ -1,7 +1,7 @@
 // Checks that the notice files in notices/ equal the notices of the MapLibre
 // Native FFI presets installed in third_party/ (design D96 of the
 // third-party-notices change, second item). Only presets built at the commit in
-// scripts/maplibre_ffi.lock are compared. The test is skipped when no such
+// maplibre_ffi.lock are compared. The test is skipped when no such
 // preset is installed, for example in a checkout without the FFI build.
 import 'dart:io';
 
@@ -15,9 +15,9 @@ final ffiDirectory = p.join(
   'maplibre-native-ffi',
 );
 
-/// The presets installed at the commit in `scripts/maplibre_ffi.lock`.
+/// The presets installed at the commit in `maplibre_ffi.lock`.
 List<String> pinnedPresets() {
-  final lock = File(p.join(repositoryRoot, 'scripts', 'maplibre_ffi.lock'))
+  final lock = File('maplibre_ffi.lock')
       .readAsStringSync();
   final commit = RegExp(
     r'^MAPLIBRE_FFI_COMMIT=(\S+)$',

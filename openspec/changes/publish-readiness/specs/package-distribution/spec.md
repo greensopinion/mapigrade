@@ -35,7 +35,7 @@ An application that depends on the package, with the package's files exactly as 
 
 #### Scenario: Consumer build in CI
 - **WHEN** CI copies the files that the dry run lists to a directory outside the checkout, creates a new Flutter application that depends on that directory, and builds a release APK, an iOS simulator build, an iOS device build without code signing and a macOS build on a runner without an FFI build
-- **THEN** every build succeeds, the APK's `lib/` directory contains `libmaplibre-native-c.so` and `libflutter_mapigrade.so` for each of the three ABIs, and the iOS and macOS applications contain `MapLibreNativeC.framework`
+- **THEN** every build succeeds, the APK's `lib/` directory contains `libmaplibre-native-c.so` and `libflutter_mapigrade.so` for each of the three ABIs, and the iOS and macOS applications contain `MaplibreNativeC.framework`
 
 #### Scenario: Build reads a file outside the package
 - **WHEN** a change makes the package's Android or Apple build read a file through a path outside the package directory

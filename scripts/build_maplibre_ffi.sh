@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Clones MapLibre Native FFI at the commit in scripts/maplibre_ffi.lock,
+# Clones MapLibre Native FFI at the commit in
+# packages/flutter_mapigrade/maplibre_ffi.lock,
 # applies the patches in scripts/patches/, builds the presets listed in the
 # lock file (or the ones given as arguments), and installs each into
-# third_party/maplibre-native-ffi/<preset>/. It combines every installed Apple
-# preset into third_party/maplibre-native-ffi/MapLibreNativeC.xcframework. For
+# third_party/maplibre-native-ffi/<preset>/. It combines the
+# MaplibreNativeC.framework that the install of every Apple preset creates into
+# third_party/maplibre-native-ffi/MaplibreNativeC.xcframework, which
+# darwin/flutter_mapigrade/Package.swift uses in place of the remote zip, and
+# deletes Swift Package Manager's manifest cache so that the next build does. For
 # Android presets, it also builds the FFI's patched rustls-platform-verifier
 # Android component and installs it into the Maven repository
 # third_party/maplibre-native-ffi/android-maven/. It copies the third-party
@@ -26,12 +30,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=maplibre_ffi.lock
-source "$repo_root/scripts/maplibre_ffi.lock"
+# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
 
 src_dir="$repo_root/third_party/maplibre-native-ffi-src"
 out_dir="$repo_root/third_party/maplibre-native-ffi"
-fw_name=MapLibreNativeC
+fw_name=MaplibreNativeC
 
 read -r -a all_presets <<< "$MAPLIBRE_FFI_PRESETS"
 read -r -a android_presets <<< "$MAPLIBRE_FFI_ANDROID_PRESETS"
@@ -118,75 +122,6 @@ if [[ "$build_android" == true ]]; then
   "$src_dir/.mise/bin/sync-rustls-platform-verifier"
 fi
 
-# Writes the framework Info.plist for a preset to $1.
-write_info_plist() {
-  local plist=$1 preset=$2 platform_keys
-  case "$preset" in
-    macos-*)
-      platform_keys="<key>LSMinimumSystemVersion</key><string>14.3</string>" ;;
-    ios-simulator-*)
-      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
-  <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>" ;;
-    ios-*)
-      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
-  <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>" ;;
-  esac
-  cat > "$plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key><string>$fw_name</string>
-  <key>CFBundleIdentifier</key><string>org.maplibre.$fw_name</string>
-  <key>CFBundleName</key><string>$fw_name</string>
-  <key>CFBundlePackageType</key><string>FMWK</string>
-  <key>CFBundleShortVersionString</key><string>0.0.0</string>
-  <key>CFBundleVersion</key><string>${MAPLIBRE_FFI_COMMIT:0:12}</string>
-  $platform_keys
-</dict>
-</plist>
-PLIST
-}
-
-# Wraps the dylib of an installed preset in a framework under $2: the versioned
-# layout on macOS, the flat layout on iOS. Swift Package Manager accepts the
-# frameworks as a binary target once they are combined into an xcframework, and
-# Xcode embeds and signs the framework in the app bundle.
-make_framework() {
-  local preset=$1 stage=$2 install="$out_dir/$1"
-  local fw="$stage/$preset/$fw_name.framework" contents
-  if [[ "$preset" == macos-* ]]; then
-    contents="$fw/Versions/A"
-  else
-    contents="$fw"
-  fi
-  mkdir -p "$contents/Headers" "$contents/Modules"
-  cp "$install/lib/libmaplibre-native-c.dylib" "$contents/$fw_name"
-  if [[ "$preset" == macos-* ]]; then
-    install_name_tool -id "@rpath/$fw_name.framework/Versions/A/$fw_name" "$contents/$fw_name"
-  else
-    install_name_tool -id "@rpath/$fw_name.framework/$fw_name" "$contents/$fw_name"
-  fi
-  cp -R "$install/include/maplibre_native_c.h" "$install/include/maplibre_native_c" "$contents/Headers/"
-  cat > "$contents/Modules/module.modulemap" <<MODULEMAP
-framework module $fw_name {
-  umbrella header "maplibre_native_c.h"
-  export *
-}
-MODULEMAP
-  if [[ "$preset" == macos-* ]]; then
-    mkdir -p "$contents/Resources"
-    write_info_plist "$contents/Resources/Info.plist" "$preset"
-    ln -s A "$fw/Versions/Current"
-    for item in "$fw_name" Headers Modules Resources; do
-      ln -s "Versions/Current/$item" "$fw/$item"
-    done
-  else
-    write_info_plist "$contents/Info.plist" "$preset"
-  fi
-  echo "$fw"
-}
-
 for preset in "${presets[@]}"; do
   start=$(date +%s)
   with_tools cmake -S "$src_dir" --preset "$preset"
@@ -249,18 +184,23 @@ if [[ "$build_apple" != true ]]; then
   exit 0
 fi
 
-# Combines every installed preset of the pinned commit into the xcframework.
-stage="$out_dir/framework-stage"
-rm -rf "$stage"
+# Combines the framework of every installed preset of the pinned commit into
+# the xcframework.
 fw_args=()
 for preset in "${all_presets[@]}"; do
   if [[ "$(cat "$out_dir/$preset/BUILD_INFO" 2>/dev/null)" == "$MAPLIBRE_FFI_COMMIT $preset" ]]; then
-    fw_args+=(-framework "$(make_framework "$preset" "$stage")")
+    fw_args+=(-framework "$out_dir/$preset/Frameworks/$fw_name.framework")
   else
     echo "Not in the xcframework (not built at the pinned commit): $preset" >&2
   fi
 done
 rm -rf "$out_dir/$fw_name.xcframework"
 xcodebuild -create-xcframework "${fw_args[@]}" -output "$out_dir/$fw_name.xcframework" >/dev/null
-rm -rf "$stage"
 echo "Created $out_dir/$fw_name.xcframework with $(( ${#fw_args[@]} / 2 )) slices"
+
+# Package.swift uses the xcframework only when it exists, but Swift Package
+# Manager caches the result of evaluating Package.swift by the manifest's
+# contents. Deleting the cache makes the next build evaluate it again and use
+# the local build in place of the remote zip.
+rm -f "$HOME"/Library/Caches/org.swift.swiftpm/manifests/manifest.db*
+echo "Deleted the Swift Package Manager manifest cache"

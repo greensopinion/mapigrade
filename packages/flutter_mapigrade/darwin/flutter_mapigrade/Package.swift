@@ -1,10 +1,28 @@
 // swift-tools-version: 5.9
 
+import Foundation
 import PackageDescription
 
-// Sources/flutter_mapigrade/core is a symlink to the shared C++ core
-// in ../../src/core, and Frameworks/MapLibreNativeC.xcframework is a symlink to
-// the output of scripts/build_maplibre_ffi.sh at the repository root.
+// Sources/flutter_mapigrade/core is a symlink to the shared C++ core in
+// ../../src/core.
+//
+// MaplibreNativeC is the xcframework zip of the MapLibre Native FFI release in
+// ../../maplibre_ffi.lock. scripts/update_ffi_pins.sh writes its URL and
+// checksum below from the lock file; don't edit them by hand. In this
+// repository, Frameworks/MaplibreNativeC.xcframework is a symlink to the output
+// of scripts/build_maplibre_ffi.sh, and the package uses that local build when
+// the symlink resolves. A published archive has no Frameworks/ directory.
+let localFramework = "Frameworks/MaplibreNativeC.xcframework"
+let maplibreNativeC: Target =
+    FileManager.default.fileExists(
+        atPath: Context.packageDirectory + "/" + localFramework)
+    ? .binaryTarget(name: "MaplibreNativeC", path: localFramework)
+    : .binaryTarget(
+        name: "MaplibreNativeC",
+        url: "https://github.com/maplibre/maplibre-native-ffi/releases/download/unstable-native-snapshot/MaplibreNativeC.xcframework.zip",
+        checksum: "c70784ce9de029e5f630cbe1a8e11e0e9c9481c3582179eaa7b48d4af7ecb2ec"
+    )
+
 let package = Package(
     name: "flutter_mapigrade",
     platforms: [
@@ -18,15 +36,12 @@ let package = Package(
         .package(name: "FlutterFramework", path: "../FlutterFramework")
     ],
     targets: [
-        .binaryTarget(
-            name: "MapLibreNativeC",
-            path: "Frameworks/MapLibreNativeC.xcframework"
-        ),
+        maplibreNativeC,
         .target(
             name: "flutter_mapigrade",
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework"),
-                "MapLibreNativeC",
+                "MaplibreNativeC",
             ],
             cxxSettings: [
                 .headerSearchPath("core"),

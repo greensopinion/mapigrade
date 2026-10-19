@@ -20,8 +20,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=maplibre_ffi.lock
-source "$repo_root/scripts/maplibre_ffi.lock"
+# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
 
 ffi_dir="$repo_root/third_party/maplibre-native-ffi"
 notices_dir="$repo_root/packages/flutter_mapigrade/notices"

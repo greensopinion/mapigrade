@@ -15,6 +15,12 @@ Current state, as checked on 2026-10-13:
 - `flutter pub publish` and `dart pub` in Flutter 3.47.5 have no option that writes the archive to a file.
 - The names `flutter_mapigrade` and `mapigrade` are free on pub.dev.
 
+On 2026-10-16 we ran a zip built from the 0.202610.0 tarballs as a remote binary target. Swift Package Manager downloaded it and checked its checksum, but the macOS build failed: `maplibre_native_c/callback_adapter.h` includes its sibling headers as `"maplibre_native_c/base.h"`, which doesn't resolve inside a framework's `Headers/`. #808 changes these includes to bare names, so no xcframework built from a release before it compiles. `unstable-native-snapshot` at `017483a` (2026-10-14) contains #807 and #808.
+
+On 2026-10-18 upstream merged #838 (`c3ad8a9`) in place of our #822. It renames the framework and its module to `MaplibreNativeC`, makes the CMake install of each Apple Metal preset create `Frameworks/MaplibreNativeC.framework` in the tarball, and adds `MaplibreNativeC.xcframework.zip` to the native release, listed in `SHA256SUMS`. The zip has six slices (iOS, iOS simulator, Mac Catalyst, macOS, tvOS, tvOS simulator). It has no dSYMs; #845 (`386377f`, merged 2026-10-18) adds a dSYM to each slice. `unstable-native-snapshot` at `44d24a1` (2026-10-18, after #838 and #843) contains the zip, with checksum `c70784ce9de029e5f630cbe1a8e11e0e9c9481c3582179eaa7b48d4af7ecb2ec`. Upstream replaces the snapshot's assets on every publish, so a checksum of a snapshot asset stops matching after the next publish.
+
+On 2026-10-19 the snapshot was still at `44d24a1`. Upstream publishes a snapshot only from a commit whose CI on `main` passed, and CI on `main` had failed on every commit since #845. The same day the upstream maintainer stated that upstream will tag a release before merging #760. That release contains #807, #808, #821, #838 and #845.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -68,18 +74,18 @@ Alternatives:
 
 ### D102. Apple uses a remote binary target
 
-`Package.swift` declares `MapLibreNativeC` as `.binaryTarget(name:url:checksum:)` with the values from D99. When `Frameworks/MapLibreNativeC.xcframework` exists in the package directory, it declares `.binaryTarget(name:path:)` in its place (D103). `.pubignore` excludes `darwin/flutter_mapigrade/Frameworks/`, so a published archive never contains a framework and always uses the URL. Swift Package Manager downloads the zip while Xcode resolves packages, checks the checksum and caches the zip.
+`Package.swift` declares `MaplibreNativeC` as `.binaryTarget(name:url:checksum:)` with the values from D99. When `Frameworks/MaplibreNativeC.xcframework` exists in the package directory, it declares `.binaryTarget(name:path:)` in its place (D103). `.pubignore` excludes `darwin/flutter_mapigrade/Frameworks/`, so a published archive never contains a framework and always uses the URL. Swift Package Manager downloads the zip while Xcode resolves packages, checks the checksum and caches the zip.
 
-The zip comes from the upstream release when upstream publishes it (D107). Until then, `scripts/package_xcframework.sh` builds it from the release's `ios-arm64-metal`, `ios-simulator-arm64-metal` and `macos-arm64-metal` tarballs, after checking `SHA256SUMS`, with the steps that `scripts/build_maplibre_ffi.sh` uses today: wrap each dylib in a framework, set its install name, run `xcodebuild -create-xcframework`. We attach the zip to a release of this repository, with GitHub's immutable releases enabled.
+The zip is the `MaplibreNativeC.xcframework.zip` of the upstream release (D107). Until the release pin (stage 2), the lock file states the URL and checksum of the zip in `unstable-native-snapshot`. Upstream replaces the snapshot's assets (see Context), so after each publish a remote build fails the checksum check until we update both values. Local builds (D103) are unaffected. Nothing is published before stage 2, so no consumer depends on these values. We don't copy the snapshot zip to a fork, because the next release contains the zip. If a release's zip doesn't work, `scripts/package_xcframework.sh` builds a zip from the release's `ios-arm64-metal`, `ios-simulator-arm64-metal` and `macos-arm64-metal` tarballs, after checking `SHA256SUMS`, and we attach it to a release of this repository, with GitHub's immutable releases enabled.
 
 Alternatives:
-- A build hook that downloads the dylib tarballs and declares each dylib as a code asset. Rejected: `src/core` and `MapTextureMetal.mm` link against `MapLibreNativeC` at link time and would have to resolve it at runtime, and we haven't checked whether Flutter runs build hooks before Xcode resolves plugin packages.
+- A build hook that downloads the dylib tarballs and declares each dylib as a code asset. Rejected: `src/core` and `MapTextureMetal.mm` link against `MaplibreNativeC` at link time and would have to resolve it at runtime, and we haven't checked whether Flutter runs build hooks before Xcode resolves plugin packages.
 
 ### D103. Local mode for repository development
 
 The package builds against a local FFI build in this repository, and against the released artifacts everywhere else:
 
-- Apple: `Package.swift` uses the path binary target when the symlink `Frameworks/MapLibreNativeC.xcframework` resolves to an existing framework. In a published archive the symlink is absent (D102).
+- Apple: `Package.swift` uses the path binary target when the symlink `Frameworks/MaplibreNativeC.xcframework` resolves to an existing framework. In a published archive the symlink is absent (D102). From `44d24a1` on, `scripts/build_maplibre_ffi.sh` combines the `MaplibreNativeC.framework` that the CMake install of each Apple preset creates, so the local and the remote frameworks have the same layout and module map. Swift Package Manager caches the result of evaluating `Package.swift` in `~/Library/Caches/org.swift.swiftpm/manifests/`, keyed by the manifest's contents, so it doesn't notice when the symlink starts or stops resolving: on 2026-10-19 a build after the local build was removed failed with "does not contain a binary artifact", and a build after it was restored kept the remote zip. `scripts/build_maplibre_ffi.sh` deletes that cache after it creates the xcframework, and `CONTRIBUTING.md` tells developers to delete it after they remove or rename the local build. The cache is shared by every Swift package on the machine; deleting it costs one evaluation of each manifest.
 - Android: `android/build.gradle.kts` uses today's build, with the local library, the local verifier repository and `CopyFfiLibrary`, when the Gradle property `mapigrade.ffiDir` names an existing directory. The example and the test harness set it in their `android/gradle.properties`. In a consumer's pub cache the directory doesn't exist, so the plugin uses the AAR. Gradle logs which mode it uses. Local mode builds only the ABIs that the local build installed.
 
 The two modes don't mix, because the AAR and the local build would both package `libmaplibre-native-c.so`.
@@ -103,16 +109,18 @@ A GitHub Actions workflow on a macOS runner, which has no FFI build:
 1. Reproduces the archive: runs `flutter pub publish --dry-run`, takes the file list it prints, and copies those files, with symlinks resolved, to a directory outside the checkout. Flutter 3.47.5 can't write the archive to a file.
 2. Creates an app with `flutter create` outside the checkout, with a path dependency on that directory and the example's `lib/main.dart`.
 3. Builds `flutter build apk --release`, `flutter build ios --simulator`, `flutter build ios --no-codesign` and `flutter build macos`.
-4. Checks that the APK's `lib/` has both libraries for each of the three ABIs, and that the iOS and macOS apps contain `MapLibreNativeC.framework`.
-5. Runs `scripts/fetch_ffi_release.sh`, which downloads the pinned release's tarballs and `SHA256SUMS` into the git-ignored `third_party/maplibre-native-ffi-release/<version>/` and checks them, and runs the tests that compare the committed headers (D101) and notices (D108) with them. `scripts/package_xcframework.sh` (D102) and `scripts/copy_ffi_notices.sh` (D108) read the tarballs from the same directory.
+4. Checks that the APK's `lib/` has both libraries for each of the three ABIs, and that the iOS and macOS apps contain `MaplibreNativeC.framework`.
+5. Runs `scripts/fetch_ffi_release.sh`, which downloads the pinned release's tarballs and `SHA256SUMS` into the git-ignored `third_party/maplibre-native-ffi-release/<version>/` and checks them, and runs the tests that compare the committed headers (D101) and notices (D108) with them. `scripts/package_xcframework.sh` (the fallback of D102) and `scripts/copy_ffi_notices.sh` (D108) read the tarballs from the same directory.
 
 The workflow runs on pull requests that change the package's native build files, the lock file or `.pubignore`. A second job on a Linux runner with KVM installs the APK on an x86_64 emulator and runs the test harness's integration tests: the Android emulator on Apple-silicon Macs runs only arm64 system images. The other runtime checks need devices and are tasks, not CI: an arm64 Android device, `armeabi-v7a` through `adb install --abi armeabi-v7a` on a device whose `ro.product.cpu.abilist` lists it, an iPhone and macOS. Each runs a release build that loads a style over HTTPS, which exercises the verifier's keep rules under R8.
 
 ### D107. Upstream contribution
 
-We propose a pull request to `maplibre/maplibre-native-ffi` that adds `MapLibreNativeC.xcframework.zip`, assembled from the Apple presets as in D102, and its checksum to the native release, and, separately, a Prefab module in the runtime AARs. The MapLibre organization already publishes an xcframework zip for Swift Package Manager: `maplibre-native` releases contain `MapLibre.dynamic.xcframework.zip`, which `maplibre-gl-native-distribution` declares as a remote binary target.
+We proposed to `maplibre/maplibre-native-ffi` that its native release include an xcframework zip and its checksum, and, separately, a Prefab module in the runtime AARs. The MapLibre organization already publishes an xcframework zip for Swift Package Manager: `maplibre-native` releases contain `MapLibre.dynamic.xcframework.zip`, which `maplibre-gl-native-distribution` declares as a remote binary target.
 
-Before the pull request, we build the zip from upstream tarballs and run it as a remote binary target on macOS and an iPhone, so the proposal describes an assembly that works. We do that first, before the Android and CI work, because the zip is only in the release that this change waits for if the pull request is merged before that release. The Prefab proposal needs no prototype and can be raised at any time.
+Before the xcframework proposal, we built the zip from the tarballs of `unstable-native-snapshot`, because no zip built from 0.202610.0 compiles (see Context), and ran it as a remote binary target on macOS and the iOS simulator, so the proposal described an assembly that works. `scripts/fetch_ffi_release.sh` and `scripts/package_xcframework.sh` take an optional release tag, which stage 0 used to fetch the snapshot into `third_party/maplibre-native-ffi-release/unstable-native-snapshot/`. The user opened #822 from the fork's branch `apple-xcframework`. Upstream closed it in favor of #838, which builds the framework in CMake, and merged #838 on 2026-10-18 (see Context).
+
+The Prefab proposal is issue #820 and pull request #821. On 2026-10-16 we checked it with a copy of the 0.202610.0 OpenGL AAR to which we added `prefab/` with `"stl": "none"`: the plugin linked through `find_package`, the release APK had one `libmaplibre-native-c.so` per ABI, and the map loaded on an arm64 emulator. The AAR grew from 16.9 MB to 33.8 MB, because it stores each library twice. The Kotlin Multiplatform Android library plugin that builds the AARs has no Prefab DSL, and AGP's `prefabPublishing` publishes only libraries of the module's own CMake build, so the pull request generates `prefab/` in a Gradle task.
 
 Upstream's `AI_POLICY.md` requires the contributor to write issues, pull request descriptions and review replies, and to read every line submitted. The user writes and opens both proposals. The implementation on a branch of a fork follows upstream's conventions (mise tasks, `hk` checks, `ci:test`).
 
@@ -124,8 +132,9 @@ We compared the 0.202610.0 artifacts on 2026-10-13. The AAR's `META-INF/licenses
 
 ## Risks / Trade-offs
 
-- [The upstream release containing #807 and #808 is later than planned] → 0.0.1 waits for it, as decided. Stage 0 runs against 0.202610.0, which lacks the fixes; they affect resizing, not packaging.
-- [Upstream doesn't accept the xcframework zip, or not in time] → D102's fallback: our own zip built from upstream tarballs, which needs only Xcode.
+- [The upstream release containing #807 and #808 is later than planned] → 0.0.1 waits for it, as decided. Until then, the Android work and the lock file use 0.202610.0, where the missing #807 affects only resizing. Apple builds use the zip in `unstable-native-snapshot` (D102), and local builds use `44d24a1`.
+- [Upstream replaces the snapshot zip while stage 1 checks run] → The remote build fails its checksum check and names the zip. We update the lock's URL and checksum to the new zip and run `scripts/update_ffi_pins.sh`.
+- [Upstream changes the zip's name or layout before the release] → Stage 2 repeats the consumer build and the runtime checks with the release's zip. D102's fallback, our own zip built from upstream tarballs, needs only Xcode.
 - [A release asset that a published version points to is deleted] → Builds of that version fail. Our own releases are immutable; for upstream assets we have no control, and the version would need a new release.
 - [First builds need network access; organizations that block GitHub downloads can't resolve the Apple binary target] → Documented in the README. Android goes through Maven Central, which repository proxies mirror.
 - [The C++ core or the JNI bridge has 32-bit faults] → The `armeabi-v7a` runtime check of D106. No such device is known to be available; Firebase Test Lab is the alternative.
@@ -136,9 +145,9 @@ We compared the 0.202610.0 artifacts on 2026-10-13. The AAR's `META-INF/licenses
 
 ## Migration Plan
 
-1. Stage 0, against 0.202610.0: build the zip with `scripts/package_xcframework.sh`, publish it on a fork's pre-release, and run it as a remote binary target on macOS and an iPhone.
-2. Stage 1: raise Prefab and open the xcframework zip pull request upstream (D107). While upstream reviews them, implement the rest of D99 to D106 against 0.202610.0 and run D106 and the runtime checks. After the pull request is merged, repeat the checks against `unstable-native-snapshot`.
-3. Stage 2: pin the release that contains #807, #808 and, if accepted, the zip. Run `scripts/update_ffi_pins.sh`, the notices script and D106, and confirm that the dry run reports no warnings.
+1. Stage 0, against `unstable-native-snapshot`: build the zip with `scripts/package_xcframework.sh`, publish it on a fork's pre-release, and run it as a remote binary target on macOS and an iPhone.
+2. Stage 1: raise Prefab and the xcframework zip upstream (D107); upstream added the zip in #838. Implement the rest of D99 to D106, with Android against 0.202610.0, Apple against the zip in `unstable-native-snapshot` (D102), local builds at `44d24a1`, and run D106 and the runtime checks.
+3. Stage 2: pin the release that contains #807, #808, the zip (#838) and its dSYMs (#845). Run `scripts/update_ffi_pins.sh`, the notices script and D106, and confirm that the dry run reports no warnings.
 
 Nothing is published before stage 2, so there is no rollback beyond reverting commits.
 

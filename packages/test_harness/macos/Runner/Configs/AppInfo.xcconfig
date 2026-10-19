@@ -14,5 +14,5 @@ PRODUCT_BUNDLE_IDENTIFIER = com.greensopinion.mapigradeTestHarness
 PRODUCT_COPYRIGHT = Copyright © 2026 org.maplibre. All rights reserved.
 
 // MapLibre Native FFI is built for arm64 only (macos-arm64-metal in
-// scripts/maplibre_ffi.lock), so the app is arm64 only.
+// packages/flutter_mapigrade/maplibre_ffi.lock), so the app is arm64 only.
 ARCHS = arm64

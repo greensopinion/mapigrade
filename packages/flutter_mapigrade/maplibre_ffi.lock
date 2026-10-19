@@ -1,0 +1,24 @@
+# The MapLibre Native FFI that the package uses (design D99 of the
+# publish-readiness change). Shell syntax: scripts/build_maplibre_ffi.sh and
+# the other scripts source it, and android/build.gradle.kts reads it.
+#
+# The upstream release whose artifacts the package uses.
+MAPLIBRE_FFI_VERSION=0.202610.0
+# The xcframework zip of that release and its `swift package compute-checksum`
+# value. scripts/update_ffi_pins.sh writes both into
+# darwin/flutter_mapigrade/Package.swift. Until a release contains the zip,
+# they name the zip of unstable-native-snapshot (44d24a1), whose assets upstream
+# replaces: after a new snapshot, update both and run the script again.
+MAPLIBRE_FFI_XCFRAMEWORK_URL=https://github.com/maplibre/maplibre-native-ffi/releases/download/unstable-native-snapshot/MaplibreNativeC.xcframework.zip
+MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=c70784ce9de029e5f630cbe1a8e11e0e9c9481c3582179eaa7b48d4af7ecb2ec
+MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
+# The commit that scripts/build_maplibre_ffi.sh builds locally. Until the
+# package pins a release that contains #807 and #808, it is the commit of
+# unstable-native-snapshot after #838, whose CMake install creates
+# MaplibreNativeC.framework.
+MAPLIBRE_FFI_COMMIT=44d24a1cfd9cb1b1b25a8c36e8e2472f0e392e18
+# The presets that make up MaplibreNativeC.xcframework, one slice each.
+MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"
+# The Android presets. Each is installed on its own and is not part of the
+# xcframework.
+MAPLIBRE_FFI_ANDROID_PRESETS="android-arm64-egl"

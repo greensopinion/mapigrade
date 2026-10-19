@@ -1,7 +1,0 @@
-MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
-MAPLIBRE_FFI_COMMIT=677a1cfdf1ab2b914f633d4abc790b7136d3a321
-# The presets that make up MapLibreNativeC.xcframework, one slice each.
-MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"
-# The Android presets. Each is installed on its own and is not part of the
-# xcframework.
-MAPLIBRE_FFI_ANDROID_PRESETS="android-arm64-egl"

@@ -20,6 +20,7 @@ Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. F
 
 ```
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
+  maplibre_ffi.lock                      the pinned FFI release, commit and presets
 packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
                                          flyover on your own devices (Android, iOS, macOS)
 packages/test_harness/                   test harness app: integration tests, benchmarks, color check
@@ -27,7 +28,6 @@ docs/                                    architecture, packaging, measurements, 
                                          and follow-up documents
 pubspec.yaml                             pub workspace of the Dart packages
 scripts/build_maplibre_ffi.sh            builds the pinned MapLibre Native FFI, and on Android its verifier AAR
-scripts/maplibre_ffi.lock                the pinned FFI commit and presets
 third_party/                             FFI checkout and build output (gitignored)
 ```
 
