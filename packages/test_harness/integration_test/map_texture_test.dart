@@ -296,6 +296,7 @@ void main() {
     await cycle();
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final before = processThreadCount();
+    final namesBefore = _threadNames();
     final footprintBefore = memoryFootprintForTesting();
     for (var i = 0; i < 50; i++) {
       await cycle();
@@ -306,6 +307,11 @@ void main() {
     debugPrint('thread count: before $before, after 50 cycles $after; '
         'memory footprint ${mib(footprintBefore)} MiB before, '
         '${mib(memoryFootprintForTesting())} MiB after');
+    if (after > before) {
+      final namesAfter = _threadNames();
+      debugPrint('threads added: ${_subtract(namesAfter, namesBefore)}; '
+          'removed: ${_subtract(namesBefore, namesAfter)}');
+    }
     expect(after, lessThanOrEqualTo(before));
   });
 
@@ -1031,4 +1037,25 @@ class _SelectingViewState extends State<_SelectingView> {
     return MapTextureView(
         controller: controller, slot: controller.selectedFrame?.slot ?? 0);
   }
+}
+
+/// The names of the process's threads, from /proc/self/task/*/comm, on Android
+/// only; empty elsewhere.
+List<String> _threadNames() {
+  if (!Platform.isAndroid) return const [];
+  final names = <String>[];
+  for (final task in Directory('/proc/self/task').listSync()) {
+    try {
+      names.add(File('${task.path}/comm').readAsStringSync().trim());
+    } on FileSystemException {
+      // The thread exited while the directory was listed.
+    }
+  }
+  return names..sort();
+}
+
+/// The elements of [a] that [b] doesn't have, counting repeated names.
+List<String> _subtract(List<String> a, List<String> b) {
+  final rest = [...b];
+  return [for (final name in a) if (!rest.remove(name)) name];
 }

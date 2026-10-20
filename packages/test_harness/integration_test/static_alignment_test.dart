@@ -186,7 +186,19 @@ void main() {
         await idle;
         await _waitForDisplayedCamera(tester, controller!, camera, c.finalSize);
 
+        final displayed = controller!.displayedFrame;
         final green = await _centroid(boundaryKey, _isGreen);
+        // Diagnostics for misalignment after a resize on the x86_64 emulator:
+        // a second capture after a delay shows whether the map was still
+        // changing at the first capture.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        await tester.pump();
+        final greenLater = await _centroid(boundaryKey, _isGreen);
+        debugPrint(
+          'CAPTURE$variant ${c.name}: displayed $displayed at the capture, '
+          '${controller!.displayedFrame} 2 s later; style $green, '
+          '2 s later $greenLater',
+        );
         await tester.pumpWidget(app(c.finalSize, overlay: true));
         await tester.pump();
         final blue = await _centroid(boundaryKey, _isBlue);
