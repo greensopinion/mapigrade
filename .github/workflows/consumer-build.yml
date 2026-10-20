@@ -82,6 +82,9 @@ jobs:
           api-level: 35
           arch: x86_64
           target: google_apis
+          # The tests lay out widgets at least 400 logical pixels wide; the
+          # default device profile's screen is 320 wide.
+          profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           working-directory: packages/test_harness
