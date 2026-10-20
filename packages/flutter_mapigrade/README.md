@@ -33,6 +33,26 @@ The package contains no native libraries of MapLibre Native FFI. The first build
 
 Gradle and Swift Package Manager cache the downloads for later builds.
 
+### Application settings
+
+An application created with `flutter create` needs these changes before it builds with the package:
+
+- Android: set `minSdk = 29` in `android/app/build.gradle.kts`.
+- iOS: set the deployment target to 15.5 (`IPHONEOS_DEPLOYMENT_TARGET` of the Runner target), and exclude `x86_64` from simulator builds, because the FFI's xcframework has no `x86_64` slice. Add this line to `ios/Flutter/Debug.xcconfig` and `ios/Flutter/Release.xcconfig`:
+
+  ```
+  EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
+  ```
+
+  Without it, `flutter build ios --simulator` fails with undefined `mln_` symbols.
+- macOS: set the deployment target to 14.3 (`MACOSX_DEPLOYMENT_TARGET` of the Runner target), and build for arm64 only. Add this line to `macos/Runner/Configs/AppInfo.xcconfig`:
+
+  ```
+  ARCHS = arm64
+  ```
+
+  To load styles and tiles over the network, add the `com.apple.security.network.client` entitlement with the value `true` to `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`.
+
 ## Usage
 
 Place a `MapigradeLayer` first among the children of a `FlutterMap`, and place overlay layers such as markers in the layer's own `children`:
