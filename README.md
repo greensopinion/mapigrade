@@ -4,41 +4,47 @@
 
 # Mapigrade
 
-Mapigrade is an experimental Flutter plugin that renders MapLibre Native maps directly into a Flutter `Texture` widget, using MapLibre Native FFI and GPU rendering. It uses no platform view and no CPU pixel readback.
+Mapigrade is an experimental Flutter plugin that renders MapLibre Native maps into a Flutter `Texture` widget, for use as the base layer of a `flutter_map` map.
+
+Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. Mapigrade also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
+
+The usual way to show a native map in Flutter is a platform view, which Flutter composites separately from its own widgets. Depending on the platform and configuration, this causes defects:
+
+- Overlays move relative to the map while the camera moves.
+- Captures with `RepaintBoundary.toImage` don't contain the map.
+- Effects such as `ColorFiltered` and `ShaderMask` leave the map unchanged.
+
+Mapigrade doesn't use a platform view, so it avoids these defects.
 
 https://github.com/user-attachments/assets/fe764361-10ca-4e47-acc8-d8824cf6dbdf
 
-`MapigradeLayer` draws its `flutter_map` overlays at the camera of the map frame that each Flutter frame displays, so markers and routes stay aligned with the map while the camera moves. In the alignment benchmark on macOS and iOS, no Flutter frame had an alignment error over 1 logical pixel during steady pans, flings, abrupt stops and reversals. On Android we checked alignment by hand. The map and the overlays still lag the live `flutter_map` camera together, by about one Flutter frame of camera movement.
-
-Unlike a map in a platform view on iOS, the map can be captured with `RepaintBoundary.toImage`: our integration tests capture it on macOS, iOS and Android. The comparison with a platform view is in [docs/platform-view-comparison.md](docs/platform-view-comparison.md).
+## Status
 
 Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later; `arm64-v8a`, `armeabi-v7a` and `x86_64`). We haven't yet validated it for production use.
 
-For how to use the plugin in an app, see [packages/flutter_mapigrade](packages/flutter_mapigrade/). To try it on your devices, build the demo app: [packages/demo](packages/demo/).
+Use Mapigrade in your app: [packages/flutter_mapigrade](packages/flutter_mapigrade/)
+
+Try the demo: [packages/demo](packages/demo/)
 
 ## Documentation
 
-- Build, tests, measurements and FFI updates: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Architecture: [docs/architecture.md](docs/architecture.md)
-- Packaging and release build checks: [docs/packaging.md](docs/packaging.md)
-- Measurements: [docs/benchmarks.md](docs/benchmarks.md)
 - Limitations, licenses and findings: [docs/limitations.md](docs/limitations.md)
+- Benchmarks: [docs/benchmarks.md](docs/benchmarks.md)
 - Platform view comparison: [docs/platform-view-comparison.md](docs/platform-view-comparison.md)
+- Build, tests, measurements and FFI updates: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Packaging and release build checks: [docs/packaging.md](docs/packaging.md)
 
 ## Repository layout
 
 ```
-packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
-  maplibre_ffi.lock                      the pinned FFI release, commit and presets
-packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
-                                         flyover on your devices (Android, iOS, macOS)
-packages/test_harness/                   test harness app: integration tests, benchmarks, color check
-docs/                                    architecture, packaging, measurements, limitations, concept
-                                         and follow-up documents
-pubspec.yaml                             pub workspace of the Dart packages
-scripts/build_maplibre_ffi.sh            builds MapLibre Native FFI locally (optional), and on Android its verifier AAR
-third_party/                             fetched FFI release, and the local FFI checkout and build output (gitignored)
+packages/flutter_mapigrade/    Flutter plugin
+packages/demo/                 demo app
+packages/test_harness/         integration tests and benchmarks
+docs/                          architecture, benchmarks and limitations
 ```
+
+The full layout is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development requirements
 
@@ -49,12 +55,14 @@ We develop and test on an Apple silicon Mac with macOS 14.3 or later, Xcode 26.6
 ## Build and run
 
 ```sh
-# Get the Dart dependencies of the workspace, then run the test harness. The
+# Get the Dart dependencies of the workspace, then run the demo app. The
 # first build downloads the MapLibre Native FFI release.
 flutter pub get
-cd packages/test_harness
+cd packages/demo
 flutter run -d macos
 flutter run -d <simulator id>             # iOS simulator (Apple silicon Macs only)
 flutter run --release -d <iPhone id>      # iPhone; `flutter devices` lists the ids
 flutter run --release -d <Android id>     # Android device or emulator, API level 29 or later
 ```
+
+To work on the plugin, run the test harness instead; see [CONTRIBUTING.md](CONTRIBUTING.md).

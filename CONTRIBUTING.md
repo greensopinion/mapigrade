@@ -1,6 +1,21 @@
 # Contributing
 
-This guide is for developers who build, test and measure Mapigrade. The [README](README.md) has the short build and run steps; the architecture is in [docs/architecture.md](docs/architecture.md).
+This guide is for developers who build, test and measure Mapigrade. The [README](README.md) has the short build and run steps for the demo app; the architecture is in [docs/architecture.md](docs/architecture.md).
+
+## Repository layout
+
+```
+packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
+  maplibre_ffi.lock                      the pinned FFI release, commit and presets
+packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
+                                         flyover on your devices (Android, iOS, macOS)
+packages/test_harness/                   test harness app: integration tests, benchmarks, color check
+docs/                                    architecture, packaging, measurements, limitations, concept
+                                         and follow-up documents
+pubspec.yaml                             pub workspace of the Dart packages
+scripts/build_maplibre_ffi.sh            builds MapLibre Native FFI locally (optional), and on Android its verifier AAR
+third_party/                             fetched FFI release, and the local FFI checkout and build output (gitignored)
+```
 
 ## Prerequisites
 
@@ -27,6 +42,17 @@ The plugin uses Swift Package Manager, the native build integration that the Flu
 ## Run the test harness
 
 The test harness shows the map with a control panel above it: style selection (OpenFreeMap Liberty, MapLibre demo tiles, and an invalid URL that shows the reported failure), zoom, rotate and pan buttons, and a continuous pan switch that changes the camera on every Flutter frame. `--dart-define=LOG_FRAMES=true` prints every displayed frame with its camera, and `--dart-define=CONTINUOUS_PAN=true` starts continuous pan at launch. On iOS, launching through `xcrun devicectl device process launch -e '{"MLT_KEEP_AWAKE":"1"}'` keeps the device from locking during scripted measurements. On Android, keep the device unlocked with the screen on during a measurement: when the activity stops, the plugin pauses rendering.
+
+```sh
+# At the repository root
+flutter pub get
+
+cd packages/test_harness
+flutter run -d macos
+flutter run -d <simulator id>             # iOS simulator (Apple silicon Macs only)
+flutter run --release -d <iPhone id>      # iPhone; `flutter devices` lists the ids
+flutter run --release -d <Android id>     # Android device or emulator, API level 29 or later
+```
 
 ## Tests
 

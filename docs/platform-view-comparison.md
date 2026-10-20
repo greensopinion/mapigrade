@@ -75,13 +75,13 @@ Improves: customer experience (shared images) and developer experience (on-devic
 
 ### Effects on and over the map
 
-On iOS, the blurred sheet blurred the map and `Opacity` made it translucent, but `ColorFiltered` and `ShaderMask` left the map tiles unchanged while they changed the markers. With the Android default, all four effects worked. In both `SurfaceView` configurations, none of them affected the map.
+On iOS, the blurred sheet blurred the map and `Opacity` made it translucent, but `ColorFiltered` and `ShaderMask` left the map tiles unchanged while they changed the markers. With the Android default, all four effects worked. In both `SurfaceView` configurations, none of them affected the map. With Mapigrade, all four effects worked on the map; we didn't keep that test.
 
 A texture is part of Flutter's scene, so Flutter applies these effects to it like to any other widget. For applications whose value is the data drawn on the map, effects such as a dark or grayscale tint, a fade while the style loads, or blending data drawn by Flutter (such as weather layers) with the map are a capability, not only a difference in appearance. On iOS, a platform view can't provide the tint or the fade.
 
 Flutter's Android documentation states that Hybrid Composition++ (HCPP) "does not currently support BackdropFilter or ImageFilter effects applied to or over platform views". HCPP needs Android 14 or later, Impeller and Vulkan, and we didn't test it. On the Pixel, Flutter tried Vulkan and then used OpenGL ES (`benchmarks.md`), so it can't run HCPP. We also didn't test `ImageFilter.shader`.
 
-Improves: customer experience, through effects that a platform view can't show, and developer experience, through effects that work the same on every platform. Status: observed for flutter_map_maplibre; not tested with Mapigrade.
+Improves: customer experience, through effects that a platform view can't show, and developer experience, through effects that work the same on every platform. Status: observed for flutter_map_maplibre and for Mapigrade.
 
 ### Placement in scroll views
 
@@ -129,8 +129,7 @@ What Mapigrade has that a switch to textures doesn't give automatically is the w
 ## Remaining tests
 
 1. Flutter frame times with several animated Flutter overlays above the map, with flutter_map_maplibre in the Android default and in `hc` with a `SurfaceView`, on iOS, and with Mapigrade. This decides the frame-rate reason, and whether the defects of the other Android configurations matter.
-2. The Share and Effects pages of the test app with Mapigrade in place of `MapLibreLayer`, on the iPhone and the Pixel, to confirm that the capture and the four effects work with a texture.
-3. HCPP and `ImageFilter.shader`, on a device that runs Impeller with Vulkan.
+2. HCPP and `ImageFilter.shader`, on a device that runs Impeller with Vulkan.
 
 ## Other findings
 

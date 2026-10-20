@@ -4,7 +4,19 @@
 
 # flutter_mapigrade
 
-Displays a [MapLibre Native](https://github.com/maplibre/maplibre-native) map as the base layer of a [`flutter_map`](https://pub.dev/packages/flutter_map) map. MapLibre renders on its own thread into a Flutter `Texture`, so the `flutter_map` layers above it are ordinary widgets.
+Displays a [MapLibre Native](https://github.com/maplibre/maplibre-native) map as the base layer of a [`flutter_map`](https://pub.dev/packages/flutter_map) map. MapLibre renders the map on its own thread into a Flutter `Texture` widget.
+
+Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. The plugin also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
+
+The usual way to show a native map in Flutter is a platform view, which Flutter composites separately from its own widgets. Depending on the platform and configuration, this causes defects:
+
+- Overlays move relative to the map while the camera moves.
+- Captures with `RepaintBoundary.toImage` don't contain the map.
+- Effects such as `ColorFiltered` and `ShaderMask` leave the map unchanged.
+
+The plugin doesn't use a platform view, so it avoids these defects.
+
+The plugin is experimental: we haven't yet validated it for production use. A recording and a demo app are in the [repository](https://github.com/greensopinion/mapigrade).
 
 ## Installation
 
@@ -43,7 +55,7 @@ FlutterMap(
 
 MapLibre renders the map on its own thread, so while the camera moves, for example during a pan or a zoom, the displayed map lags the `flutter_map` camera by one to two frames. Layers placed after `MapigradeLayer` among the `FlutterMap` children are drawn at the live camera, so they move relative to the map while the camera moves. To keep overlay layers such as a `MarkerLayer` or a `PolylineLayer` aligned with the map, place them in the layer's own `children`, as in the example, instead of the `FlutterMap` children.
 
-Place widgets that don't move with the map, such as zoom buttons or a scale bar, among the `FlutterMap` children after the layer. On Android the layer draws its own `children` at the live camera; see `MapigradeLayer.children`.
+Place widgets that don't move with the map, such as zoom buttons or a scale bar, among the `FlutterMap` children after the layer.
 
 Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a different one.
 
