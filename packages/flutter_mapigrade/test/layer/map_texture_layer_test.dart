@@ -43,7 +43,7 @@ class _FakeController implements MapTextureController {
   bool _disposed = false;
 
   /// The counters that [stats] returns.
-  MapTextureStats values = const MapTextureStats.forTesting();
+  MapTextureStats values = const MapTextureStats();
 
   /// The cameras passed to [setCamera], in order; the sequence number of
   /// each is its index plus one.
@@ -389,7 +389,7 @@ void main() {
     );
 
     MapTextureStats stats(int displayed, int rendered, int renderMs) =>
-        MapTextureStats.forTesting(
+        MapTextureStats(
           presentedFrames: displayed,
           renderedFrames: rendered,
           renderUpdateTotal: Duration(milliseconds: renderMs),

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 // A controller without a native map that returns [values] from stats().
 class _FakeController implements MapTextureController {
-  MapTextureStats values = const MapTextureStats.forTesting();
+  MapTextureStats values = const MapTextureStats();
   Object? error;
   bool _disposed = false;
 
@@ -26,7 +26,7 @@ class _FakeController implements MapTextureController {
 }
 
 MapTextureStats _stats(int displayed, int rendered, int renderMs) =>
-    MapTextureStats.forTesting(
+    MapTextureStats(
       presentedFrames: displayed,
       renderedFrames: rendered,
       renderUpdateTotal: Duration(milliseconds: renderMs),

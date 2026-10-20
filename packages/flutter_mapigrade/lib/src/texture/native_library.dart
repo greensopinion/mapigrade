@@ -1,7 +1,10 @@
 // Whether the plugin's native library is available in this process (design
-// D86 of the unsupported-architectures change).
-import 'dart:ffi';
-import 'dart:io';
+// D86 of the unsupported-architectures change). The platform result comes
+// from the FFI file, or on web from a file without FFI (designs D161 and D162
+// of the web-build-compatibility change).
+import 'native_library_ffi.dart'
+    if (dart.library.js_interop) 'native_library_web.dart'
+    as platform;
 
 /// For tests: when not null, [nativeLibraryAvailable] returns this value
 /// (design D87).
@@ -10,21 +13,6 @@ bool? nativeLibraryAvailableOverride;
 /// Whether the native library is available in this process, so that the
 /// bindings resolve. On Android the plugin loads the library unless the APK
 /// lacks it for the device's ABIs; on macOS and iOS it is linked into the app.
+/// Always false on web.
 bool get nativeLibraryAvailable =>
-    nativeLibraryAvailableOverride ?? _nativeLibraryAvailable;
-
-final bool _nativeLibraryAvailable = () {
-  try {
-    if (Platform.isAndroid) {
-      // Returns the copy that the plugin loaded, if it loaded it.
-      DynamicLibrary.open('libflutter_mapigrade.so');
-      return true;
-    }
-    if (Platform.isMacOS || Platform.isIOS) {
-      return DynamicLibrary.process().providesSymbol('map_texture_create');
-    }
-    return false;
-  } on ArgumentError {
-    return false;
-  }
-}();
+    nativeLibraryAvailableOverride ?? platform.nativeLibraryAvailable;
