@@ -214,20 +214,34 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 8));
     }
     final last = sent.last;
-    // The final camera appears soon after the last update.
+    final displayedBeforeLast = displayed.length;
+    // The deadline only ends a hang; how soon the final camera appears
+    // depends on how long a render takes on the device.
     final caughtUp = Stopwatch()..start();
     while (!displayed.any((f) => near(f.camera.longitude, last))) {
-      if (caughtUp.elapsed > const Duration(seconds: 2)) break;
+      if (caughtUp.elapsed > const Duration(seconds: 20)) break;
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     await sub.cancel();
+    final lastIndex =
+        displayed.indexWhere((f) => near(f.camera.longitude, last));
+    // Frames with an earlier camera displayed after the last update.
+    final staleFrames =
+        lastIndex < 0 ? -1 : lastIndex - displayedBeforeLast;
     debugPrint('rapid updates: sent ${sent.length} cameras, '
         'displayed ${displayed.length} frames, caught up in '
-        '${caughtUp.elapsedMilliseconds} ms; ${controller.stats()}');
+        '${caughtUp.elapsedMilliseconds} ms after $staleFrames earlier '
+        'frames; ${controller.stats()}');
 
-    expect(displayed.any((f) => near(f.camera.longitude, last)), isTrue,
-        reason: 'the last camera was never displayed');
-    expect(caughtUp.elapsed, lessThan(const Duration(milliseconds: 500)));
+    expect(lastIndex, greaterThanOrEqualTo(0),
+        reason: 'the last camera (longitude $last) was never displayed; the '
+            'last displayed frame was '
+            '${displayed.isEmpty ? 'none' : displayed.last}; '
+            '${controller.stats()}');
+    // No backlog: when the last update arrives, at most one frame is ready
+    // and one is rendering with an earlier camera, and the next render
+    // takes the last camera.
+    expect(staleFrames, lessThanOrEqualTo(2));
     final stats = controller.stats();
     if (Platform.isAndroid) {
       // Renders are paced to one per display refresh interval (designs D53
@@ -296,6 +310,7 @@ void main() {
     await cycle();
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final before = processThreadCount();
+    final namesBefore = _threadNames();
     final footprintBefore = memoryFootprintForTesting();
     for (var i = 0; i < 50; i++) {
       await cycle();
@@ -306,7 +321,21 @@ void main() {
     debugPrint('thread count: before $before, after 50 cycles $after; '
         'memory footprint ${mib(footprintBefore)} MiB before, '
         '${mib(memoryFootprintForTesting())} MiB after');
-    expect(after, lessThanOrEqualTo(before));
+    // A thread leaked by each cycle adds 50 threads. The Dart VM and Android
+    // start and stop threads of their own pools as needed, so the count may
+    // grow by a few: DartWorker and binder threads don't count, and two other
+    // threads are allowed. Thread names are read on Android only.
+    var poolThreadsAdded = 0;
+    if (after > before) {
+      final namesAfter = _threadNames();
+      final added = _subtract(namesAfter, namesBefore);
+      poolThreadsAdded = added
+          .where((name) => name == 'DartWorker' || name.startsWith('binder:'))
+          .length;
+      debugPrint('threads added: $added; '
+          'removed: ${_subtract(namesBefore, namesAfter)}');
+    }
+    expect(after - poolThreadsAdded, lessThanOrEqualTo(before + 2));
   });
 
   testWidgets('dispose while rendering', (tester) async {
@@ -1031,4 +1060,25 @@ class _SelectingViewState extends State<_SelectingView> {
     return MapTextureView(
         controller: controller, slot: controller.selectedFrame?.slot ?? 0);
   }
+}
+
+/// The names of the process's threads, from /proc/self/task/*/comm, on Android
+/// only; empty elsewhere.
+List<String> _threadNames() {
+  if (!Platform.isAndroid) return const [];
+  final names = <String>[];
+  for (final task in Directory('/proc/self/task').listSync()) {
+    try {
+      names.add(File('${task.path}/comm').readAsStringSync().trim());
+    } on FileSystemException {
+      // The thread exited while the directory was listed.
+    }
+  }
+  return names..sort();
+}
+
+/// The elements of [a] that [b] doesn't have, counting repeated names.
+List<String> _subtract(List<String> a, List<String> b) {
+  final rest = [...b];
+  return [for (final name in a) if (!rest.remove(name)) name];
 }

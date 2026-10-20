@@ -30,4 +30,4 @@ add_library(flutter_mapigrade SHARED
   map_texture_android.cpp)
 target_include_directories(flutter_mapigrade PRIVATE ${CORE_DIR})
 target_compile_options(flutter_mapigrade PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(flutter_mapigrade PRIVATE maplibre_native_c android EGL log)
+target_link_libraries(flutter_mapigrade PRIVATE maplibre_native_c android EGL GLESv3 log)

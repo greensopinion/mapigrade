@@ -1,0 +1,114 @@
+# Builds an application that depends on flutter_mapigrade as the published
+# archive contains it, on a runner without a MapLibre Native FFI build (design
+# D106 of the publish-readiness change).
+name: Consumer build
+
+on:
+  pull_request:
+    paths:
+      - packages/flutter_mapigrade/android/**
+      - packages/flutter_mapigrade/darwin/**
+      - packages/flutter_mapigrade/src/**
+      - packages/flutter_mapigrade/hook/**
+      - packages/flutter_mapigrade/pubspec.yaml
+      - packages/flutter_mapigrade/maplibre_ffi.lock
+      - packages/flutter_mapigrade/.pubignore
+      - scripts/consumer_build.sh
+      - scripts/fetch_ffi_release.sh
+      - scripts/emulator_integration_tests.sh
+      - .github/workflows/consumer-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Android, iOS and macOS builds
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+      # The plugin builds with NDK 30; Flutter's app template and the jni
+      # plugin use NDK 28.2 and CMake 3.22.1, which Gradle would otherwise
+      # download during the build, once with a corrupt archive. A failed
+      # download is retried.
+      - name: Install the Android NDKs and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "ndk;30.0.16248370" "ndk;28.2.13676358" "cmake;3.22.1" && exit 0
+            echo "sdkmanager failed (attempt $attempt)"
+            sleep 10
+          done
+          exit 1
+      - name: Build the consumer application
+        run: scripts/consumer_build.sh "$RUNNER_TEMP/consumer" android ios macos
+      - name: Fetch the FFI release
+        run: scripts/fetch_ffi_release.sh
+      - name: Compare the notices with the FFI release
+        working-directory: packages/flutter_mapigrade
+        run: flutter test test/notices/ffi_notices_test.dart
+
+  # The Android emulator on Apple-silicon Macs runs arm64 system images only, so
+  # the x86_64 libraries run on a Linux runner with KVM.
+  android-x86_64:
+    name: Integration tests on an x86_64 emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+      # The plugin builds with NDK 30; Flutter's app template and the jni
+      # plugin use NDK 28.2 and CMake 3.22.1, which Gradle would otherwise
+      # download during the build, once with a corrupt archive. A failed
+      # download is retried.
+      - name: Install the Android NDKs and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "ndk;30.0.16248370" "ndk;28.2.13676358" "cmake;3.22.1" && exit 0
+            echo "sdkmanager failed (attempt $attempt)"
+            sleep 10
+          done
+          exit 1
+      # The checkout has no local FFI build, so the test harness uses the FFI
+      # release from Maven Central.
+      - name: Run the integration tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          working-directory: packages/test_harness
+          script: ../../scripts/emulator_integration_tests.sh
+      - name: Upload the logcat of failed test files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logcat
+          path: packages/test_harness/build/logcat/
