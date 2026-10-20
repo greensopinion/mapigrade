@@ -63,11 +63,48 @@ wait_until_ready() {
   echo "The lock screen is still showing on $device" >&2
 }
 
-# Runs one test file, and writes its results as JSON to $2. Returns the exit
-# status of flutter test.
+# Runs one test file, writes its results as JSON to $2 and the tool's verbose
+# log to $3, and prints the test output without the verbose lines. Returns the
+# exit status of flutter test. A run in which no test has started after 8
+# minutes, the first build included, is stopped: the tool hasn't connected to
+# the app, whose tests wait for it.
 run_file() {
   adb -s "$device" logcat -c
-  with_timeout flutter test "$1" -d "$device" --file-reporter "json:$2"
+  rm -f "$2"
+  with_timeout flutter test -v "$1" -d "$device" --file-reporter "json:$2" \
+    > "$3" 2>&1 &
+  local flutter_pid=$! waited=0
+  # The subshell's stderr is discarded, where it reports that tail was
+  # stopped.
+  (tail -n +1 -f "$3" | grep --line-buffered -vE '^\[[ +0-9]*( ms)?\]') \
+    2> /dev/null &
+  local tail_pid=$!
+  while kill -0 "$flutter_pid" 2> /dev/null; do
+    if ((waited >= 480)) && ! started_a_test "$2"; then
+      echo "No test started in 8 minutes; stopping the run" >&2
+      kill_tree "$flutter_pid"
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  wait "$flutter_pid"
+  local status=$?
+  sleep 1
+  kill_tree "$tail_pid"
+  return $status
+}
+
+# Stops process $1 and its descendants.
+kill_tree() {
+  local child
+  for child in $(pgrep -P "$1"); do kill_tree "$child"; done
+  kill "$1" 2> /dev/null
+}
+
+# Whether the JSON results in $1 report a started test.
+started_a_test() {
+  grep '"type":"testStart"' "$1" 2> /dev/null | grep -qv '"name":"loading '
 }
 
 # Whether the JSON results in $1 report a finished test.
@@ -75,13 +112,15 @@ ran_a_test() {
   grep '"type":"testDone"' "$1" 2> /dev/null | grep -q '"hidden":false'
 }
 
-# Saves the logcat, the lock screen and power state, and the JSON results of a
-# failed run in build/logcat/ with the prefix $1.
+# Saves the logcat, the lock screen and power state, the JSON results ($2) and
+# the tool's verbose log ($3) of a failed run in build/logcat/ with the prefix
+# $1.
 save_evidence() {
   adb -s "$device" logcat -d > "build/logcat/$1.txt"
   adb -s "$device" shell dumpsys window | grep -E "isKeyguardShowing|mCurrentFocus|mDreamingLockscreen" > "build/logcat/$1-window.txt"
   adb -s "$device" shell dumpsys power | grep -E "mWakefulness=" >> "build/logcat/$1-window.txt"
   cp "$2" "build/logcat/$1.json" 2> /dev/null
+  cp "$3" "build/logcat/$1-flutter.txt" 2> /dev/null
 }
 
 wait_until_ready
@@ -92,8 +131,9 @@ for run in $(seq 1 "${REPEAT:-1}"); do
   for test in "${tests[@]}"; do
     name="$(basename "$test" .dart)-$run"
     results="build/logcat/$name-results.json"
+    verbose="build/logcat/$name-verbose.txt"
     echo "== $test, run $run"
-    if run_file "$test" "$results"; then
+    if run_file "$test" "$results" "$verbose"; then
       continue
     fi
     # A run in which no test finished never reached the tests: the tool
@@ -101,14 +141,14 @@ for run in $(seq 1 "${REPEAT:-1}"); do
     # more. A run in which a test failed doesn't.
     if ! ran_a_test "$results"; then
       echo "NO TESTS RAN: $test, run $run; running it again" >&2
-      save_evidence "$name-no-tests" "$results"
+      save_evidence "$name-no-tests" "$results" "$verbose"
       wait_until_ready
-      if run_file "$test" "$results"; then
+      if run_file "$test" "$results" "$verbose"; then
         continue
       fi
     fi
     echo "FAIL: $test, run $run" >&2
-    save_evidence "$name" "$results"
+    save_evidence "$name" "$results" "$verbose"
     status=1
     failures=$((failures + 1))
   done
