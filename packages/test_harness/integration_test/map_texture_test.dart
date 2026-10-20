@@ -214,20 +214,34 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 8));
     }
     final last = sent.last;
-    // The final camera appears soon after the last update.
+    final displayedBeforeLast = displayed.length;
+    // The deadline only ends a hang; how soon the final camera appears
+    // depends on how long a render takes on the device.
     final caughtUp = Stopwatch()..start();
     while (!displayed.any((f) => near(f.camera.longitude, last))) {
-      if (caughtUp.elapsed > const Duration(seconds: 2)) break;
+      if (caughtUp.elapsed > const Duration(seconds: 20)) break;
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     await sub.cancel();
+    final lastIndex =
+        displayed.indexWhere((f) => near(f.camera.longitude, last));
+    // Frames with an earlier camera displayed after the last update.
+    final staleFrames =
+        lastIndex < 0 ? -1 : lastIndex - displayedBeforeLast;
     debugPrint('rapid updates: sent ${sent.length} cameras, '
         'displayed ${displayed.length} frames, caught up in '
-        '${caughtUp.elapsedMilliseconds} ms; ${controller.stats()}');
+        '${caughtUp.elapsedMilliseconds} ms after $staleFrames earlier '
+        'frames; ${controller.stats()}');
 
-    expect(displayed.any((f) => near(f.camera.longitude, last)), isTrue,
-        reason: 'the last camera was never displayed');
-    expect(caughtUp.elapsed, lessThan(const Duration(milliseconds: 500)));
+    expect(lastIndex, greaterThanOrEqualTo(0),
+        reason: 'the last camera (longitude $last) was never displayed; the '
+            'last displayed frame was '
+            '${displayed.isEmpty ? 'none' : displayed.last}; '
+            '${controller.stats()}');
+    // No backlog: when the last update arrives, at most one frame is ready
+    // and one is rendering with an earlier camera, and the next render
+    // takes the last camera.
+    expect(staleFrames, lessThanOrEqualTo(2));
     final stats = controller.stats();
     if (Platform.isAndroid) {
       // Renders are paced to one per display refresh interval (designs D53
