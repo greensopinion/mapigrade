@@ -4,9 +4,15 @@
 
 # Mapigrade
 
-A proof of concept that renders a MapLibre Native map on the GPU into a Flutter `Texture` widget on macOS, iOS and Android, through MapLibre Native FFI, with no platform view and no CPU pixel readback. Flutter widgets placed above the map draw on top of it and receive input.
+Mapigrade is an experimental Flutter plugin that renders MapLibre Native maps directly into a Flutter `Texture` widget, using MapLibre Native FFI and GPU rendering. It uses no platform view and no CPU pixel readback.
 
-Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. For how to use the plugin in an app, see [packages/flutter_mapigrade](packages/flutter_mapigrade/). To try it on your own devices, build the demo app: [packages/demo](packages/demo/).
+`MapigradeLayer` draws its `flutter_map` overlays at the camera of the map frame that each Flutter frame displays, so markers and routes stay aligned with the map while the camera moves. In the alignment benchmark on macOS and iOS, no Flutter frame had an alignment error over 1 logical pixel during steady pans, flings, abrupt stops and reversals. On Android we checked alignment by hand. The map and the overlays still lag the live `flutter_map` camera together, by about one Flutter frame of camera movement.
+
+Unlike a map in a platform view on iOS, the map can be captured with `RepaintBoundary.toImage`: our integration tests capture it on macOS, iOS and Android. We haven't yet tested whether effects such as `ColorFiltered` and `ShaderMask` apply to the map. The comparison with a platform view is in [docs/platform-view-comparison.md](docs/platform-view-comparison.md).
+
+Mapigrade runs on macOS, iOS and Android (arm64, API level 29 or later). We haven't yet validated it for production use.
+
+For how to use the plugin in an app, see [packages/flutter_mapigrade](packages/flutter_mapigrade/). To try it on your devices, build the demo app: [packages/demo](packages/demo/).
 
 ## Documentation
 
@@ -15,6 +21,7 @@ Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. F
 - Packaging and release build checks: [docs/packaging.md](docs/packaging.md)
 - Measurements: [docs/benchmarks.md](docs/benchmarks.md)
 - Limitations, licenses and findings: [docs/limitations.md](docs/limitations.md)
+- Platform view comparison: [docs/platform-view-comparison.md](docs/platform-view-comparison.md)
 
 ## Repository layout
 
@@ -22,7 +29,7 @@ Support for macOS, iOS and Android (arm64, API level 29 or later) is complete. F
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
   maplibre_ffi.lock                      the pinned FFI release, commit and presets
 packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
-                                         flyover on your own devices (Android, iOS, macOS)
+                                         flyover on your devices (Android, iOS, macOS)
 packages/test_harness/                   test harness app: integration tests, benchmarks, color check
 docs/                                    architecture, packaging, measurements, limitations, concept
                                          and follow-up documents
@@ -31,9 +38,11 @@ scripts/build_maplibre_ffi.sh            builds the pinned MapLibre Native FFI, 
 third_party/                             FFI checkout and build output (gitignored)
 ```
 
-## Prerequisites
+## Development requirements
 
-An Apple silicon Mac with macOS 14.3 or later, Xcode 26.6, Flutter 3.47.5, git and [mise](https://mise.jdx.dev). For Android, also the Android SDK with NDK 30.0.16248370. The full list, including what an iPhone and an Android device need, and the pinned versions are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Apps that use the plugin don't build MapLibre Native FFI. The plugin uses the prebuilt libraries of the pinned FFI release, through Swift Package Manager on iOS and macOS and from Maven Central on Android. The demo app, the example and the test harness in this repository use a local FFI build. Create it with the steps below.
+
+We develop and test on an Apple silicon Mac with macOS 14.3 or later, Xcode 26.6, Flutter 3.47.5, git and [mise](https://mise.jdx.dev), and for Android, the Android SDK with NDK 30.0.16248370. These are the versions we test with, not minimum versions; other versions may work. The full list, including what an iPhone and an Android device need, and the pinned versions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Build and run
 
