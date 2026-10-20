@@ -1,0 +1,26 @@
+# Media License
+
+To the extent possible under law, David Green has waived all copyright and
+related or neighboring rights to the Mapigrade logo and the other files in the
+`assets/` directory of this repository, under the Creative Commons CC0 1.0
+Universal Public Domain Dedication (CC0 1.0). The source code is licensed
+separately under the BSD 3-Clause License in `LICENSE`.
+
+Summary: https://creativecommons.org/publicdomain/zero/1.0/
+Legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+An AI image generator created the logo as a PNG image. David Green created the
+SVG file from it with minor changes.
+
+You may copy, modify, distribute and use these files, including commercially,
+without asking permission and without giving credit.
+
+## Trademarks
+
+CC0 1.0 does not waive trademark rights (section 4(a) of the legal text). It
+does not license the name "Mapigrade" or the logo as a trademark. Do not use
+the name or the logo in a way that suggests that the Mapigrade project endorses
+or sponsors you or your work, or is associated with it.
+
+For permissions that this dedication does not grant, open an issue at
+https://github.com/greensopinion/mapigrade/issues.

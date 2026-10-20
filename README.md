@@ -66,3 +66,9 @@ flutter run --release -d <Android id>     # Android device or emulator, API leve
 ```
 
 To work on the plugin, run the test harness instead; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+The source code is licensed under the BSD 3-Clause License; see [LICENSE](LICENSE). The logo and the other files in [assets/](assets/) are dedicated to the public domain under the Creative Commons CC0 1.0 Universal Public Domain Dedication (CC0 1.0); see [LICENSE-MEDIA](LICENSE-MEDIA).
+
+Apps built with the plugin include the notices of MapLibre Native FFI and the third-party code it includes; see [docs/limitations.md](docs/limitations.md), "Licenses and third-party notices".
