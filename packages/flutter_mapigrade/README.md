@@ -87,6 +87,8 @@ Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a di
 | iOS | 15.5 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
+Apps built for web build with the package, compiled to JavaScript or to WebAssembly, but the layer draws no map there: `MapigradeLayer.isSupported` is false, and a placed layer reports a `LayerCreateException`.
+
 On iOS and macOS the plugin supports Swift Package Manager only.
 
 On iOS and macOS, set **Strip Style** to **Non-Global Symbols** for the `Runner` target's Release and Profile configurations. In `ios/Runner.xcodeproj/project.pbxproj` and `macos/Runner.xcodeproj/project.pbxproj` that is:
@@ -97,7 +99,7 @@ STRIP_STYLE = "non-global";
 
 Swift Package Manager links the plugin's native code into the app executable, and Dart looks up its functions in the process. When Xcode archives an app, the default strip style removes every global symbol from the executable, so in an archived build, such as one installed from TestFlight or the App Store, `MapigradeLayer.isSupported` is false and the layer reports a `LayerCreateException`: "the native library of flutter_mapigrade is not available in this process". Debug builds and `flutter run --release` don't strip the executable, so they don't show the failure. To check an archive, run `nm -gU` on the app executable; the output must include `_map_texture_create`.
 
-On Android, an app that also runs on other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
+An app that also runs on web, or on Android devices with other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
 
 ```dart
 FlutterMap(

@@ -15,9 +15,13 @@
 
 ## 3. Native platforms unchanged
 
-- [ ] 3.1 Run the test harness's integration tests on macOS, on the iOS simulator and on the Pixel 4a (5G), one file per `flutter test` call; verify that they pass as before the change
+- [x] 3.1 Run the test harness's integration tests on macOS, on the iOS simulator and on the Pixel 4a (5G), one file per `flutter test` call; verify that they pass as before the change
   - macOS (2026-10-20): `map_texture_test` (29 passed, 1 skipped), `map_layer_test` (15), `resource_test` (8), `notices_test` (1) and `engines_test` (with `flutter drive`) passed; `unsupported_test` skipped itself. In `static_alignment_test` 11 tests passed and "alignment at rest: integer zoom" failed at `controller!` (line 179) right after the first `pumpWidget`. The same test failed the same way in two runs at commit 7b2ebc6 without this change, so the failure predates it: the first map creation in the process waits for the engine token, and the test doesn't wait for the controller. The iOS simulator and the Pixel 4a (5G) are still open.
-- [ ] 3.2 Run the demo app in release mode on macOS and on the Pixel 4a (5G); verify that the map appears with a style loaded over HTTPS and that `isSupported` is true
+  - Reduced on 2026-10-20 at the user's request, to the runs that cover code this change touched: the refactored Dart code is the same on every FFI platform, and its only platform branches are the Android and the Apple branch of `native_library_ffi.dart`. The iOS simulator runs the same branch and code as macOS, so it is skipped. On the Pixel, `map_texture_test` and `map_layer_test` run, which cover the controller and `isSupported`; the other files test alignment, resources, notices and engines, which this change didn't touch.
+  - Pixel 4a (5G) (2026-10-20): `map_texture_test` (28 passed, 2 skipped, the display-time tests that skip on Android) and `map_layer_test` (15) passed; the logged `MapTextureStats` had non-zero counters.
+- [x] 3.2 Run the demo app in release mode on macOS and on the Pixel 4a (5G); verify that the map appears with a style loaded over HTTPS and that `isSupported` is true
+  - Reduced on 2026-10-20 at the user's request to the Pixel only: release mode differs from debug mode by the compiler, and the AOT compiler compiles the same Dart code on macOS and Android; the Pixel also runs the Android branch of `native_library_ffi.dart` in AOT.
+  - Pixel 4a (5G) (2026-10-20): the release APK (86.1 MB) showed the OpenFreeMap Liberty style over Nice with the stage overlay; logcat showed `libflutter_mapigrade.so` loaded and no unavailable-library message, so `isSupported` was true.
 
 ## 4. CI (after PR #1 is merged)
 
@@ -29,5 +33,5 @@ Another session is changing `scripts/consumer_build.sh` and `.github/workflows/c
 
 ## 5. Documentation
 
-- [ ] 5.1 Below the table "Supported platforms" of `packages/flutter_mapigrade/README.md`, state that apps built for web build with the package and see `isSupported == false`, and that Linux and Windows apps are expected to behave the same but are untested; widen the `isSupported` paragraph and its example from Android ABIs to web; add a line to `CHANGELOG.md` under 0.0.1; verify that the README's `isSupported` example uses the same names as the `isSupported` branch in `test/api_usage_test.dart`, which compiles under `flutter test`
-- [ ] 5.2 In `docs/adoption-gaps.md`, replace "Apps that also target web can't use the package" with a note that apps build for web and that rendering on web is open; in `docs/limitations.md`, add the web behavior, and the untested Linux and Windows behavior, to "Known limitations"; verify by reading both against the spec delta
+- [x] 5.1 Below the table "Supported platforms" of `packages/flutter_mapigrade/README.md`, state that apps built for web build with the package and see `isSupported == false`, and that Linux and Windows apps are expected to behave the same but are untested; widen the `isSupported` paragraph and its example from Android ABIs to web; add a line to `CHANGELOG.md` under 0.0.1; verify that the README's `isSupported` example uses the same names as the `isSupported` branch in `test/api_usage_test.dart`, which compiles under `flutter test`
+- [x] 5.2 In `docs/adoption-gaps.md`, replace "Apps that also target web can't use the package" with a note that apps build for web and that rendering on web is open; in `docs/limitations.md`, add the web behavior, and the untested Linux and Windows behavior, to "Known limitations"; verify by reading both against the spec delta

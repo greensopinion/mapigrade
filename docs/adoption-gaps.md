@@ -4,11 +4,9 @@ What app developers need from the package that the publish-readiness change does
 
 ## Gaps that prevent adoption
 
-### Apps that also target web can't use the package
+### No map on web
 
-Four files in `lib/src/texture/` import `dart:ffi`, without conditional imports, and the package's library exports code that depends on them. `dart:ffi` doesn't compile for web, so a `flutter_map` app that also builds for web can't add the package. `MapigradeLayer.isSupported` doesn't help, because the build fails at compile time. Not yet confirmed with a web build.
-
-Fix: put the FFI code behind `if (dart.library.ffi)` conditional imports with a stub implementation, make `isSupported` return false on web, and add a CI job that builds a web app with the package. Check Linux and Windows desktop builds the same way.
+Since the web-build-compatibility change (commit 8e688cf), apps built for web build with the package, and `MapigradeLayer.isSupported` is false on web, so an app places another layer there. The layer draws no map on web. Two options for drawing one: `vector_map_tiles` with the same style, or maplibre-gl-js rendering into an offscreen canvas, with the layer drawing each frame as an image.
 
 ### Archived iOS and macOS builds fail without `STRIP_STYLE`
 
