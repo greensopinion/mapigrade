@@ -37,10 +37,20 @@ jobs:
         with:
           flutter-version: 3.47.5
           channel: stable
-      - name: Install the Android NDK
+      # The plugin builds with NDK 30; Flutter's app template and the jni
+      # plugin use NDK 28.2 and CMake 3.22.1, which Gradle would otherwise
+      # download during the build, once with a corrupt archive. A failed
+      # download is retried.
+      - name: Install the Android NDKs and CMake
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "ndk;30.0.16248370" "ndk;28.2.13676358" "cmake;3.22.1" && exit 0
+            echo "sdkmanager failed (attempt $attempt)"
+            sleep 10
+          done
+          exit 1
       - name: Build the consumer application
         run: scripts/consumer_build.sh "$RUNNER_TEMP/consumer" android ios macos
       - name: Fetch the FFI release
@@ -70,10 +80,20 @@ jobs:
         with:
           flutter-version: 3.47.5
           channel: stable
-      - name: Install the Android NDK
+      # The plugin builds with NDK 30; Flutter's app template and the jni
+      # plugin use NDK 28.2 and CMake 3.22.1, which Gradle would otherwise
+      # download during the build, once with a corrupt archive. A failed
+      # download is retried.
+      - name: Install the Android NDKs and CMake
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "ndk;30.0.16248370" "ndk;28.2.13676358" "cmake;3.22.1" && exit 0
+            echo "sdkmanager failed (attempt $attempt)"
+            sleep 10
+          done
+          exit 1
       # The checkout has no local FFI build, so the test harness uses the FFI
       # release from Maven Central.
       - name: Run the integration tests
