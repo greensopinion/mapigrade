@@ -58,6 +58,17 @@ A chosen slot stays held until Flutter presents a slot that Dart chose later, an
 
 Each displayed frame is reported to Dart with the camera and size it was rendered with and the sequence number of the camera update it was rendered with (`MapTextureController.frames`), taken from `mln_render_session_projection_create()` after the frame rendered. The layer keeps the `flutter_map` camera of each of the last 32 camera updates it sent, by sequence number, and draws its `children` under its own `MapInheritedModel` at the camera of the frame it chose (designs D125 and D127). The children therefore stay exactly on the displayed map, and lag the gesture as the map does.
 
+## Flutter engines
+
+A process can run more than one Flutter engine, for example a background engine that a messaging plugin starts. Each engine registers the plugin, and texture ids are only valid in the engine that issued them, so each map registers its textures with the engine whose Dart code created it (design D153 to D157 of the multiple-flutter-engines change).
+
+- When an engine registers the plugin, the platform code stores the engine's texture registry in a table under a token, a number that is never reused in the process. The table is guarded by a mutex.
+- The plugin registers the method channel `flutter_mapigrade` with each engine. Its handler answers `engineToken` with that engine's token. Dart asks once per isolate, at the first map creation, so `MapTextureController.create` is asynchronous; `MapigradeLayer` builds an empty placeholder until the map exists.
+- `map_texture_create` takes the token, the map keeps it, and `CreatePlatformRenderTarget` registers the map's textures with the token's registry. An unknown token fails the creation.
+- When an engine detaches the plugin (Android `onDetachedFromEngine`, iOS `detachFromEngineForRegistrar:` when the engine is deallocated), the platform code removes the token and disposes the maps that have it (`DisposeEngineMaps`). macOS has no detach callback; its table holds the registry weakly, and a destroyed engine's undisposed maps stay until the process ends.
+
+Pausing and memory reduction stay process-wide: they apply to every map, whichever engine created it.
+
 ## Android
 
 Android uses the same core, C ABI and Dart API. The core has two kinds of render target (`src/core/render_target.h`): macOS and iOS use the buffer target described above, and Android uses the surface target in `android/src/main/cpp/map_texture_android.cpp` (design D52 of the android-texture-vertical-slice change).

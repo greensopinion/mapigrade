@@ -64,7 +64,7 @@ void main() {
   /// Creates a controller and shows it in a 400x300 view.
   Future<MapTextureController> showMap(WidgetTester tester,
       {bool copyFree = copyFree}) async {
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     await tester.pumpWidget(Directionality(
@@ -88,7 +88,7 @@ void main() {
 
   testWidgets('create and dispose', (tester) async {
     final controller =
-        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
     // Four slots with a texture each on macOS and iOS; six slots that share
     // one texture on Android (design D135).
     expect(controller.textureIds, hasLength(Platform.isAndroid ? 6 : 4));
@@ -265,7 +265,7 @@ void main() {
 
   testWidgets('calls after dispose report an error', (tester) async {
     final controller =
-        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
     controller.dispose();
     expect(
         () => controller.setCamera(
@@ -283,7 +283,7 @@ void main() {
       (tester) async {
     Future<void> cycle() async {
       final controller =
-        MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
       final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
       controller.resize(const Size(400, 300), 2);
       controller.loadStyleJson(colorStyle('#123456'));
@@ -596,7 +596,7 @@ void main() {
     await idle;
 
     MapigradeLayer.maximumCacheSizeBytes = 80 << 20;
-    final second = MapTextureController.create(
+    final second = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(second);
     await tester.pumpWidget(Directionality(
@@ -629,7 +629,7 @@ void main() {
   });
 
   testWidgets('resizing on every frame for 10 seconds', (tester) async {
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final size = ValueNotifier(const Size(400, 300));
@@ -715,7 +715,7 @@ void main() {
     if (skipOnAndroid('the plugin owns no display buffers on Android')) {
       return;
     }
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final size = ValueNotifier(const Size(200, 200));
@@ -755,6 +755,13 @@ void main() {
   testWidgets('example shows a style load failure and keeps running',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(home: app.MapScreen()));
+    // The screen creates its map asynchronously (design D155 of the
+    // multiple-flutter-engines change).
+    final shown = DateTime.now().add(const Duration(seconds: 20));
+    while (find.byType(MapTextureView).evaluate().isEmpty &&
+        DateTime.now().isBefore(shown)) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
     await tester.tap(find.byKey(const Key('style-select')));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('Invalid URL').last);
@@ -862,7 +869,7 @@ void main() {
   });
 
   testWidgets('a selected frame is displayed', (tester) async {
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final log = <_SlotEntry>[];
@@ -925,7 +932,7 @@ void main() {
   // image texture keeps the image Dart chose last (design D136).
   testWidgets('resize keeps the selected frame until a new-size selection',
       (tester) async {
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     controllers.add(controller);
     final log = <_SlotEntry>[];

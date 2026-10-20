@@ -136,6 +136,7 @@ typedef MapTextureEventCallback = Void Function(
 
 @Native<
   Int64 Function(
+    Int64,
     Double,
     Int32,
     Pointer<NativeFunction<MapTextureEventCallback>>,
@@ -146,6 +147,7 @@ typedef MapTextureEventCallback = Void Function(
   )
 >(symbol: 'map_texture_create')
 external int mapTextureCreate(
+  int engine,
   double pixelRatio,
   int copyFree,
   Pointer<NativeFunction<MapTextureEventCallback>> callback,

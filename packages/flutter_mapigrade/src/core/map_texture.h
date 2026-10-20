@@ -34,19 +34,24 @@ struct HttpHeaderRule {
 
 class MapTexture : public std::enable_shared_from_this<MapTexture> {
  public:
-  // Creates the platform render target, starts the map thread, and waits
-  // until the thread has created the runtime and map. With `copy_free`, the
+  // Creates the platform render target with the textures of the engine of
+  // the token `engine`, starts the map thread, and waits until the thread has
+  // created the runtime and map. With `copy_free`, the
   // session renders directly into the display buffers (design D20). With
   // `maximum_cache_size`, the maximum size in bytes of the runtime's tile
   // cache is that value; otherwise it is MapLibre's default (design D61).
   // Returns null on failure and sets `out_error`.
   static std::shared_ptr<MapTexture> Create(
-      int64_t handle, double pixel_ratio, bool copy_free,
+      int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
       std::optional<uint64_t> maximum_cache_size,
       std::vector<HttpHeaderRule> header_rules,
       map_texture_event_callback callback, std::string* out_error);
 
   ~MapTexture();
+
+  // The token of the engine whose textures the map registered with (design
+  // D156).
+  int64_t engine() const { return engine_; }
 
   // The display slots and the Flutter texture id of each (design D122).
   int slot_count() const;
@@ -124,7 +129,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   map_texture_stats stats();
 
  private:
-  MapTexture(int64_t handle, double pixel_ratio,
+  MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
              std::optional<uint64_t> maximum_cache_size,
              std::vector<HttpHeaderRule> header_rules,
              map_texture_event_callback callback);
@@ -185,6 +190,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void ReportInitStatus(const char* what, mln_status status);
 
   const int64_t handle_;
+  const int64_t engine_;
   const double initial_pixel_ratio_;
   const std::optional<uint64_t> maximum_cache_size_;
 
@@ -273,6 +279,12 @@ void SetAllPaused(bool paused);
 // Queues ReduceMemoryUse() for every live map, for example after an iOS
 // memory warning. Defined in map_texture_api.cpp.
 void ReduceAllMemoryUse();
+
+// Disposes every live map with the engine token `engine`, as
+// map_texture_dispose() does; later calls with their handles return
+// MAP_TEXTURE_ERROR_DISPOSED. The platform calls this when the engine detaches
+// the plugin (design D157). Defined in map_texture_api.cpp.
+void DisposeEngineMaps(int64_t engine);
 
 // For tests and measurements: when maps render without waiting until Dart has
 // chosen the latest frame. kAuto (the default) renders ahead while a frame

@@ -88,6 +88,21 @@ void main() {
     };
   }
 
+  /// Waits until the layer has created its controller, which [read]
+  /// returns, and the controller reports its first displayed frame. The
+  /// layer creates its map asynchronously (design D155 of the
+  /// multiple-flutter-engines change).
+  Future<void> firstFrame(
+    WidgetTester tester,
+    MapTextureController? Function() read,
+  ) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (read() == null && DateTime.now().isBefore(deadline)) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await read()!.frames.first.timeout(const Duration(seconds: 20));
+  }
+
   test('MapigradeLayer.isSupported is true in an app with the native library',
       () {
     expect(MapigradeLayer.isSupported, isTrue);
@@ -108,7 +123,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await controller!.frames.first.timeout(const Duration(seconds: 20));
+    await firstFrame(tester, () => controller);
     // Let Flutter show the frame and the layer rebuild with it.
     await Future<void>.delayed(const Duration(milliseconds: 300));
     await tester.pump();
@@ -147,7 +162,7 @@ void main() {
         ),
       ),
     ));
-    await controller!.frames.first.timeout(const Duration(seconds: 20));
+    await firstFrame(tester, () => controller);
     await Future<void>.delayed(const Duration(milliseconds: 200));
 
     // Two viewport widths east at flutter_map zoom 12.
@@ -218,7 +233,7 @@ void main() {
           onController: (c) => controller = c,
         ),
       );
-      await controller!.frames.first.timeout(const Duration(seconds: 20));
+      await firstFrame(tester, () => controller);
       await Future<void>.delayed(const Duration(milliseconds: 200));
       await tester.pump();
 
@@ -247,7 +262,7 @@ void main() {
     await tester.pumpWidget(
       layerApp(mapController, onController: (c) => controller = c),
     );
-    await controller!.frames.first.timeout(const Duration(seconds: 20));
+    await firstFrame(tester, () => controller);
     await Future<void>.delayed(const Duration(milliseconds: 200));
 
     final displayed = <double>[];
@@ -294,7 +309,7 @@ void main() {
     await tester.pumpWidget(
       mapApp(boundaryKey, withLayer: true, onController: (c) => controller = c),
     );
-    await controller!.frames.first.timeout(const Duration(seconds: 20));
+    await firstFrame(tester, () => controller);
     expect(controller!.isDisposed, isFalse);
 
     await tester.pumpWidget(mapApp(boundaryKey, withLayer: false));
@@ -308,7 +323,7 @@ void main() {
       MapTextureController? controller;
       await tester.pumpWidget(mapApp(boundaryKey,
           withLayer: true, onController: (c) => controller = c));
-      await controller!.frames.first.timeout(const Duration(seconds: 20));
+      await firstFrame(tester, () => controller);
       await tester.pumpWidget(mapApp(boundaryKey, withLayer: false));
       expect(controller!.isDisposed, isTrue);
     }

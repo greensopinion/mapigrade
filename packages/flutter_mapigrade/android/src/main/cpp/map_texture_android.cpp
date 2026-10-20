@@ -35,6 +35,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "map_texture.h"
@@ -49,7 +50,6 @@ namespace {
 
 // Set by JNI_OnLoad and nativeInit; the references are global.
 JavaVM* java_vm = nullptr;
-jobject texture_registry = nullptr;
 jclass map_surface_class = nullptr;
 jmethodID map_surface_init = nullptr;
 jmethodID map_surface_id = nullptr;
@@ -60,6 +60,23 @@ jmethodID map_surface_close_image = nullptr;
 jmethodID map_surface_release_readers = nullptr;
 std::mutex cache_dir_mutex;
 std::string cache_dir;
+
+// The TextureRegistry of each engine that attached the plugin, as a global
+// reference, by token (design D153 of the multiple-flutter-engines change).
+// nativeInit adds an engine's registry and nativeDetach removes it.
+std::mutex registries_mutex;
+int64_t next_token = 1;
+std::unordered_map<int64_t, jobject>& Registries() {
+  static auto* registries = new std::unordered_map<int64_t, jobject>();
+  return *registries;
+}
+
+// A local reference to the registry of the engine `engine`, or null.
+jobject NewRegistryRef(JNIEnv* env, int64_t engine) {
+  std::lock_guard lock(registries_mutex);
+  auto it = Registries().find(engine);
+  return it == Registries().end() ? nullptr : env->NewLocalRef(it->second);
+}
 
 // The JNIEnv of the calling thread, which must be attached to the VM (the main
 // thread is).
@@ -125,11 +142,10 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     }
   }
 
-  // Main thread. Creates the image texture through MapSurface.
-  bool Init(JNIEnv* env) {
+  // Main thread. Creates the image texture in `registry` through MapSurface.
+  bool Init(JNIEnv* env, jobject registry) {
     jobject local = env->NewObject(map_surface_class, map_surface_init,
-                                   texture_registry,
-                                   reinterpret_cast<jlong>(this));
+                                   registry, reinterpret_cast<jlong>(this));
     if (CheckException(env, "creating the image texture") ||
         local == nullptr) {
       return false;
@@ -540,7 +556,8 @@ void SetReadersReleased(bool released) {
 }  // namespace
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner, bool copy_free) {
+    std::weak_ptr<MapTexture> owner, bool copy_free, int64_t engine,
+    std::string* out_error) {
   // MapSurface belongs to the main thread, which runs Dart's UI
   // isolate unless the merged platform and UI thread is turned off.
   if (!OnMainThread()) {
@@ -549,12 +566,19 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
     return nullptr;
   }
   JNIEnv* env = Env();
-  if (env == nullptr || texture_registry == nullptr) {
+  if (env == nullptr || map_surface_class == nullptr) {
     LOGE("map_texture_create called before the plugin was attached");
     return nullptr;
   }
+  jobject registry = NewRegistryRef(env, engine);
+  if (registry == nullptr) {
+    *out_error = kEngineDetachedError;
+    return nullptr;
+  }
   auto target = std::make_unique<AndroidSurfaceTarget>(std::move(owner));
-  if (!target->Init(env)) return nullptr;
+  bool initialized = target->Init(env, registry);
+  env->DeleteLocalRef(registry);
+  if (!initialized) return nullptr;
   return target;
 }
 
@@ -580,20 +604,18 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
   return JNI_VERSION_1_6;
 }
 
-JNIEXPORT void JNICALL
+// Returns the token of the engine's registry (design D153), or 0 if the
+// plugin can't create maps.
+JNIEXPORT jlong JNICALL
 Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
     JNIEnv* env, jobject, jobject registry, jobject context,
     jstring cache_dir) {
   using namespace map_texture;
-  // One Flutter engine per process: a second engine's registry replaces the
-  // first one's.
-  if (texture_registry != nullptr) env->DeleteGlobalRef(texture_registry);
-  texture_registry = env->NewGlobalRef(registry);
   if (map_surface_class == nullptr) {
     jclass surface_class =
         env->FindClass("com/greensopinion/flutter_mapigrade/MapSurface");
     if (CheckException(env, "FindClass(MapSurface)") || surface_class == nullptr) {
-      return;
+      return 0;
     }
     map_surface_class = static_cast<jclass>(env->NewGlobalRef(surface_class));
     env->DeleteLocalRef(surface_class);
@@ -624,6 +646,27 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
     LOGE("mln_android_init failed with status %d: %s", static_cast<int>(status),
          detail != nullptr ? detail : "");
   }
+  std::lock_guard lock(registries_mutex);
+  int64_t token = next_token++;
+  Registries()[token] = env->NewGlobalRef(registry);
+  return static_cast<jlong>(token);
+}
+
+// The engine of `token` detached the plugin: removes its registry and releases
+// the maps that Dart in that engine created and didn't dispose (design D157).
+JNIEXPORT void JNICALL
+Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeDetach(
+    JNIEnv* env, jobject, jlong token) {
+  using namespace map_texture;
+  {
+    std::lock_guard lock(registries_mutex);
+    auto it = Registries().find(token);
+    if (it != Registries().end()) {
+      env->DeleteGlobalRef(it->second);
+      Registries().erase(it);
+    }
+  }
+  DisposeEngineMaps(token);
 }
 
 JNIEXPORT void JNICALL

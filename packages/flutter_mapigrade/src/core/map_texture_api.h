@@ -132,7 +132,10 @@ typedef struct map_texture_stats {
   int64_t max_slots_in_use;
 } map_texture_stats;
 
-// Creates a map that renders at `pixel_ratio` and starts its map thread.
+// Creates a map that renders at `pixel_ratio` and starts its map thread. The
+// map registers its Flutter textures with the engine of the token `engine`,
+// which the plugin gave to Dart over the channel `flutter_mapigrade` (designs
+// D153 to D156 of the multiple-flutter-engines change).
 // With `copy_free` non-zero (what the Dart API passes by default), MapLibre
 // renders each frame directly into a free display buffer; otherwise it renders
 // into one render texture, and each frame is copied on the GPU into a free
@@ -147,7 +150,7 @@ typedef struct map_texture_stats {
 // `*out_error`, if non-null, is a message to free with
 // map_texture_string_free().
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
-    double pixel_ratio, int32_t copy_free, map_texture_event_callback callback,
+    int64_t engine, double pixel_ratio, int32_t copy_free, map_texture_event_callback callback,
     const char* const* header_strings, const int32_t* header_counts,
     int32_t rule_count, char** out_error);
 

@@ -11,6 +11,8 @@ Initial release. The library `package:flutter_mapigrade/flutter_mapigrade.dart` 
 
 Licensed under the BSD 3-Clause License. Apps list the notices of MapLibre Native FFI and the libraries it includes in Flutter's license registry, so `showLicensePage` shows them without code in the app; Android apps also list the FFI's Rust crates and the NDK's C++ runtime.
 
+Maps keep working when the app or another plugin, such as a messaging plugin that runs Dart in the background, starts a second Flutter engine: each map displays in the engine whose Dart code created it. On Android and iOS, the maps of an engine that is destroyed are released with it.
+
 Supported platforms: Android (API level 29; `arm64-v8a`, `armeabi-v7a` and `x86_64`), iOS 15.5 (arm64) and macOS 14.3 (arm64).
 
 The native libraries come from MapLibre Native FFI 0.202610.1: on Android the runtime AAR from Maven Central, on iOS and macOS the release's `MaplibreNativeC.xcframework.zip`. The package contains no native binaries.

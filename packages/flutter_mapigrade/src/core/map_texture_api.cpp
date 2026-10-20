@@ -100,11 +100,29 @@ void ReduceAllMemoryUse() {
   for (auto& [handle, texture] : Registry()) texture->ReduceMemoryUse();
 }
 
+void DisposeEngineMaps(int64_t engine) {
+  std::vector<std::shared_ptr<MapTexture>> textures;
+  {
+    std::lock_guard lock(registry_mutex);
+    for (auto it = Registry().begin(); it != Registry().end();) {
+      if (it->second->engine() == engine) {
+        textures.push_back(std::move(it->second));
+        it = Registry().erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  // Outside the lock, as in map_texture_dispose().
+  for (auto& texture : textures) texture->Dispose();
+}
+
 }  // namespace map_texture
 
 extern "C" {
 
-int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
+int64_t map_texture_create(int64_t engine, double pixel_ratio,
+                           int32_t copy_free,
                            map_texture_event_callback callback,
                            const char* const* header_strings,
                            const int32_t* header_counts, int32_t rule_count,
@@ -130,7 +148,7 @@ int64_t map_texture_create(double pixel_ratio, int32_t copy_free,
     handle = next_handle++;
     if (maximum_cache_size >= 0) cache_size = maximum_cache_size;
   }
-  auto texture = MapTexture::Create(handle, pixel_ratio, copy_free != 0,
+  auto texture = MapTexture::Create(handle, engine, pixel_ratio, copy_free != 0,
                                     cache_size, std::move(rules), callback,
                                     &error);
   if (!texture) return fail(MAP_TEXTURE_ERROR_CREATE_FAILED, error);

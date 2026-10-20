@@ -50,6 +50,7 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   MapTextureController? _controller;
+  bool _creating = false;
   final _subscriptions = <StreamSubscription<Object>>[];
   late final Ticker _panTicker = createTicker(_onPanTick);
 
@@ -83,19 +84,27 @@ class _MapScreenState extends State<MapScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_controller != null) return;
+    if (_controller != null || _creating) return;
     // Before the window's metrics arrive (on Android), the size is empty and
     // the device pixel ratio is 1; the map's ratio is fixed at creation.
     if (MediaQuery.sizeOf(context).isEmpty) return;
-    final controller = MapTextureController.create(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context),
-        copyFree: copyFree);
+    _creating = true;
+    _create(MediaQuery.devicePixelRatioOf(context));
+  }
+
+  Future<void> _create(double pixelRatio) async {
+    final controller = await MapTextureController.create(
+        pixelRatio: pixelRatio, copyFree: copyFree);
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
     _subscriptions.add(controller.events.listen(_onEvent));
     _subscriptions.add(controller.frames.listen(_onFrame));
     if (benchmarkEnabled || timingProbeEnabled) _camera = start;
     controller.loadStyleUrl(styles[_styleIndex].url);
     controller.setCamera(_camera);
-    _controller = controller;
+    setState(() => _controller = controller);
     if (continuousPanAtLaunch && !benchmarkEnabled) _panTicker.start();
     if (benchmarkEnabled) {
       Benchmark(controller, onCamera: (camera) {

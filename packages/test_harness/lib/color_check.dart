@@ -67,19 +67,28 @@ class ColorCheck extends StatefulWidget {
 
 class _ColorCheckState extends State<ColorCheck> {
   MapTextureController? _controller;
+  bool _creating = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_controller != null) return;
-    final controller = MapTextureController.create(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context),
-        copyFree: widget.copyFree);
+    if (_controller != null || _creating) return;
+    _creating = true;
+    _create(MediaQuery.devicePixelRatioOf(context));
+  }
+
+  Future<void> _create(double pixelRatio) async {
+    final controller = await MapTextureController.create(
+        pixelRatio: pixelRatio, copyFree: widget.copyFree);
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
     controller.events.listen((event) => debugPrint('map event: $event'));
     controller.loadStyleJson(style);
     controller.setCamera(
         const MapCamera(latitude: 0, longitude: 0, zoom: 2));
-    _controller = controller;
+    setState(() => _controller = controller);
   }
 
   @override
@@ -91,7 +100,10 @@ class _ColorCheckState extends State<ColorCheck> {
   @override
   Widget build(BuildContext context) => Scaffold(
         body: Column(children: [
-          Expanded(child: MapTextureView(controller: _controller!)),
+          Expanded(
+              child: _controller == null
+                  ? const SizedBox.expand()
+                  : MapTextureView(controller: _controller!)),
           const SizedBox(
             height: 100,
             child: Row(children: [

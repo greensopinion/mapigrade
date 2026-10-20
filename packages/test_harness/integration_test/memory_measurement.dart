@@ -27,7 +27,7 @@ void main() {
 
   testWidgets('memory footprint before and after a memory reduction',
       (tester) async {
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     addTearDown(controller.dispose);
     await tester.pumpWidget(MapTextureView(controller: controller));
@@ -90,7 +90,7 @@ void main() {
           '(${mib(r.aliveBytes)} MiB)';
     }
 
-    final controller = MapTextureController.create(
+    final controller = await MapTextureController.create(
         pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
     final size = ValueNotifier(const Size(200, 200));
     await tester.pumpWidget(Directionality(

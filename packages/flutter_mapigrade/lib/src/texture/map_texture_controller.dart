@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'bindings.dart';
+import 'engine_token.dart';
 import 'native_library.dart';
 
 /// A map camera: center, zoom and bearing in degrees.
@@ -329,20 +330,27 @@ class MapTextureController {
   /// On Android every map renders directly into the buffers that Flutter
   /// displays, and [copyFree] has no effect.
   ///
+  /// The map registers its textures with the Flutter engine of the calling
+  /// isolate. The first creation in an isolate asks the plugin for the
+  /// engine's token over a platform channel; later creations wait only for a
+  /// microtask (designs D154 and D155 of the multiple-flutter-engines change).
+  ///
   /// Throws [MapTextureException] without calling native code when the native
   /// library isn't available in this process (design D86 of the
-  /// unsupported-architectures change).
-  factory MapTextureController.create({
+  /// unsupported-architectures change), and when the plugin doesn't give the
+  /// engine's token.
+  static Future<MapTextureController> create({
     required double pixelRatio,
     bool copyFree = true,
     List<HeaderRule> httpHeaders = const [],
-  }) {
+  }) async {
     if (!nativeLibraryAvailable) {
       throw const MapTextureException(
         'the native library of flutter_mapigrade is not available in this '
         'process',
       );
     }
+    final engine = await engineToken();
     late final MapTextureController controller;
     final callable = NativeCallable<MapTextureEventCallback>.listener(
       (Pointer<MapTextureEventStruct> event) => controller._onEvent(event),
@@ -368,6 +376,7 @@ class MapTextureController {
       }
       final outError = arena<Pointer<Utf8>>();
       final handle = mapTextureCreate(
+        engine,
         pixelRatio,
         copyFree ? 1 : 0,
         callable.nativeFunction,

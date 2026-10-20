@@ -339,9 +339,14 @@ class MetalRenderTarget : public BufferRenderTarget {
 }  // namespace
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner, bool copy_free) {
-  NSObject<FlutterTextureRegistry>* registry = MLTTextureRegistry();
-  if (registry == nil) return nullptr;
+    std::weak_ptr<MapTexture> owner, bool copy_free, int64_t engine,
+    std::string* out_error) {
+  NSObject<FlutterTextureRegistry>* registry =
+      MLTTextureRegistryForEngine(engine);
+  if (registry == nil) {
+    *out_error = kEngineDetachedError;
+    return nullptr;
+  }
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
   if (device == nil) return nullptr;
   __block SlotTextures slots;

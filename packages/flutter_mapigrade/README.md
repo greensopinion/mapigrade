@@ -151,7 +151,6 @@ android {
 ## Limitations
 
 - No API for style layers, sources, queries or pitch.
-- One Flutter engine per process.
 - Sprite and glyph density is fixed when the map is created.
 
 More in [docs/limitations.md](https://github.com/greensopinion/mapigrade/blob/main/docs/limitations.md).

@@ -6,7 +6,8 @@
 /// and D67 of the public-api change), D80 of the http-headers-and-assets
 /// change, its metrics (D111 of the layer-metrics change), and its children,
 /// drawn at the camera of the displayed map frame (D125 and D127 of the
-/// layer-children-alignment change).
+/// layer-children-alignment change). It creates its map asynchronously (D155
+/// of the multiple-flutter-engines change).
 ///
 /// Only files in `lib/src/layer/` may import `package:flutter_map` (design
 /// D9).
@@ -35,7 +36,7 @@ import 'layer_metrics.dart';
 
 /// Creates the map of a [MapTextureLayer]; the signature of
 /// [MapTextureController.create], with [HttpHeaderRule]s.
-typedef MapTextureControllerFactory = MapTextureController Function({
+typedef MapTextureControllerFactory = Future<MapTextureController> Function({
   required double pixelRatio,
   required bool copyFree,
   required List<HttpHeaderRule> httpHeaders,
@@ -114,7 +115,7 @@ class MapTextureLayer extends StatefulWidget {
   State<MapTextureLayer> createState() => _MapTextureLayerState();
 }
 
-MapTextureController _createController({
+Future<MapTextureController> _createController({
   required double pixelRatio,
   required bool copyFree,
   required List<HttpHeaderRule> httpHeaders,
@@ -131,6 +132,8 @@ const _sentCameraCount = 32;
 
 class _MapTextureLayerState extends State<MapTextureLayer> {
   MapTextureController? _controller;
+  // Whether a creation has started and not completed, so that only one runs.
+  bool _creating = false;
   bool _createFailed = false;
   // The messages of the load failures reported since the last style load.
   final Set<String> _loadFailures = {};
@@ -146,28 +149,47 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_controller != null || _createFailed) return;
+    if (_controller != null || _creating || _createFailed) return;
     // On Android the first frames can come before the window's metrics, with
     // an empty size and a device pixel ratio of 1. The map's pixel ratio is
     // fixed at creation, so the map is created when the metrics have arrived,
     // which runs this method again.
     if (MediaQuery.sizeOf(context).isEmpty) return;
+    _creating = true;
+    _create(MediaQuery.devicePixelRatioOf(context));
+  }
+
+  // Creates the map at `pixelRatio`, the ratio when creation started. Until
+  // the controller arrives, the layer builds an empty placeholder (design
+  // D155).
+  Future<void> _create(double pixelRatio) async {
     final create = widget.createController ?? _createController;
     final MapTextureController controller;
     try {
-      controller = create(
-        pixelRatio: MediaQuery.devicePixelRatioOf(context),
+      controller = await create(
+        pixelRatio: pixelRatio,
         copyFree: widget.copyFree,
         httpHeaders: widget.httpHeaders,
       );
     } on MapTextureException catch (e) {
+      if (!mounted) return;
       // Not retried while the layer is in the tree, so that the failure is
       // reported once (design D67).
-      _createFailed = true;
+      setState(() {
+        _creating = false;
+        _createFailed = true;
+      });
       _report(LayerCreateException(e.message));
       return;
     }
-    _controller = controller;
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    setState(() {
+      _creating = false;
+      _controller = controller;
+    });
     if (widget.metrics case final metrics?) bindMetrics(metrics, controller);
     _events = controller.events.listen(_onEvent);
     // With camera prediction, the rebuild after a new displayed frame, once

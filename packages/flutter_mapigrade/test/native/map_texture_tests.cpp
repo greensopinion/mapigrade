@@ -2,7 +2,8 @@
 // display slots (D130-D135), the display slots of a buffer target
 // (D122-D126), camera sequence numbers (D125), the maximum size of the tile
 // cache (D61-D63), and the HTTP header rules (D81, D82), on the fake FFI in
-// fake_mln.cpp.
+// fake_mln.cpp, and the engine token of each map (D156 and D157 of the
+// multiple-flutter-engines change).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -180,6 +181,12 @@ class FakeBufferTarget : public BufferRenderTarget {
 // Whether the next map gets a buffer target instead of a surface target.
 bool use_buffer_target = false;
 
+// The engine tokens that the fake platform has a texture registry for, and
+// the token that the last render target was created with.
+constexpr int64_t kEngine = 7;
+constexpr int64_t kOtherEngine = 8;
+int64_t last_engine = 0;
+
 // The target and owner of the last map created.
 FakeSurfaceTarget* last_target = nullptr;
 FakeBufferTarget* last_buffer_target = nullptr;
@@ -271,7 +278,8 @@ map_texture_stats Stats(int64_t handle) {
 // Sets `error` to the message of map_texture_create().
 int64_t CreateMapWithRules(const std::vector<const char*>& strings,
                            const std::vector<int32_t>& counts,
-                           std::string* error = nullptr) {
+                           std::string* error = nullptr,
+                           int64_t engine = kEngine) {
   fake_mln::Reset();
   {
     std::lock_guard lock(events_mutex);
@@ -279,7 +287,7 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
   }
   char* message = nullptr;
   int64_t handle = map_texture_create(
-      2.0, 1, OnEvent, strings.empty() ? nullptr : strings.data(),
+      engine, 2.0, 1, OnEvent, strings.empty() ? nullptr : strings.data(),
       counts.empty() ? nullptr : counts.data(),
       static_cast<int32_t>(counts.size()), &message);
   CHECK((handle > 0) == (message == nullptr));
@@ -1117,7 +1125,8 @@ void InvalidRuleArraysFailCreate() {
   std::string error;
   fake_mln::Reset();
   char* message = nullptr;
-  CHECK(map_texture_create(2.0, 1, OnEvent, nullptr, nullptr, 1, &message) ==
+  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 1,
+                           &message) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(message != nullptr);
   map_texture_string_free(message);
@@ -1125,7 +1134,8 @@ void InvalidRuleArraysFailCreate() {
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(!error.empty());
   // A null out_error is allowed.
-  CHECK(map_texture_create(2.0, 1, nullptr, nullptr, nullptr, 0, nullptr) ==
+  CHECK(map_texture_create(kEngine, 2.0, 1, nullptr, nullptr, nullptr, 0,
+                           nullptr) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(fake_mln::Calls().empty());
 }
@@ -1175,12 +1185,57 @@ void OtherLogRecordsAreNotReported() {
   map_texture_dispose(handle);
 }
 
+void MapKeepsItsEngineToken() {
+  int64_t handle = CreateMapWithRules({}, {}, nullptr, kOtherEngine);
+  CHECK(handle > 0);
+  CHECK(last_engine == kOtherEngine);
+  auto owner = last_owner.lock();
+  CHECK(owner && owner->engine() == kOtherEngine);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void DisposeEngineMapsDisposesOnlyThatEngine() {
+  int64_t first = CreateMap();
+  // Without the reset of CreateMapWithRules, which the live map uses.
+  int64_t second =
+      map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0, nullptr);
+  int64_t other = map_texture_create(kOtherEngine, 2.0, 1, OnEvent, nullptr,
+                                     nullptr, 0, nullptr);
+  CHECK(second > 0);
+  CHECK(other > 0);
+  map_texture::DisposeEngineMaps(kEngine);
+  map_texture_stats stats{};
+  CHECK(map_texture_get_stats(first, &stats) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_get_stats(second, &stats) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_load_style_url(first, "https://example.com") ==
+        MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_dispose(second) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(map_texture_get_stats(other, &stats) == MAP_TEXTURE_OK);
+  CHECK(map_texture_dispose(other) == MAP_TEXTURE_OK);
+}
+
+void UnknownEngineFailsCreate() {
+  std::string error;
+  int64_t result = CreateMapWithRules({}, {}, &error, /*engine=*/99);
+  CHECK(result == MAP_TEXTURE_ERROR_CREATE_FAILED);
+  CHECK(error == map_texture::kEngineDetachedError);
+  // The map thread doesn't start.
+  CHECK(fake_mln::Calls().empty());
+}
+
 }  // namespace
 
 namespace map_texture {
 
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner, bool) {
+    std::weak_ptr<MapTexture> owner, bool, int64_t engine,
+    std::string* out_error) {
+  if (engine != kEngine && engine != kOtherEngine) {
+    *out_error = kEngineDetachedError;
+    return nullptr;
+  }
+  last_engine = engine;
   last_owner = std::move(owner);
   if (use_buffer_target) {
     auto target = std::make_unique<FakeBufferTarget>();
@@ -1238,6 +1293,9 @@ int main() {
   FailedInitReportsMessage();
   GlyphFailureIsReportedAsLoadFailure();
   OtherLogRecordsAreNotReported();
+  MapKeepsItsEngineToken();
+  DisposeEngineMapsDisposesOnlyThatEngine();
+  UnknownEngineFailsCreate();
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

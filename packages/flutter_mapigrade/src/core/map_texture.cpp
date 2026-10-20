@@ -110,7 +110,7 @@ struct TaskDone {
 }  // namespace
 
 std::shared_ptr<MapTexture> MapTexture::Create(
-    int64_t handle, double pixel_ratio, bool copy_free,
+    int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
     std::optional<uint64_t> maximum_cache_size,
     std::vector<HttpHeaderRule> header_rules,
     map_texture_event_callback callback, std::string* out_error) {
@@ -119,17 +119,18 @@ std::shared_ptr<MapTexture> MapTexture::Create(
     return nullptr;
   }
   std::shared_ptr<MapTexture> texture(
-      new MapTexture(handle, pixel_ratio, maximum_cache_size,
+      new MapTexture(handle, engine, pixel_ratio, maximum_cache_size,
                      std::move(header_rules), callback));
   if (!texture->Start(copy_free, out_error)) return nullptr;
   return texture;
 }
 
-MapTexture::MapTexture(int64_t handle, double pixel_ratio,
+MapTexture::MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
                        std::optional<uint64_t> maximum_cache_size,
                        std::vector<HttpHeaderRule> header_rules,
                        map_texture_event_callback callback)
     : handle_(handle),
+      engine_(engine),
       initial_pixel_ratio_(pixel_ratio),
       maximum_cache_size_(maximum_cache_size),
       header_rules_(std::move(header_rules)),
@@ -167,9 +168,12 @@ MapTexture::~MapTexture() {
 }
 
 bool MapTexture::Start(bool copy_free, std::string* out_error) {
-  target_ = CreatePlatformRenderTarget(weak_from_this(), copy_free);
+  std::string target_error;
+  target_ = CreatePlatformRenderTarget(weak_from_this(), copy_free, engine_,
+                                       &target_error);
   if (!target_) {
-    *out_error = "failed to create the render target";
+    *out_error = target_error.empty() ? "failed to create the render target"
+                                      : target_error;
     return false;
   }
   if (auto* surface = target_->AsSurfaceTarget()) {

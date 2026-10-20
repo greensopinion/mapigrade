@@ -166,11 +166,18 @@ class SurfaceRenderTarget : public RenderTarget {
   virtual void ReleaseSurfaces() = 0;
 };
 
+// The error of a map creation with the token of an engine that has detached
+// the plugin, or that the plugin never gave out (design D156).
+inline constexpr const char* kEngineDetachedError =
+    "the Flutter engine of this isolate has detached flutter_mapigrade";
+
 // Creates the platform render target for `owner` and registers its Flutter
-// texture. With `copy_free`, a buffer target renders directly into the display
-// buffers; a surface target ignores it. Returns null on failure.
+// textures with the engine of the token `engine`. With `copy_free`, a buffer
+// target renders directly into the display buffers; a surface target ignores
+// it. Returns null on failure, and may set `out_error`.
 std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
-    std::weak_ptr<MapTexture> owner, bool copy_free);
+    std::weak_ptr<MapTexture> owner, bool copy_free, int64_t engine,
+    std::string* out_error);
 
 // The path of MapLibre's tile cache database, or an empty string for none.
 std::string PlatformCachePath();

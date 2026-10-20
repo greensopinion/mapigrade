@@ -1,7 +1,8 @@
 // Widget tests for the layer when its map can't be created (design D67 of the
 // public-api change), its header rules (D80 of http-headers-and-assets), its
-// metrics (D111 of layer-metrics), and its children (D125 and D127 of
-// layer-children-alignment).
+// metrics (D111 of layer-metrics), its children (D125 and D127 of
+// layer-children-alignment), and its asynchronous creation (D155 of
+// multiple-flutter-engines).
 // The other scenarios need the native map and are integration tests in
 // packages/test_harness/integration_test/.
 import 'dart:async';
@@ -25,11 +26,12 @@ import 'package:latlong2/latlong.dart';
 
 const _markerKey = Key('marker');
 
-MapTextureController _failingCreate({
+Future<MapTextureController> _failingCreate({
   required double pixelRatio,
   required bool copyFree,
   required List<HttpHeaderRule> httpHeaders,
-}) => throw const MapTextureException('map_texture_create failed with -3');
+}) async =>
+    throw const MapTextureException('map_texture_create failed with -3');
 
 // A controller without a native map.
 class _FakeController implements MapTextureController {
@@ -86,8 +88,12 @@ class _FakeController implements MapTextureController {
   Stream<MapEvent> get events => _events.stream;
   @override
   Stream<FrameCamera> get frames => _frames.stream;
+
+  /// The URLs passed to [loadStyleUrl], in order.
+  final List<String> styleUrls = [];
+
   @override
-  void loadStyleUrl(String url) {}
+  void loadStyleUrl(String url) => styleUrls.add(url);
   @override
   void loadStyleJson(String json) {}
   @override
@@ -177,6 +183,8 @@ void main() {
         ),
       ),
     );
+    // The frame after the creation failed.
+    await tester.pump();
 
     expect(tester.getSize(find.byType(MapTextureLayer)), const Size(800, 600));
     expect(find.byKey(_markerKey), findsOneWidget);
@@ -209,11 +217,11 @@ void main() {
   testWidgets('passes httpHeaders to the factory once', (tester) async {
     final calls = <List<HttpHeaderRule>>[];
     final controllers = <_FakeController>[];
-    MapTextureController create({
+    Future<MapTextureController> create({
       required double pixelRatio,
       required bool copyFree,
       required List<HttpHeaderRule> httpHeaders,
-    }) {
+    }) async {
       calls.add(httpHeaders);
       final controller = _FakeController();
       controllers.add(controller);
@@ -261,7 +269,7 @@ void main() {
             required double pixelRatio,
             required bool copyFree,
             required List<HttpHeaderRule> httpHeaders,
-          }) => throw const MapTextureException(message),
+          }) async => throw const MapTextureException(message),
           onError: failures.add,
         ),
       ),
@@ -270,13 +278,100 @@ void main() {
     expect(failures, [const LayerCreateException(message)]);
   });
 
+  group('asynchronous creation', () {
+    const style = 'https://example.com/style.json';
+    late Completer<MapTextureController> creation;
+    late int creations;
+
+    // Called at the start of each test: a completer created in setUp belongs
+    // to a zone whose microtasks the tester's pumps don't run.
+    void start() {
+      creation = Completer();
+      creations = 0;
+    }
+
+    MapTextureLayer layer({void Function(LayerException)? onError}) =>
+        MapTextureLayer(
+          styleUrl: style,
+          createController:
+              ({
+                required double pixelRatio,
+                required bool copyFree,
+                required List<HttpHeaderRule> httpHeaders,
+              }) {
+                creations++;
+                return creation.future;
+              },
+          onError: onError,
+        );
+
+    testWidgets('builds the placeholder until creation completes, then '
+        'loads the style', (tester) async {
+      start();
+      await tester.pumpWidget(_map(layer()));
+      // A change of the device pixel ratio while creation is pending starts
+      // no second creation.
+      await tester.pumpWidget(_map(layer(), pixelRatio: 2));
+      expect(creations, 1);
+      expect(find.byType(Texture), findsNothing);
+      expect(find.byKey(_markerKey), findsOneWidget);
+
+      final controller = _FakeController();
+      creation.complete(controller);
+      // The creation completes in a microtask after the first pump's frame;
+      // the layer's setState builds in the second.
+      await tester.pump();
+      await tester.pump();
+      expect(controller.styleUrls, [style]);
+      expect(find.byType(Texture), findsOneWidget);
+      expect(creations, 1);
+    });
+
+    testWidgets('disposing the layer during creation disposes the controller', (
+      tester,
+    ) async {
+      start();
+      await tester.pumpWidget(_map(layer()));
+      await tester.pumpWidget(const SizedBox());
+
+      final controller = _FakeController();
+      creation.complete(controller);
+      await tester.pump();
+      expect(controller.isDisposed, isTrue);
+      expect(controller.styleUrls, isEmpty);
+    });
+
+    testWidgets('a failed creation reports one LayerCreateException', (
+      tester,
+    ) async {
+      start();
+      final failures = <LayerException>[];
+      await tester.pumpWidget(_map(layer(onError: failures.add)));
+      await tester.pumpWidget(
+        _map(layer(onError: failures.add), pixelRatio: 2),
+      );
+      creation.completeError(const MapTextureException('no engine token'));
+      await tester.pump();
+      await tester.pumpWidget(
+        _map(layer(onError: failures.add), pixelRatio: 3),
+      );
+
+      expect(failures, [const LayerCreateException('no engine token')]);
+      expect(creations, 1);
+      expect(
+        tester.getSize(find.byType(MapTextureLayer)),
+        const Size(800, 600),
+      );
+    });
+  });
+
   group('metrics', () {
     late List<_FakeController> controllers;
-    MapTextureController create({
+    Future<MapTextureController> create({
       required double pixelRatio,
       required bool copyFree,
       required List<HttpHeaderRule> httpHeaders,
-    }) {
+    }) async {
       final controller = _FakeController();
       controllers.add(controller);
       return controller;
@@ -443,7 +538,7 @@ void main() {
                   required double pixelRatio,
                   required bool copyFree,
                   required List<HttpHeaderRule> httpHeaders,
-                }) => layerController,
+                }) async => layerController,
                 onChildCamera: (id, camera) => childCameras.add((id, camera)),
                 children: children ?? [probe('child')],
               ),
@@ -482,11 +577,18 @@ void main() {
       await tester.pump();
     }
 
+    // Builds [widget], and then the frame in which the layer has its map,
+    // which it creates asynchronously (design D155).
+    Future<void> show(WidgetTester tester, Widget widget) async {
+      await tester.pumpWidget(widget);
+      await tester.pump();
+    }
+
     int displayedTexture(WidgetTester tester) =>
         tester.widget<Texture>(find.byType(Texture)).textureId;
 
     testWidgets('get the camera of the chosen frame', (tester) async {
-      await tester.pumpWidget(map());
+      await show(tester, map());
       final first = mapController.camera;
       expect(controller.cameras, hasLength(1));
       await ready(tester, 1, 2, 1);
@@ -514,7 +616,7 @@ void main() {
     testWidgets('get a frame newer than the frame reported last', (
       tester,
     ) async {
-      await tester.pumpWidget(map());
+      await show(tester, map());
       await ready(tester, 1, 2, 1);
       mapController.move(const LatLng(49.3, -123.0), 10);
       await tester.pump();
@@ -543,7 +645,7 @@ void main() {
     testWidgets('keep the frame chosen before when no frame has finished', (
       tester,
     ) async {
-      await tester.pumpWidget(map());
+      await show(tester, map());
       final first = mapController.camera;
       await ready(tester, 1, 2, 1);
       mapController.move(const LatLng(49.3, -123.0), 10);
@@ -555,9 +657,7 @@ void main() {
     });
 
     testWidgets('get the predicted camera of the chosen frame', (tester) async {
-      await tester.pumpWidget(
-        map(alignment: const LayerAlignment.prediction()),
-      );
+      await show(tester, map(alignment: const LayerAlignment.prediction()));
       // A steady pan, so that the predictor extrapolates.
       for (var i = 1; i <= 6; i++) {
         mapController.move(LatLng(49.25, -123.1 + i * 0.01), 10);
@@ -575,7 +675,7 @@ void main() {
     });
 
     testWidgets('get the live camera before the first frame', (tester) async {
-      await tester.pumpWidget(map());
+      await show(tester, map());
       expect(seen['child'], same(mapController.camera));
       expect(childCameras.last, (null, mapController.camera));
       expect(displayedTexture(tester), 10);
@@ -588,7 +688,7 @@ void main() {
       tester,
     ) async {
       final fake = _FakeController(textureIds: const [7, 7, 7, 7, 7, 7]);
-      await tester.pumpWidget(map(fake: fake));
+      await show(tester, map(fake: fake));
       await ready(tester, 1, 4, 1, fake);
       final sent = seen['child'];
       mapController.move(const LatLng(49.3, -123.0), 10);
@@ -604,7 +704,8 @@ void main() {
       MapController? childController;
       MapOptions? childOptions;
       MapOptions? siblingOptions;
-      await tester.pumpWidget(
+      await show(
+        tester,
         map(
           children: [
             Builder(
@@ -625,7 +726,8 @@ void main() {
     });
 
     testWidgets('fill the viewport above the map', (tester) async {
-      await tester.pumpWidget(
+      await show(
+        tester,
         map(children: [const SizedBox.expand(key: _markerKey)]),
       );
       expect(tester.getSize(find.byKey(_markerKey)), const Size(800, 600));
@@ -638,7 +740,8 @@ void main() {
     testWidgets('a polyline hit-tests where it is drawn', (tester) async {
       final hits = LayerHitNotifier<String>(null);
       const line = [LatLng(49.20, -123.1), LatLng(49.30, -123.1)];
-      await tester.pumpWidget(
+      await show(
+        tester,
         map(
           children: [
             GestureDetector(
