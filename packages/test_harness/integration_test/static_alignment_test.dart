@@ -188,6 +188,12 @@ void main() {
         }
 
         await tester.pumpWidget(app(c.size, overlay: false));
+        // The layer creates its map asynchronously (design D155 of the
+        // multiple-flutter-engines change).
+        final deadline = DateTime.now().add(const Duration(seconds: 20));
+        while (controller == null && DateTime.now().isBefore(deadline)) {
+          await tester.pump(const Duration(milliseconds: 10));
+        }
         final idle = controller!.events
             .firstWhere((e) => e is MapIdle)
             .timeout(const Duration(seconds: 20));
