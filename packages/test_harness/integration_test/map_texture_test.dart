@@ -321,12 +321,21 @@ void main() {
     debugPrint('thread count: before $before, after 50 cycles $after; '
         'memory footprint ${mib(footprintBefore)} MiB before, '
         '${mib(memoryFootprintForTesting())} MiB after');
+    // A thread leaked by each cycle adds 50 threads. The Dart VM and Android
+    // start and stop threads of their own pools as needed, so the count may
+    // grow by a few: DartWorker and binder threads don't count, and two other
+    // threads are allowed. Thread names are read on Android only.
+    var poolThreadsAdded = 0;
     if (after > before) {
       final namesAfter = _threadNames();
-      debugPrint('threads added: ${_subtract(namesAfter, namesBefore)}; '
+      final added = _subtract(namesAfter, namesBefore);
+      poolThreadsAdded = added
+          .where((name) => name == 'DartWorker' || name.startsWith('binder:'))
+          .length;
+      debugPrint('threads added: $added; '
           'removed: ${_subtract(namesBefore, namesAfter)}');
     }
-    expect(after, lessThanOrEqualTo(before));
+    expect(after - poolThreadsAdded, lessThanOrEqualTo(before + 2));
   });
 
   testWidgets('dispose while rendering', (tester) async {
