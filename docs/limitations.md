@@ -44,6 +44,8 @@ Release APKs for arm64 (`flutter build apk --release --target-platform android-a
 
 The APK stores native libraries uncompressed, so the app can map them without extracting them. The rest of the increase is the test harness's Dart code and assets, the plugin's notices (about 78 KB, see Licenses), and `libdartjni.so` for three ABIs (330 KB), which `path_provider_android`, a dependency of `flutter_map`, adds. The Play Store download is compressed and split by ABI, so it is smaller than the APK.
 
+Since the publish-readiness change the APK contains the libraries of the FFI release for `arm64-v8a`, `armeabi-v7a` and `x86_64`. On 2026-10-20, with FFI release 0.202610.1, the test harness's release APK was 86.1 MB, and 31.0 MB with the app's `abiFilters` set to `arm64-v8a` and the Gradle property `disable-abi-filtering=true`, without which the Flutter Gradle plugin replaces an app's `abiFilters` with all three ABIs.
+
 ## Licenses and third-party notices
 
 The package is licensed under the BSD 3-Clause License (`packages/flutter_mapigrade/LICENSE`, and an identical `LICENSE` at the repository root).
@@ -159,7 +161,8 @@ On 2026-10-18, an app installed from TestFlight reported `LayerCreateException`:
 
 ## Known limitations
 
-- arm64 only: the FFI presets are `macos-arm64-metal`, `ios-arm64-metal` and `ios-simulator-arm64-metal`, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds. On Android the plugin packages `libflutter_mapigrade.so` for `arm64-v8a` only. On a device without an arm64 ABI, the plugin logs a warning that names the device's ABIs and calls no native code, the app starts, `MapigradeLayer.isSupported` is false, and a `MapigradeLayer` reports a `LayerCreateException` (unsupported-architectures change). `packages/test_harness/integration_test/unsupported_test.dart` checks this on an arm64 device with an APK built without the library; a 32-bit device was not tested.
+- arm64 only on iOS and macOS: the slices of the FFI's xcframework that the package uses are arm64, so the iOS simulator works only on Apple-silicon Macs. The macOS example sets `ARCHS = arm64`, and the iOS example excludes `x86_64` from simulator builds.
+- Android: the plugin packages its libraries for `arm64-v8a`, `armeabi-v7a` and `x86_64`, the ABIs of the FFI's runtime AAR. The `armeabi-v7a` and `x86_64` builds haven't run on a device or emulator yet. On a device with none of the three ABIs, such as a 32-bit `x86` device, the plugin logs a warning that names the device's ABIs and calls no native code, the app starts, `MapigradeLayer.isSupported` is false, and a `MapigradeLayer` reports a `LayerCreateException` (unsupported-architectures change). `packages/test_harness/integration_test/unsupported_test.dart` checks this on an arm64 device with an APK built without the library; a 32-bit device was not tested.
 - iOS 15.5 or later, the FFI's iOS deployment target. Android 10 (API 29) or later, the minimum for Flutter's image texture (`ImageTextureEntry.pushImage` and the engine's image path).
 - Swift Package Manager only: the plugin has no podspec.
 - On iOS and macOS the app must set `STRIP_STYLE = non-global` for the `Runner` target's Release and Profile configurations. Without it, archived builds have no `map_texture_*` symbols in the executable, and the layer reports a `LayerCreateException` (see Archived builds strip the exported functions).

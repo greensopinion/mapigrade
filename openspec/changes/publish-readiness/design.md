@@ -55,7 +55,7 @@ Alternatives:
 
 ### D100. Android depends on the upstream runtime AAR
 
-`android/build.gradle.kts` declares `implementation("org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android:$MAPLIBRE_FFI_VERSION")` with `mavenCentral()` in the plugin's repositories. A Flutter app's default `settings.gradle.kts` already includes `mavenCentral()`. The AAR gives the app the native library for three ABIs, the verifier classes and their keep rules. The plugin's `rootProject.allprojects` repository block, the dependency on the local verifier and `CopyFfiLibrary` are used only in local mode (D103).
+`android/build.gradle.kts` declares `implementation("org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android:$MAPLIBRE_FFI_VERSION")` with `mavenCentral()` in the plugin's repositories. The `android/build.gradle.kts` that `flutter create` writes already adds `mavenCentral()` to every project. The AAR gives the app the native library for three ABIs, the verifier classes and their keep rules. The plugin's `rootProject.allprojects` repository block, the dependency on the local verifier and `CopyFfiLibrary` are used only in local mode (D103).
 
 Alternatives:
 - Download the `android-*-egl` tarballs in a Gradle task and check them against pinned SHA-256 values. Rejected: the verifier would have to be vendored, the downloads bypass Maven repository proxies, and the task has to manage its own cache.
@@ -97,7 +97,7 @@ Alternative: release mode only, with local FFI builds published to a local Maven
 
 ### D104. ABIs
 
-The plugin's `abiFilters` are `arm64-v8a`, `armeabi-v7a` and `x86_64`, the ABIs of the AAR. An app building for another ABI, such as 32-bit `x86`, gets neither library for it, and the requirement "Unsupported architectures" applies there. An app that wants only `arm64-v8a` sets `abiFilters` in its own module, as the README already describes.
+The plugin's `abiFilters` are `arm64-v8a`, `armeabi-v7a` and `x86_64`, the ABIs of the AAR. An app building for another ABI, such as 32-bit `x86`, gets neither library for it, and the requirement "Unsupported architectures" applies there. On 2026-10-20 the user decided that the package's README doesn't describe how to build for fewer ABIs: developers who need it know their build tools. The same day we found that the Flutter Gradle plugin of Flutter 3.47.5 replaces an app's `abiFilters` with `arm64-v8a`, `armeabi-v7a` and `x86_64` unless that property is true, and that `flutter build apk --target-platform android-arm64` filters only Flutter's own libraries: its APK had the plugin's and the FFI's libraries for all three ABIs, and `libflutter.so` for `arm64-v8a` only.
 
 ### D105. Pubspec and `.pubignore`
 

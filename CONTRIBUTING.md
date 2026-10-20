@@ -8,19 +8,19 @@ This guide is for developers who build, test and measure Mapigrade. The [README]
 - Xcode 26.6 with the macOS and iOS SDKs, and an iOS simulator runtime
 - Flutter 3.47.5 with macOS desktop support
 - For an iPhone: iOS 15.5 or later, an Apple account added in Xcode (Settings > Accounts) for automatic signing, and the device paired with Xcode. The test harness's iOS project uses development team `2J9XYBV642`; change it in Xcode (Runner > Signing & Capabilities) for another team
-- git and [mise](https://mise.jdx.dev) (`brew install mise`); the build script installs CMake, Ninja, Rust and cargo-about through mise
+- For a local FFI build only (optional, see Build MapLibre Native FFI): git and [mise](https://mise.jdx.dev) (`brew install mise`); the build script installs CMake, Ninja, Rust and cargo-about through mise
 - CMake for the C++ unit tests (`brew install cmake`)
 - For Android: the Android SDK with NDK 30.0.16248370 (Android Studio's SDK Manager, or `sdkmanager "ndk;30.0.16248370"`). The FFI build and Gradle find the SDK through `ANDROID_HOME`; the FFI build uses `~/Library/Android/sdk` when it isn't set. The FFI build installs the Rust target `aarch64-linux-android` and the JDK for its Gradle build through mise
-- For an Android device: arm64, Android 10 (API 29) or later, with USB debugging turned on and this Mac authorized on the device. For the emulator: an arm64 system image of API 29 or later; we used `sdk_gphone16k_arm64` (API 37, 16 KB pages)
+- For an Android device: `arm64-v8a`, `armeabi-v7a` or `x86_64`, Android 10 (API 29) or later, with USB debugging turned on and this Mac authorized on the device. For the emulator: an arm64 system image of API 29 or later; we used `sdk_gphone16k_arm64` (API 37, 16 KB pages)
 
 ## Pinned versions
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | commit `44d24a1cfd9cb1b1b25a8c36e8e2472f0e392e18` (`unstable-native-snapshot` of 2026-10-18), presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
+| MapLibre Native FFI | release 0.202610.1, commit `a2f332ec3b5d5f5cdda227acfea757dcf59970fd`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.5 |
-| Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 29, ABI `arm64-v8a` |
+| Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 29, ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
 
 The plugin uses Swift Package Manager, the native build integration that the Flutter 3.47.5 plugin template uses by default. It has no podspec, so CocoaPods builds are not supported.
 
@@ -81,6 +81,8 @@ A run takes about 3 minutes: about 1 minute to build, 21 s of warm-up, 20 s of r
 To publish the video, edit `README.md` on github.com, drag `packages/demo/build/readme_demo.mp4` into the editor, and replace the earlier video's URL with the `https://github.com/user-attachments/assets/...` URL that GitHub inserts, on a line of its own. GitHub doesn't list or delete attachments, so the earlier video stays at its URL.
 
 ## Build MapLibre Native FFI
+
+The package and the repository's apps use the FFI release in `packages/flutter_mapigrade/maplibre_ffi.lock`, so you don't need a local build. Build one to test an FFI commit that has no release, after setting `MAPLIBRE_FFI_COMMIT` in the lock file. While it exists, the apps of the repository use it in place of the release on every platform; delete `third_party/maplibre-native-ffi/` and the manifest cache (below) to use the release again.
 
 `scripts/build_maplibre_ffi.sh` builds the FFI at the commit and presets pinned in `packages/flutter_mapigrade/maplibre_ffi.lock`: the Apple presets in `MAPLIBRE_FFI_PRESETS` and the Android presets in `MAPLIBRE_FFI_ANDROID_PRESETS`. A preset name as argument builds only that preset.
 

@@ -6,6 +6,21 @@
 
 Displays a [MapLibre Native](https://github.com/maplibre/maplibre-native) map as the base layer of a [`flutter_map`](https://pub.dev/packages/flutter_map) map. MapLibre renders on its own thread into a Flutter `Texture`, so the `flutter_map` layers above it are ordinary widgets.
 
+## Installation
+
+```sh
+flutter pub add flutter_mapigrade
+```
+
+On iOS and macOS the plugin supports Swift Package Manager only; it has no podspec.
+
+The package contains no native libraries of MapLibre Native FFI. The first build on a machine downloads them from the FFI release that the package pins, so it needs network access:
+
+- Android: the runtime AAR `org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android` from Maven Central, 34 MB. The `android/build.gradle.kts` that `flutter create` writes includes `mavenCentral()` in the repositories of every project.
+- iOS and macOS: `MaplibreNativeC.xcframework.zip` from the FFI's GitHub release, 28 MB. Swift Package Manager checks it against the checksum that the package states.
+
+Gradle and Swift Package Manager cache the downloads for later builds.
+
 ## Usage
 
 Place a `MapigradeLayer` first among the children of a `FlutterMap`, and place overlay layers such as markers in the layer's own `children`:
@@ -36,11 +51,11 @@ Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a di
 
 | Platform | Minimum version | Architecture |
 | --- | --- | --- |
-| Android | API level 29 | arm64 |
-| iOS | 15.5 | arm64 |
+| Android | API level 29 | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| iOS | 15.5 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
-iOS and macOS support Swift Package Manager only.
+On iOS and macOS the plugin supports Swift Package Manager only.
 
 On iOS and macOS, set **Strip Style** to **Non-Global Symbols** for the `Runner` target's Release and Profile configurations. In `ios/Runner.xcodeproj/project.pbxproj` and `macos/Runner.xcodeproj/project.pbxproj` that is:
 
@@ -50,7 +65,7 @@ STRIP_STYLE = "non-global";
 
 Swift Package Manager links the plugin's native code into the app executable, and Dart looks up its functions in the process. When Xcode archives an app, the default strip style removes every global symbol from the executable, so in an archived build, such as one installed from TestFlight or the App Store, `MapigradeLayer.isSupported` is false and the layer reports a `LayerCreateException`: "the native library of flutter_mapigrade is not available in this process". Debug builds and `flutter run --release` don't strip the executable, so they don't show the failure. To check an archive, run `nm -gU` on the app executable; the output must include `_map_texture_create`.
 
-On Android, an app that also runs on other ABIs, such as `armeabi-v7a` or `x86_64`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
+On Android, an app that also runs on other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
 
 ```dart
 FlutterMap(
@@ -69,7 +84,7 @@ FlutterMap(
 
 ## HTTP headers
 
-To send an access key or other headers to a tile server, give `httpHeaders` a list of `HttpHeaderRule`s. `HttpHeaderRule` describes how rules match URLs and which headers a rule can't set.
+To send an access key or other headers to a tile server, give `httpHeaders` a list of `HttpHeaderRule`s. The documentation of `HttpHeaderRule` describes how rules match URLs and which headers a rule can't set.
 
 ```dart
 MapigradeLayer(
@@ -85,7 +100,7 @@ MapigradeLayer(
 
 ## Flutter assets
 
-`asset://<asset key>` refers to a Flutter asset, in the style URL and in every URL in a style. `MapigradeLayer.styleUrl` describes package assets, PMTiles and add-to-app hosts.
+`asset://<asset key>` refers to a Flutter asset, in the style URL and in every URL in a style. The documentation of `MapigradeLayer.styleUrl` describes package assets, PMTiles and add-to-app hosts.
 
 ```dart
 MapigradeLayer(styleUrl: 'asset://assets/style.json')

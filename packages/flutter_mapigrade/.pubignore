@@ -1,0 +1,42 @@
+# Pub reads this file in place of .gitignore in this directory (design D105 of
+# the publish-readiness change). It repeats the entries of .gitignore, and
+# excludes the local MapLibre Native FFI build, so that a published archive
+# never contains a framework or library and always uses the pinned release.
+# The .gitignore files in subdirectories still apply.
+
+# The local FFI build (scripts/build_maplibre_ffi.sh). Without it the symlink
+# in Frameworks/ doesn't resolve.
+darwin/flutter_mapigrade/Frameworks/
+android/.cxx/
+
+# The entries of .gitignore.
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/

@@ -1,7 +1,13 @@
 name: flutter_mapigrade
 description: "Displays a MapLibre Native map in a Flutter Texture widget, rendered on the GPU through MapLibre Native FFI."
 version: 0.0.1
-publish_to: none
+repository: https://github.com/greensopinion/mapigrade
+issue_tracker: https://github.com/greensopinion/mapigrade/issues
+topics:
+  - maps
+  - maplibre
+  - flutter-map
+  - vector-tiles
 
 resolution: workspace
 
