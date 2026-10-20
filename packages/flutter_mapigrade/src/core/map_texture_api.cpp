@@ -165,15 +165,24 @@ int32_t map_texture_texture_ids(int64_t handle, int64_t* out_ids,
   return count;
 }
 
-int32_t map_texture_select(int64_t handle, int32_t slot, int64_t frame_id) {
+int32_t map_texture_select_newest(int64_t handle, map_texture_frame* out) {
+  if (out == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
-  if (slot < 0 || slot >= texture->slot_count()) {
-    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
-  }
-  return texture->Select(slot, static_cast<uint64_t>(frame_id))
-             ? MAP_TEXTURE_OK
-             : MAP_TEXTURE_NOT_SELECTED;
+  int slot = -1;
+  map_texture::FrameInfo info;
+  if (!texture->SelectNewest(&slot, &info)) return MAP_TEXTURE_NOT_SELECTED;
+  out->frame_id = static_cast<int64_t>(info.frame_id);
+  out->slot = slot;
+  out->seq = info.seq;
+  out->latitude = info.camera.latitude;
+  out->longitude = info.camera.longitude;
+  out->zoom = info.camera.zoom;
+  out->bearing = info.camera.bearing;
+  out->physical_width = static_cast<int32_t>(info.physical_width);
+  out->physical_height = static_cast<int32_t>(info.physical_height);
+  out->scale_factor = info.scale_factor;
+  return MAP_TEXTURE_OK;
 }
 
 int32_t map_texture_load_style_url(int64_t handle, const char* url) {

@@ -59,7 +59,7 @@ The repository contains the app, the test script (`TEST_SCRIPT.md`) and the resu
 
 During pans, the markers floated over the map tiles: clearly on the Pixel in both configurations where we could judge it, and almost imperceptibly on the iPhone. It looked like the displayed map frame lagged the `flutter_map` camera by several frames on Android, and by less on the iPhone.
 
-The platform view causes it, not one layer's code. `MapLibreLayer` sets the native camera on every move event, and the native view renders and composites its frame on its own schedule. Flutter has no information about which camera the displayed frame was rendered at, so no layer can draw the overlays at that camera. Mapigrade's layer can, because the plugin reports each texture frame together with its camera: with the overlays as `MapigradeLayer` children, the alignment benchmark found no Flutter frame with an error over 1 logical px on the Mac and the iPhone, and on the Pixel the overlays stayed on the map in a manual check (`benchmarks.md`, `docs/camera-alignment-options.md`). On the Pixel this lowers the frame rate: Mapigrade displays about 51 map frames per second and the pan stutters now and then (`limitations.md`).
+The platform view causes it, not one layer's code. `MapLibreLayer` sets the native camera on every move event, and the native view renders and composites its frame on its own schedule. Flutter has no information about which camera the displayed frame was rendered at, so no layer can draw the overlays at that camera. Mapigrade's layer can, because the plugin reports each texture frame together with its camera: with the overlays as `MapigradeLayer` children, the alignment benchmark found no Flutter frame with an error over 1 logical px on the Mac and the iPhone, and on the Pixel the overlays stayed on the map in a manual check (`benchmarks.md`, `docs/camera-alignment-options.md`). On the Pixel this lowers the frame rate: Mapigrade displays about 53 map frames per second (`limitations.md`).
 
 This is the reason with the most evidence. It occurs with the default configuration on both platforms, and customers see it as markers, routes and labels that float over the map: clearly on Android, and almost imperceptibly on iOS.
 
@@ -102,7 +102,7 @@ The frame rate that may differ is that of the Flutter UI around the map:
 
 A texture adds no composition work to the widgets above it. If platform views cause dropped Flutter frames while overlays are animating above the map, customers see it as stutter in the application's UI. On Android, the result also shows how much the defects of the other configurations matter: if the Android default is fast enough, applications have no reason to switch.
 
-Mapigrade has its own cost on Android: drawing children at the camera of the displayed frame lowers the displayed map frame rate on the Pixel from about 58 to about 51 frames per second, with occasional stutter (`limitations.md`).
+Mapigrade has its own cost on Android: drawing children at the camera of the displayed frame lowers the displayed map frame rate on the Pixel from about 58 to about 53 frames per second (`limitations.md`).
 
 Improves: customer experience. Status: plausible, not measured.
 

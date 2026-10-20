@@ -96,12 +96,14 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // The target releases the slots' images in SlotFreed (design D137).
   void ResetSlots();
 
-  // The platform thread: Dart chose the frame `frame_id` in `slot` (design
-  // D123). If the slot still holds the frame, records the choice, marks the
-  // slot's texture available and returns true; otherwise returns false. For a
-  // surface target, the first choice of a frame gives its image to Flutter
-  // and reports a frame-displayed event without a display time (design D132).
-  bool Select(int slot, uint64_t frame_id);
+  // The platform thread: Dart chooses the newest finished frame for the
+  // Flutter frame it builds (designs D139 and D140). If a frame is finished
+  // that Dart hasn't chosen, records the choice, marks the slot's texture
+  // available, sets `out_slot` and `out_info`, and returns true; otherwise
+  // returns false and records nothing. For a surface target, the choice gives
+  // the frame's image to Flutter and reports a frame-displayed event without
+  // a display time (design D132).
+  bool SelectNewest(int* out_slot, FrameInfo* out_info);
 
   // The thread that receives a surface target's images: the image of the
   // frame `frame_id` arrived. If a slot queues the frame, publishes it, runs
@@ -233,7 +235,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // resize (steady clock, ns), or 0 for not pending.
   int64_t notify_after_resize_at_ns_ = 0;
   // Set when a render was deferred because Dart hadn't chosen the latest
-  // frame or no slot was free; Select() and Present() wake the map thread.
+  // frame or no slot was free; SelectNewest() and Present() wake the map thread.
   std::atomic<bool> waiting_for_buffer_{false};
   // Timing stats (steady clock, ns): when the last frame was published, when
   // Flutter last took a frame, and when Dart last chose a frame, written by

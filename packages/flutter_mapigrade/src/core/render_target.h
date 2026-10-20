@@ -116,7 +116,7 @@ class BufferRenderTarget : public RenderTarget {
     return MLN_STATUS_OK;
   }
 
-  // The platform thread, from MapTexture::Select. Tells Flutter that the
+  // The platform thread, from MapTexture::SelectNewest. Tells Flutter that the
   // texture of `slot` has a new frame, before the Flutter frame that Dart is
   // building is rasterized (design D123).
   virtual void FrameAvailable(int slot) = 0;
@@ -143,7 +143,7 @@ class SurfaceRenderTarget : public RenderTarget {
   // can tell which frame an image holds.
   virtual void WillRender(uint64_t frame_id) {}
 
-  // The platform thread, under the BufferState lock, from MapTexture::Select:
+  // The platform thread, under the BufferState lock, from MapTexture::SelectNewest:
   // Dart chose the frame in `slot`, so give its image to Flutter for the
   // Flutter frame that Dart is building (design D132).
   virtual void FrameAvailable(int slot) = 0;

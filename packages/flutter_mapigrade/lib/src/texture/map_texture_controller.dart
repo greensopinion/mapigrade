@@ -210,7 +210,7 @@ class MapTextureStats {
 
   /// Frames given to Flutter for display. On macOS and iOS, a frame counts
   /// when Flutter takes it for display. On Android, a frame counts when Dart
-  /// chooses it with [MapTextureController.select].
+  /// chooses it with [MapTextureController.selectNewest].
   final int presentedFrames;
 
   /// `MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE` events received.
@@ -425,10 +425,13 @@ class MapTextureController {
 
   final int _handle;
   final NativeCallable<MapTextureEventCallback> _callable;
+  // The frame that selectNewest() receives; freed in dispose().
+  final Pointer<MapTextureFrameStruct> _chosen =
+      calloc<MapTextureFrameStruct>();
 
   /// The ids for `Texture` widgets, one per display slot (design D122 of the
   /// layer-children-alignment change). Dart chooses the frame to display with
-  /// [select]. There are four slots on macOS and iOS, each with its own
+  /// [selectNewest]. There are four slots on macOS and iOS, each with its own
   /// texture, and six on Android, which share one texture, so that all six
   /// ids are equal there (design D135 of the android-layer-children-alignment
   /// change).
@@ -457,14 +460,16 @@ class MapTextureController {
   FrameCamera? _displayedFrame;
 
   /// Each frame when it has finished rendering into a display slot, before
-  /// Flutter displays it. Choose one with [select].
+  /// Flutter displays it. Each one asks for a build, in which Dart chooses
+  /// the newest finished frame with [selectNewest] (design D141). That frame
+  /// can be newer than the frame added here last.
   Stream<FrameCamera> get readyFrames => _readyFrames.stream;
 
   /// The frame added to [readyFrames] last, if any.
   FrameCamera? get readyFrame => _readyFrame;
   FrameCamera? _readyFrame;
 
-  /// The frame whose choice with [select] the map recorded last, if any.
+  /// The frame that [selectNewest] chose last, if any.
   FrameCamera? get selectedFrame => _selectedFrame;
   FrameCamera? _selectedFrame;
 
@@ -500,23 +505,39 @@ class MapTextureController {
     return seq;
   }
 
-  /// Chooses [frame], from [readyFrames], for the Flutter frame being built,
-  /// on the platform thread, and returns whether the map recorded the choice.
-  /// If it did, display `textureIds[frame.slot]` in the same build; the map
+  /// Chooses, for the Flutter frame being built, the newest frame that has
+  /// finished rendering and that Dart hasn't chosen, on the platform thread,
+  /// and returns it (designs D139 and D141 of the synchronous-frame-choice
+  /// change). Display `textureIds[frame.slot]` in the same build; the map
   /// doesn't render into the slot while a Flutter frame may still display it.
   ///
-  /// Returns false and changes nothing if the slot no longer holds the frame,
-  /// because the map replaced it with a newer frame after reporting it, or a
-  /// resize replaced the slots. Then keep displaying [selectedFrame], the
-  /// frame chosen before (design D123 of the layer-children-alignment
-  /// change).
-  bool select(FrameCamera frame) {
+  /// Returns null and changes nothing if no such frame has finished. Then keep
+  /// displaying [selectedFrame], the frame chosen before.
+  FrameCamera? selectNewest() {
     if (_disposed) throw const MapTextureDisposedException();
-    final status = mapTextureSelect(_handle, frame.slot, frame.frameId);
-    if (status == mapTextureNotSelected) return false;
+    final status = mapTextureSelectNewest(_handle, _chosen);
+    if (status == mapTextureNotSelected) return null;
     _check(status);
+    final f = _chosen.ref;
+    final frame = FrameCamera(
+      frameId: f.frameId,
+      camera: MapCamera(
+        latitude: f.latitude,
+        longitude: f.longitude,
+        zoom: f.zoom,
+        bearing: f.bearing,
+      ),
+      physicalSize: Size(
+        f.physicalWidth.toDouble(),
+        f.physicalHeight.toDouble(),
+      ),
+      scaleFactor: f.scaleFactor,
+      displayTime: null,
+      slot: f.slot,
+      seq: f.seq,
+    );
     _selectedFrame = frame;
-    return true;
+    return frame;
   }
 
   /// Sets the viewport's logical size and device pixel ratio. Repeated calls
@@ -569,6 +590,7 @@ class MapTextureController {
     mapTextureDispose(_handle);
     // No event is sent after dispose returns, so the callable can close.
     _callable.close();
+    calloc.free(_chosen);
     _events.close();
     _frames.close();
     _readyFrames.close();

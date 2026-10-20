@@ -132,6 +132,13 @@ The layer-children-alignment change took options 6 and 4 together: the overlays 
 The android-layer-children-alignment change brought children to Android: six display slots share one image texture, and the map renders once per display refresh interval (designs D130 to D138). On 2026-10-17 we checked the harness's `flutter_map` page on the Pixel 4a (5G), release build, with the polyline and the markers as children and `predict1`.
 
 - Alignment: the overlays stayed exactly on the map. With the children switch off, the overlays floated over the map during pans, as before the change.
-- Smoothness: the map stutters now and then during pans. The map renders by its own clock, which drifts against the display refresh, so some Flutter frames show the previous map frame again (design D134; about 51 displayed map frames per second in the benchmark). We accepted it.
+- Smoothness: the map stutters now and then during pans; some Flutter frames show the previous map frame again (about 51 displayed map frames per second in the benchmark). We accepted it. We attributed it to the map's render clock drifting against the display refresh (design D134); on 2026-10-19 a trace showed that frames finishing just before a vsync were replaced and their choice refused, and the synchronous-frame-choice change fixed it (below).
 - Tearing: none seen, so freeing a slot after three later choices (design D133) is enough on this device.
 - Decision: `predict1` stays the default on Android.
+
+## Manual check on Android (synchronous-frame-choice change, task 5.3)
+
+The synchronous-frame-choice change made the map choose its newest finished frame in each Flutter frame that Dart builds, and return that frame's camera (designs D139 to D141). On 2026-10-19 the user compared release builds of the demo on the Pixel 4a (5G), with the route and the pins as children, before the change (commit `f3a80bb`) and after it: pans, flings and stops.
+
+- Smoothness: the build before the change stuttered during pans; the build after the change didn't. The benchmark agrees: the longest displayed map frame interval decreased from 137–203 ms to 45–47 ms (`benchmarks.md`, "Choice of the newest finished frame").
+- Alignment: with the build after the change, the route and the pins stayed on the map.

@@ -174,8 +174,8 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     // the camera has stopped, finds the camera unchanged and sets the
     // converted camera instead of the last predicted one (design D32).
     _frames = controller.frames.listen((_) => setState(() {}));
-    // On macOS and iOS each build chooses the newest ready frame (design
-    // D127).
+    // Each finished frame starts a build, which chooses the newest finished
+    // frame (design D127, and D141 of the synchronous-frame-choice change).
     _readyFrames = controller.readyFrames.listen((_) => setState(() {}));
     _loadStyle();
     widget.onController?.call(controller);
@@ -293,20 +293,16 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       }
     }
 
-    // If the map refuses the newest ready frame, because it replaced the
-    // frame after reporting it or a resize replaced the slots, the layer
-    // keeps the frame it chose before, which the map still holds (design
-    // D123).
-    final ready = controller.readyFrame;
-    if (ready != null &&
-        ready.frameId > (controller.selectedFrame?.frameId ?? 0)) {
-      controller.select(ready);
-    }
+    // The map chooses its newest finished frame, which can be newer than the
+    // last frame reported to Dart. If no frame has finished since the last
+    // choice, the layer keeps the frame it chose before, which the map still
+    // holds (design D141 of the synchronous-frame-choice change).
+    controller.selectNewest();
     final chosen = controller.selectedFrame;
     // A chosen frame without a sent camera was rendered before the first
     // setCamera; any other miss is a bug.
-    final childCamera = (chosen == null ? null : _sentCameras[chosen.seq]) ??
-        live;
+    final childCamera =
+        (chosen == null ? null : _sentCameras[chosen.seq]) ?? live;
     widget.onChildCamera?.call(chosen?.frameId, childCamera);
 
     return SizedBox.fromSize(

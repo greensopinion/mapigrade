@@ -239,6 +239,15 @@ std::vector<Event> ReadyEvents() {
   return EventsOfType(MAP_TEXTURE_EVENT_FRAME_READY);
 }
 
+// Dart's choice of the newest finished frame (design D140). Returns the
+// status, and the chosen frame in `out` if one was chosen.
+int32_t SelectNewest(int64_t handle, map_texture_frame* out = nullptr) {
+  map_texture_frame frame{};
+  int32_t status = map_texture_select_newest(handle, &frame);
+  if (out != nullptr) *out = frame;
+  return status;
+}
+
 // Waits up to two seconds for `condition`.
 bool WaitFor(const std::function<bool()>& condition) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -329,7 +338,7 @@ class SurfaceDart {
       auto ready = ReadyEvents();
       if (!ready.empty() && ready.back().frame_id > chosen) {
         chosen = ready.back().frame_id;
-        map_texture_select(handle_, ready.back().slot, chosen);
+        SelectNewest(handle_);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -481,8 +490,16 @@ void SurfaceFrameIsReadyWhenItsImageArrives() {
   CHECK(ready[0].seq == 4);
   CHECK(ready[0].zoom == 6);
   CHECK(FrameEvents().empty());
-  for (int i = 0; i < 3; ++i) {
-    CHECK(map_texture_select(handle, ready[0].slot, 1) == MAP_TEXTURE_OK);
+  map_texture_frame chosen{};
+  CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
+  CHECK(chosen.frame_id == 1);
+  CHECK(chosen.slot == ready[0].slot);
+  CHECK(chosen.seq == 4);
+  CHECK(chosen.zoom == 6);
+  CHECK(chosen.physical_width == ready[0].physical_width);
+  // No newer frame: nothing is pushed or reported again.
+  for (int i = 0; i < 2; ++i) {
+    CHECK(SelectNewest(handle) == MAP_TEXTURE_NOT_SELECTED);
   }
   {
     std::lock_guard lock(last_target->mutex);
@@ -506,7 +523,7 @@ void SurfaceImageBeforeRenderReturns() {
   CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
   auto ready = ReadyEvents()[0];
   CHECK(ready.frame_id == 1);
-  CHECK(map_texture_select(handle, ready.slot, 1) == MAP_TEXTURE_OK);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
   fake_mln::QueueRenderUpdate();
   CHECK(WaitFor([] { return ReadyEvents().size() == 2; }));
   CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
@@ -563,8 +580,9 @@ void SurfaceSlotIsFreedAfterThreeLaterChoices() {
     }));
     CHECK(DeliverImage(frame));
     auto ready = ReadyEvents().back();
-    CHECK(map_texture_select(handle, ready.slot, ready.frame_id) ==
-          MAP_TEXTURE_OK);
+    map_texture_frame chosen{};
+    CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
+    CHECK(chosen.frame_id == ready.frame_id);
     {
       std::lock_guard lock(last_target->mutex);
       std::vector<uint64_t> expected;
@@ -613,22 +631,21 @@ void SurfaceTargetTaskFreesQueuedFrame() {
   map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAuto);
 }
 
-// Design D137: after ResetSlots, the slots' images are released and a choice
-// of a frame from before is refused.
+// Design D137: after ResetSlots, the slots' images are released and no frame
+// from before can be chosen.
 void SurfaceResetSlotsReleasesImages() {
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
   CHECK(DeliverImage(1));
-  auto ready = ReadyEvents()[0];
-  CHECK(map_texture_select(handle, ready.slot, 1) == MAP_TEXTURE_OK);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
   last_owner.lock()->ResetSlots();
   {
     std::lock_guard lock(last_target->mutex);
     CHECK(last_target->images.empty());
     CHECK((last_target->closed == std::vector<uint64_t>{1}));
   }
-  CHECK(map_texture_select(handle, ready.slot, 1) == MAP_TEXTURE_NOT_SELECTED);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_NOT_SELECTED);
   map_texture_dispose(handle);
 }
 
@@ -689,15 +706,17 @@ int64_t CreateBufferMap() {
   return handle;
 }
 
-// Dart's part: chooses the frame of `ready` as the test's model records it,
-// then selects it.
+// Dart's part: records in the test's model that the frame of `ready`, the
+// newest finished frame, is held, then chooses the newest finished frame.
 void Choose(int64_t handle, const Event& ready) {
   {
     std::lock_guard lock(last_buffer_target->mutex);
     last_buffer_target->held.insert(ready.slot);
   }
-  CHECK(map_texture_select(handle, ready.slot, ready.frame_id) ==
-        MAP_TEXTURE_OK);
+  map_texture_frame chosen{};
+  CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
+  CHECK(chosen.frame_id == ready.frame_id);
+  CHECK(chosen.slot == ready.slot);
 }
 
 // The raster thread's part: presents `slot`, then removes from the model the
@@ -761,46 +780,63 @@ void ReadyEventPrecedesDisplayedEvent() {
   map_texture_dispose(handle);
 }
 
-// Design D123: a frame replaced by rendering ahead after Dart learned of it
-// can't be chosen, and the frame Dart chose before stays displayed.
-void SelectOfReplacedFrameChangesNothing() {
+// Design D139: a frame replaced by rendering ahead after Dart learned of it
+// isn't chosen; Dart gets the newer frame, and the frame Dart chose before
+// stays displayed until Flutter presents the newer one.
+void NewestFrameIsChosenAfterReplacement() {
   int64_t handle = CreateBufferMap();
   map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAlways);
   auto owner = last_owner.lock();
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
   auto shown = ReadyEvents()[0];
-  CHECK(map_texture_select(handle, shown.slot, shown.frame_id) ==
-        MAP_TEXTURE_OK);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
   void* shown_buffer = reinterpret_cast<void*>(intptr_t{shown.slot + 1});
   CHECK(owner->Present(shown.slot) == shown_buffer);
-  // Rendered ahead, the third frame replaces the second, which Dart can no
-  // longer choose.
+  // Rendered ahead, the third frame replaces the second.
   fake_mln::QueueRenderUpdate();
   CHECK(WaitFor([] { return ReadyEvents().size() == 2; }));
   fake_mln::QueueRenderUpdate();
   CHECK(WaitFor([] { return ReadyEvents().size() == 3; }));
-  auto replaced = ReadyEvents()[1];
-  CHECK(map_texture_select(handle, replaced.slot, replaced.frame_id) ==
-        MAP_TEXTURE_NOT_SELECTED);
+  auto newest = ReadyEvents()[2];
+  map_texture_frame chosen{};
+  CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
+  CHECK(chosen.frame_id == newest.frame_id);
+  CHECK(chosen.slot == newest.slot);
   {
     std::lock_guard lock(last_buffer_target->mutex);
-    CHECK((last_buffer_target->available == std::vector<int>{shown.slot}));
+    CHECK((last_buffer_target->available ==
+           std::vector<int>{shown.slot, newest.slot}));
   }
-  // The frame chosen before stays displayable, and the map doesn't render
-  // into its slot.
+  // No newer frame: nothing is chosen, and the texture isn't marked again.
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_NOT_SELECTED);
+  {
+    std::lock_guard lock(last_buffer_target->mutex);
+    CHECK(last_buffer_target->available.size() == 2);
+  }
+  // The frame chosen before stays displayable until the newer one is
+  // presented.
   CHECK(owner->Present(shown.slot) == shown_buffer);
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return ReadyEvents().size() == 4; }));
-  CHECK(ReadyEvents()[3].slot != shown.slot);
-  CHECK(owner->Present(shown.slot) == shown_buffer);
-  // The newest frame can be chosen.
-  auto newest = ReadyEvents()[3];
-  CHECK(map_texture_select(handle, newest.slot, newest.frame_id) ==
-        MAP_TEXTURE_OK);
-  CHECK(map_texture_select(handle, 4, newest.frame_id) ==
-        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(owner->Present(newest.slot) ==
+        reinterpret_cast<void*>(intptr_t{newest.slot + 1}));
   map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAuto);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+// Design D124: the next render waits until Dart has chosen the latest frame,
+// and the choice starts it.
+void RenderWaitingForChoiceStartsAfterChoice() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
+  fake_mln::QueueRenderUpdate();
+  CHECK(WaitFor([handle] { return Stats(handle).waits_for_display > 0; }));
+  Sleep(200);
+  CHECK(Stats(handle).rendered_frames == 1);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 2; }));
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -857,9 +893,7 @@ void AllSlotsHeldWithoutPresent() {
   for (size_t frame = 1; frame <= 4; ++frame) {
     CHECK(WaitFor([frame] { return ReadyEvents().size() == frame; }));
     if (ReadyEvents().size() != frame) break;
-    auto ready = ReadyEvents().back();
-    CHECK(map_texture_select(handle, ready.slot, ready.frame_id) ==
-          MAP_TEXTURE_OK);
+    CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
     fake_mln::QueueRenderUpdate();
   }
   CHECK(WaitFor([handle] { return Stats(handle).skipped_renders > 0; }));
@@ -880,7 +914,7 @@ void SelectAfterDisposeReportsDisposed() {
   CHECK(map_texture_texture_ids(handle, ids, 4) == 4);
   CHECK(ids[0] == 50 && ids[3] == 53);
   map_texture_dispose(handle);
-  CHECK(map_texture_select(handle, 0, 1) == MAP_TEXTURE_ERROR_DISPOSED);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_ERROR_DISPOSED);
   CHECK(map_texture_texture_ids(handle, ids, 4) == MAP_TEXTURE_ERROR_DISPOSED);
   CHECK(map_texture_set_camera(handle, 0, 0, 0, 0, 1) ==
         MAP_TEXTURE_ERROR_DISPOSED);
@@ -892,7 +926,8 @@ void SurfaceMapHasSixSlotsWithOneTexture() {
   int64_t ids[8] = {};
   CHECK(map_texture_texture_ids(handle, ids, 8) == 6);
   for (int i = 0; i < 6; ++i) CHECK(ids[i] == 42);
-  CHECK(map_texture_select(handle, 6, 1) == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_select_newest(handle, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   map_texture_dispose(handle);
 }
 
@@ -1181,7 +1216,8 @@ int main() {
   NoRenderWhilePaused();
   FrameReportsLatestCameraSequenceNumber();
   ReadyEventPrecedesDisplayedEvent();
-  SelectOfReplacedFrameChangesNothing();
+  NewestFrameIsChosenAfterReplacement();
+  RenderWaitingForChoiceStartsAfterChoice();
   MapDoesNotRenderIntoHeldSlot();
   IdleBufferMapRendersNothing();
   AllSlotsHeldWithoutPresent();

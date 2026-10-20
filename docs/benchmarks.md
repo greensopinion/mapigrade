@@ -245,7 +245,7 @@ Measured 2026-10-17 on the Pixel 4a (5G), with the setup and procedure above, 3 
 | `render_update`, average (maximum) | 8.96–9.58 ms (39.4–56.9 ms) | 8.65–8.77 ms (38.3–54.2 ms) |
 | Skipped renders | 0 | 0 |
 
-With one slot, Flutter rasterized fewer Flutter frames than the map queued, so it showed at most 55 to 57 map frames per second. With six slots, about 12% of rendered frames were replaced before Dart chose them, and some Flutter frames showed the frame of the previous Flutter frame again: the map renders by its own clock, which drifts against the display refresh (design D134). Flutter itself rasterized a frame on almost every refresh.
+With one slot, Flutter rasterized fewer Flutter frames than the map queued, so it showed at most 55 to 57 map frames per second. With six slots, about 12% of rendered frames were replaced before Dart chose them, and some Flutter frames showed the frame of the previous Flutter frame again. Flutter itself rasterized a frame on almost every refresh. We first attributed this to the map's render clock drifting against the display refresh (design D134); a trace on 2026-10-19 showed that this was wrong ("Choice of the newest finished frame" below).
 
 Two other configurations of the change, one run set each, were rejected: renders paced by Dart's choice displayed 25.7–27.4 map frames per second, and five slots with interval pacing displayed 48.3–50.1 with 203–266 skipped renders per run (design corrections of D133 and D134).
 
@@ -262,6 +262,40 @@ Memory (`integration_test/memory_measurement.dart`, profile build because `flutt
 This PSS doesn't include the graphics buffers. `dumpsys meminfo` 10 s into the measured pan of the benchmark (release build, one run each) reported Graphics 215 MB with one slot and 203 MB with six slots, of which EGL mtrack 108 MB and 98 MB: the six slots use one buffer fewer than Flutter's `SurfaceProducer` did.
 
 The app size increase is in `limitations.md`.
+
+### Choice of the newest finished frame (synchronous-frame-choice change, tasks 1.1, 5.1 and 5.2)
+
+Measured 2026-10-19, with the setups and procedures above, 3 runs per device, release builds of commit `f3a80bb`. Before the change, Dart chose the frame of the last finished-frame report that it had handled (design D123 of the layer-children-alignment change). The Mac display was scaled to 1800x1169 logical pixels, and the iPhone's auto-lock was off.
+
+| Metric | Pixel 4a (5G) | Mac | iPhone |
+| --- | --- | --- | --- |
+| Displayed map frames per second, average over 30 s | 49.9–50.8 | 106.3–107.7 | 108.5–111.0 |
+| Displayed map frames per second, per-second min / p10 / p50 / p90 | 38–42 / 41–46 / 50–52 / 56–57 | 91–93 / 98–99 / 103–108 / 116–117 | 97–98 / 104–107 / 108–111 / 116–117 |
+| Displayed map frame interval, median / p95 / p99 / max | 16.80–16.82 / 34.69–38.82 / 67.44–69.95 / 137.2–202.6 ms | 8.34 / 16.69–16.70 / 16.77–16.79 / 18.4–25.6 ms | 8.34 / 16.60–16.67 / 17.00–17.10 / 33.7–41.8 ms |
+| Map frames rendered | 1,738–1,744 | 3,337–3,355 | 3,570–3,675 |
+| Map frames displayed | 1,498–1,523 | 3,189–3,230 | 3,254–3,331 |
+
+A trace of the benchmark on the Pixel before the change (2026-10-19, atrace `gfx` and `view`; the second run a profile build with `--ez trace-systrace true`) showed the cause of the frames that Dart didn't choose:
+
+- Renders started at a fixed point after each vsync: Dart's `setCamera` call, about 0.4 ms after the vsync callback, starts each render, and the map's swap followed 2 to 3 ms after the vsync. The render start didn't drift against the vsync.
+- The listener thread's `ImageReader.acquireNextImage` waited on each frame's GPU fence (`waitForever`): 10.7 ms after the swap at the median (p10 8.9 ms, p90 13.3 ms). A frame became finished only then, 10 to 16 ms after a vsync, and the time moved with the GPU load along the path.
+- Of the 403 frames that finished in the last 1.7 ms before a vsync callback, 254 had their finished-frame report handled by Dart only after `Animator::BeginFrame`. Before the next build the map replaced that frame, Dart chose the frame it had been told about, the map refused the choice, and Dart displayed the previous frame again, often for several Flutter frames in a row.
+- A simulation of the choice from the trace's timestamps gave 1,459 displayed frames and a p99 interval of 84.1 ms, against 1,449 and 84.0 ms measured. With the map choosing its newest finished frame at each build, it gave 54.3 displayed frames per second and a longest interval of 34.5 ms.
+
+After the change, measured the same day with release builds of the change: in each Flutter frame that Dart builds, the map chooses its newest finished frame and returns its camera (design D141).
+
+| Metric | Pixel 4a (5G) | Mac | iPhone |
+| --- | --- | --- | --- |
+| Displayed map frames per second, average over 30 s | 52.7–53.2 | 106.8–107.5 | 109.3–111.0 |
+| Displayed map frames per second, per-second min / p10 / p50 / p90 | 45–47 / 48–49 / 53–54 / 56–58 | 93–96 / 98–100 / 107 / 115–116 | 101–103 / 104–106 / 109–111 / 117–120 |
+| Displayed map frame interval, median / p95 / p99 / max | 16.80–16.82 / 33.95–34.09 / 37.03–38.35 / 44.7–47.0 ms | 8.34 / 16.70 / 16.77–16.80 / 18.1–25.0 ms | 8.34 / 16.49–16.59 / 16.77–16.78 / 19.1–19.3 ms |
+| Map frames rendered | 1,741–1,748 | 3,357–3,378 | 3,544–3,619 |
+| Map frames displayed | 1,582–1,597 | 3,203–3,226 | 3,280–3,330 |
+| Rendered frames that Dart didn't choose | 8.5–9.2% (before: 12.4–14.0%) | 4.1–5.2% | 7.4–8.1% |
+
+On the Pixel the displayed frame rate increased by about 3 frames per second, and the longest displayed frame interval decreased from 137–203 ms to 45–47 ms. On the Mac and the iPhone the frame rate didn't change; on the iPhone the slowest second increased from 97–98 to 101–103 frames, and the longest interval decreased from 34–42 ms to 19 ms.
+
+An atrace trace of one more Pixel run (profile build, `gfx` and `view`, `--ez trace-systrace true`; 52.8 displayed map frames per second) had 73 Flutter frames in 30 s that kept the previous map frame although a frame had finished before the frame started (`Animator::BeginFrame`), against 272 in the trace before the change. In 71 of them Dart built no widget (no `BUILD` slice), so the layer didn't choose: each of these frames finished 0 to 2 ms before the vsync, and its finished-frame report, which starts the layer's build, reached Dart after the Flutter frame had started.
 
 ### Slower GPU (task 6.4)
 

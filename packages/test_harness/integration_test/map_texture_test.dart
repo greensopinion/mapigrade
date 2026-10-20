@@ -537,10 +537,11 @@ void main() {
     final chosen = controller.selectedFrame;
     trimSurfacesForTesting(restore: false);
     final removed = controller.stats();
-    // The release frees the slots, so the frame chosen before can't be chosen
-    // again.
+    // The release frees the slots, so no frame can be chosen, and the frame
+    // chosen before stays the selected frame.
     expect(chosen, isNotNull);
-    expect(controller.select(chosen!), isFalse);
+    expect(controller.selectNewest(), isNull);
+    expect(controller.selectedFrame, same(chosen));
     // Camera changes while the surface is removed render nothing.
     const camera = MapCamera(latitude: 20, longitude: 30, zoom: 4);
     controller.setCamera(camera);
@@ -984,9 +985,9 @@ class _SlotEntry {
   final FrameCamera frame;
 }
 
-/// Chooses the newest ready frame in each build, as the layer does, displays
-/// the slot of the frame selected last, and logs each recorded selection to
-/// [log].
+/// Chooses the newest finished frame in each build, as the layer does,
+/// displays the slot of the frame selected last, and logs each recorded
+/// selection to [log].
 class _SelectingView extends StatefulWidget {
   const _SelectingView({required this.controller, required this.log});
   final MapTextureController controller;
@@ -1014,14 +1015,11 @@ class _SelectingViewState extends State<_SelectingView> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    final ready = controller.readyFrame;
-    // A frame the map replaced after reporting it is refused; the view then
-    // keeps the frame selected before.
-    if (ready != null &&
-        !controller.isDisposed &&
-        ready.frameId > (controller.selectedFrame?.frameId ?? 0) &&
-        controller.select(ready)) {
-      widget.log.add(_SlotEntry(selected: true, frame: ready));
+    // If no frame has finished since the last choice, the view keeps the
+    // frame selected before.
+    final chosen = controller.isDisposed ? null : controller.selectNewest();
+    if (chosen != null) {
+      widget.log.add(_SlotEntry(selected: true, frame: chosen));
     }
     return MapTextureView(
         controller: controller, slot: controller.selectedFrame?.slot ?? 0);

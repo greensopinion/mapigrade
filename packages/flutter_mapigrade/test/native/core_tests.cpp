@@ -171,9 +171,9 @@ void ChosenSlotStaysHeldUntilLaterChosenSlotIsPresented() {
   BufferState state;
   // Dart chooses slot 0, then slot 1. Flutter presents 0, then 1.
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   CHECK(PresentIndex(state, 0) == 0);
   CHECK(state.slot(0) == Slot::kHeld);
   CHECK(state.slot(1) == Slot::kHeld);
@@ -185,9 +185,9 @@ void ChosenSlotStaysHeldUntilLaterChosenSlotIsPresented() {
 void ChosenSlotIsHeldBeforeAnyPresent() {
   BufferState state;
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   // Neither has been presented, so a raster of either may still run.
   CHECK(state.slot(0) == Slot::kHeld);
   CHECK(state.slot(1) == Slot::kHeld);
@@ -196,41 +196,29 @@ void ChosenSlotIsHeldBeforeAnyPresent() {
 void PresentedSlotStaysHeldUntilAnotherSlotIsPresented() {
   BufferState state;
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PresentIndex(state, 0) == 0);
   // Presenting it again, or a slot Dart didn't choose, frees nothing.
   CHECK(PresentIndex(state, 0) == 0);
   CHECK(PresentIndex(state, 2) == -1);
   CHECK(state.slot(0) == Slot::kHeld);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   CHECK(state.slot(0) == Slot::kHeld);
   CHECK(PresentIndex(state, 1) == 1);
   CHECK(state.slot(0) == Slot::kFree);
 }
 
-void SlotChosenAgainStaysHeld() {
+void ChoiceWithoutNewFrameChangesNothing() {
   BufferState state;
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
-  // Dart chooses slot 0 again after slot 1; presenting 1 doesn't free 0.
-  CHECK(state.Select(0, 1));
-  CHECK(PresentIndex(state, 1) == 1);
-  CHECK(state.slot(0) == Slot::kHeld);
-  CHECK(PresentIndex(state, 0) == 0);
-  CHECK(state.slot(1) == Slot::kFree);
-}
-
-void RepeatedChoiceCountsOnce() {
-  BufferState state;
-  CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
-  CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
-  CHECK(state.Select(1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
+  // No newer frame: nothing is chosen, and slot 1 stays the slot chosen last.
+  CHECK(state.SelectNewest() == -1);
+  CHECK(state.SelectNewest() == -1);
+  CHECK(state.slot(1) == Slot::kHeld);
   CHECK(PresentIndex(state, 1) == 1);
   CHECK(state.slot(0) == Slot::kFree);
   CHECK(state.slot(1) == Slot::kHeld);
@@ -242,31 +230,37 @@ void ReplacedReadyFrameFreesItsSlot() {
   CHECK(PublishAt(state, 1, 2));
   CHECK(state.slot(0) == Slot::kFree);
   CHECK(state.slot(1) == Slot::kReady);
-  // The replaced frame can't be chosen any more.
-  CHECK(!state.Select(0, 1));
+  // The newer frame is chosen.
+  FrameInfo chosen;
+  CHECK(state.SelectNewest([&](int, const FrameInfo& info) {
+    chosen = info;
+  }) == 1);
+  CHECK(chosen.frame_id == 2);
   CHECK(state.slot(0) == Slot::kFree);
+  CHECK(state.slot(1) == Slot::kHeld);
 }
 
-void SelectingSlotThatIsNotReadyChangesNothing() {
+void NothingToChooseWithoutReadySlot() {
   BufferState state;
-  CHECK(!state.Select(0, 1));
+  bool called = false;
+  CHECK(state.SelectNewest([&](int, const FrameInfo&) { called = true; }) ==
+        -1);
+  CHECK(!called);
   CHECK(state.slot(0) == Slot::kFree);
+  // A frame still rendering, or queued on Android, isn't finished.
   int index = state.AcquireFree(-1);
-  CHECK(!state.Select(index, 0));
+  CHECK(state.SelectNewest() == -1);
   CHECK(state.slot(index) == Slot::kRendering);
   state.Publish(index, Frame(5));
-  // A different frame id, as after a resize, changes nothing.
-  CHECK(!state.Select(index, 4));
-  CHECK(state.slot(index) == Slot::kReady);
-  CHECK(!state.Select(-1, 5));
-  CHECK(!state.Select(map_texture::kMaxBufferCount, 5));
-  CHECK(state.LatestReadyChosen() == false);
+  CHECK(!state.LatestReadyChosen());
+  CHECK(state.SelectNewest() == index);
+  CHECK(state.LatestReadyChosen());
 }
 
 void PresentReportsNewFramesOnce() {
   BufferState state;
   CHECK(PublishAt(state, 1, 7));
-  CHECK(state.Select(1, 7));
+  CHECK(state.SelectNewest() == 1);
   auto first = state.Present(1, [](const BufferState::Presented&) {});
   CHECK(first.index == 1);
   CHECK(first.info.frame_id == 7);
@@ -279,7 +273,7 @@ void PresentReportsNewFramesOnce() {
 void PresentRunsCallbackWithResult() {
   BufferState state;
   CHECK(PublishAt(state, 2, 3));
-  CHECK(state.Select(2, 3));
+  CHECK(state.SelectNewest() == 2);
   int seen = -1;
   state.Present(2, [&](const BufferState::Presented& p) { seen = p.index; });
   CHECK(seen == 2);
@@ -292,7 +286,7 @@ void NewFramesHaveIncreasingDisplayTime() {
     int index = state.AcquireFree(-1);
     CHECK(index >= 0);
     state.Publish(index, Frame(id));
-    CHECK(state.Select(index, id));
+    CHECK(state.SelectNewest() == index);
     int64_t before = map_texture::DisplayClockUs();
     auto presented =
         state.Present(index, [](const BufferState::Presented&) {});
@@ -321,7 +315,7 @@ void FourSlotsAlwaysHaveAFreeSlot() {
   for (int flutter_frame = 0; flutter_frame < 50; ++flutter_frame) {
     int chosen = -1;
     if (ready >= 0) {
-      CHECK(state.Select(ready, ready_frame));
+      CHECK(state.SelectNewest() == ready);
       chosen = ready;
       ready = -1;
     }
@@ -345,7 +339,7 @@ void NoFreeSlotWithoutPresent() {
     int index = state.AcquireFree(-1);
     CHECK(index >= 0);
     state.Publish(index, Frame(frame));
-    CHECK(state.Select(index, frame));
+    CHECK(state.SelectNewest() == index);
     CHECK(state.LatestReadyChosen());
   }
   CHECK(state.AcquireFree(-1) == -1);
@@ -358,7 +352,7 @@ void HeldUntilThreeLaterChoices() {
                     BufferState::ReleaseRule::kLaterChoices);
   for (int slot = 0; slot < 4; ++slot) {
     CHECK(PublishAt(state, slot, slot + 1));
-    CHECK(state.Select(slot, slot + 1));
+    CHECK(state.SelectNewest() == slot);
     CHECK(state.slot(0) == (slot < 3 ? Slot::kHeld : Slot::kFree));
   }
   CHECK(state.slot(1) == Slot::kHeld);
@@ -366,18 +360,19 @@ void HeldUntilThreeLaterChoices() {
   CHECK(state.slot(3) == Slot::kHeld);
 }
 
-void RepeatedChoiceDoesNotCountWithLaterChoices() {
+void ChoiceWithoutNewFrameDoesNotCountWithLaterChoices() {
   BufferState state(map_texture::kChoiceReleasedBufferCount,
                     BufferState::ReleaseRule::kLaterChoices);
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   CHECK(PublishAt(state, 2, 3));
-  for (int i = 0; i < 5; ++i) CHECK(state.Select(2, 3));
+  CHECK(state.SelectNewest() == 2);
+  for (int i = 0; i < 5; ++i) CHECK(state.SelectNewest() == -1);
   CHECK(state.slot(0) == Slot::kHeld);
   CHECK(PublishAt(state, 3, 4));
-  CHECK(state.Select(3, 4));
+  CHECK(state.SelectNewest() == 3);
   CHECK(state.slot(0) == Slot::kFree);
   CHECK(state.slot(1) == Slot::kHeld);
 }
@@ -386,9 +381,9 @@ void PresentFreesNothingWithLaterChoices() {
   BufferState state(map_texture::kChoiceReleasedBufferCount,
                     BufferState::ReleaseRule::kLaterChoices);
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(PublishAt(state, 1, 2));
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   CHECK(PresentIndex(state, 1) == 1);
   CHECK(state.slot(0) == Slot::kHeld);
 }
@@ -426,7 +421,7 @@ void SixSlotsAlwaysHaveAFreeSlotWithLaterChoices() {
     // Dart chooses the newest ready frame, the one published last.
     for (int i = 0; i < map_texture::kChoiceReleasedBufferCount; ++i) {
       if (state.slot(i) == Slot::kReady) {
-        CHECK(state.Select(i, queued_frame - 1));
+        CHECK(state.SelectNewest() == i);
       }
     }
   }
@@ -443,10 +438,10 @@ void FreedSlotsAreReported() {
   CHECK(PublishAt(state, 1, 2));
   CHECK((freed == std::vector<int>{0}));
   // The release rule.
-  CHECK(state.Select(1, 2));
+  CHECK(state.SelectNewest() == 1);
   for (int slot = 2; slot < 5; ++slot) {
     CHECK(PublishAt(state, slot, slot + 1));
-    CHECK(state.Select(slot, slot + 1));
+    CHECK(state.SelectNewest() == slot);
   }
   CHECK((freed == std::vector<int>{0, 1}));
   // A render that published nothing.
@@ -463,7 +458,7 @@ void LatestReadyChosenPacesRendering() {
   CHECK(state.LatestReadyChosen());  // No frame yet.
   CHECK(PublishAt(state, 0, 1));
   CHECK(!state.LatestReadyChosen());
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   CHECK(state.LatestReadyChosen());
   CHECK(PublishAt(state, 1, 2));
   CHECK(!state.LatestReadyChosen());
@@ -472,7 +467,7 @@ void LatestReadyChosenPacesRendering() {
 void ResetFreesAllSlots() {
   BufferState state;
   CHECK(PublishAt(state, 0, 1));
-  CHECK(state.Select(0, 1));
+  CHECK(state.SelectNewest() == 0);
   PresentIndex(state, 0);
   CHECK(PublishAt(state, 1, 2));
   int chosen_seen = -2;
@@ -485,7 +480,7 @@ void ResetFreesAllSlots() {
     CHECK(state.slot(i) == Slot::kFree);
   }
   CHECK(PresentIndex(state, 0) == -1);
-  CHECK(!state.Select(1, 2));
+  CHECK(state.SelectNewest() == -1);
   CHECK(state.LatestReadyChosen());
   int none_seen = -2;
   state.WithLock([&](int chosen) { none_seen = chosen; });
@@ -566,17 +561,16 @@ int main() {
       {"ChosenSlotStaysHeldUntilLaterChosenSlotIsPresented", ChosenSlotStaysHeldUntilLaterChosenSlotIsPresented},
       {"ChosenSlotIsHeldBeforeAnyPresent", ChosenSlotIsHeldBeforeAnyPresent},
       {"PresentedSlotStaysHeldUntilAnotherSlotIsPresented", PresentedSlotStaysHeldUntilAnotherSlotIsPresented},
-      {"SlotChosenAgainStaysHeld", SlotChosenAgainStaysHeld},
-      {"RepeatedChoiceCountsOnce", RepeatedChoiceCountsOnce},
+      {"ChoiceWithoutNewFrameChangesNothing", ChoiceWithoutNewFrameChangesNothing},
       {"ReplacedReadyFrameFreesItsSlot", ReplacedReadyFrameFreesItsSlot},
-      {"SelectingSlotThatIsNotReadyChangesNothing", SelectingSlotThatIsNotReadyChangesNothing},
+      {"NothingToChooseWithoutReadySlot", NothingToChooseWithoutReadySlot},
       {"PresentReportsNewFramesOnce", PresentReportsNewFramesOnce},
       {"PresentRunsCallbackWithResult", PresentRunsCallbackWithResult},
       {"NewFramesHaveIncreasingDisplayTime", NewFramesHaveIncreasingDisplayTime},
       {"FourSlotsAlwaysHaveAFreeSlot", FourSlotsAlwaysHaveAFreeSlot},
       {"NoFreeSlotWithoutPresent", NoFreeSlotWithoutPresent},
       {"HeldUntilThreeLaterChoices", HeldUntilThreeLaterChoices},
-      {"RepeatedChoiceDoesNotCountWithLaterChoices", RepeatedChoiceDoesNotCountWithLaterChoices},
+      {"ChoiceWithoutNewFrameDoesNotCountWithLaterChoices", ChoiceWithoutNewFrameDoesNotCountWithLaterChoices},
       {"PresentFreesNothingWithLaterChoices", PresentFreesNothingWithLaterChoices},
       {"SixSlotsAlwaysHaveAFreeSlotWithLaterChoices", SixSlotsAlwaysHaveAFreeSlotWithLaterChoices},
       {"FreedSlotsAreReported", FreedSlotsAreReported},

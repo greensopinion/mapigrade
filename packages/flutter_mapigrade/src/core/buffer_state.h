@@ -18,8 +18,9 @@
 // becomes free when a newer frame is published.
 //
 // The map thread calls AcquireFree(), Release(), Publish() and Queue(). On
-// Android the thread that receives a frame's image calls PublishQueued(). Dart calls Select()
-// on the platform thread. Flutter's raster thread calls Present().
+// Android the thread that receives a frame's image calls OnImage(). Dart
+// calls SelectNewest() on the platform thread. Flutter's raster thread calls
+// Present().
 // One mutex guards the state, and the callers run their buffer lookups under
 // it (see WithLock), so a buffer set replaced during a resize is never read
 // half-replaced.
@@ -221,39 +222,36 @@ class BufferState {
     SetLocked(index, Slot::kReady);
   }
 
-  // Records that Dart chose the frame `frame_id` in slot `index`, and returns
-  // true. Returns false and changes nothing if the slot doesn't hold that
-  // frame, for example after a resize replaced the set. Choosing the slot
-  // chosen last again counts once. `on_selected(new_choice, info)` runs under
-  // the state lock when the choice is recorded; `new_choice` is false when
-  // Dart chose the slot chosen last again.
+  // Records that Dart chose the ready slot, which holds the newest finished
+  // frame, and returns its index (design D139). A ready frame is newer than
+  // every held frame, because a slot becomes held only by a choice. Returns
+  // -1 and changes nothing if no slot is ready. `on_selected(index, info)`
+  // runs under the state lock when the choice is recorded.
   template <typename F>
-  bool Select(int index, uint64_t frame_id, F&& on_selected) {
+  int SelectNewest(F&& on_selected) {
     std::lock_guard lock(mutex_);
-    if (index < 0 || index >= count_ || info_[index].frame_id != frame_id ||
-        (slots_[index] != Slot::kReady && slots_[index] != Slot::kHeld)) {
-      return false;
+    int index = -1;
+    for (int i = 0; i < count_; ++i) {
+      if (slots_[i] == Slot::kReady) index = i;
     }
-    bool new_choice = index != last_selected_ || slots_[index] != Slot::kHeld;
-    if (new_choice) {
-      selection_[index] = ++selections_;
-      last_selected_ = index;
-      SetLocked(index, Slot::kHeld);
-      if (rule_ == ReleaseRule::kLaterChoices) {
-        for (int i = 0; i < count_; ++i) {
-          if (slots_[i] == Slot::kHeld &&
-              selection_[i] + kLaterChoices <= selections_) {
-            SetLocked(i, Slot::kFree);
-          }
+    if (index < 0) return -1;
+    selection_[index] = ++selections_;
+    last_selected_ = index;
+    SetLocked(index, Slot::kHeld);
+    if (rule_ == ReleaseRule::kLaterChoices) {
+      for (int i = 0; i < count_; ++i) {
+        if (slots_[i] == Slot::kHeld &&
+            selection_[i] + kLaterChoices <= selections_) {
+          SetLocked(i, Slot::kFree);
         }
       }
     }
-    on_selected(new_choice, info_[index]);
-    return true;
+    on_selected(index, info_[index]);
+    return index;
   }
 
-  bool Select(int index, uint64_t frame_id) {
-    return Select(index, frame_id, [](bool, const FrameInfo&) {});
+  int SelectNewest() {
+    return SelectNewest([](int, const FrameInfo&) {});
   }
 
   struct Presented {

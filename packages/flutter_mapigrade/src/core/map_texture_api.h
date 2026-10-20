@@ -15,8 +15,8 @@ extern "C" {
 #define MAP_TEXTURE_EXPORT __attribute__((visibility("default"), used))
 
 enum {
-  // map_texture_select(): the slot no longer holds the frame, and the choice
-  // was not recorded.
+  // map_texture_select_newest(): no finished frame that Dart hasn't chosen,
+  // and no choice was recorded.
   MAP_TEXTURE_NOT_SELECTED = 1,
   MAP_TEXTURE_OK = 0,
   MAP_TEXTURE_ERROR_DISPOSED = -1,
@@ -30,8 +30,8 @@ enum {
   MAP_TEXTURE_EVENT_RENDER_ERROR = 2,
   MAP_TEXTURE_EVENT_IDLE = 3,
   MAP_TEXTURE_EVENT_FRAME_DISPLAYED = 4,
-  // macOS and iOS: a frame has finished rendering into a display slot, and
-  // Dart may choose it with map_texture_select() (design D123).
+  // A frame has finished rendering into a display slot, and Dart may choose
+  // it with map_texture_select_newest() (designs D123 and D140).
   MAP_TEXTURE_EVENT_FRAME_READY = 5,
 };
 
@@ -66,6 +66,22 @@ typedef struct map_texture_event {
 } map_texture_event;
 
 typedef void (*map_texture_event_callback)(map_texture_event* event);
+
+// A frame that map_texture_select_newest() chose: the frame, the display slot
+// that holds it, the camera and size it was rendered with, and the sequence
+// number of the camera update it was rendered with (design D140).
+typedef struct map_texture_frame {
+  int64_t frame_id;
+  int32_t slot;
+  int64_t seq;
+  double latitude;
+  double longitude;
+  double zoom;
+  double bearing;
+  int32_t physical_width;
+  int32_t physical_height;
+  double scale_factor;
+} map_texture_frame;
 
 typedef struct map_texture_stats {
   int64_t rendered_frames;
@@ -151,16 +167,16 @@ MAP_TEXTURE_EXPORT int32_t map_texture_texture_ids(int64_t handle,
                                                    int64_t* out_ids,
                                                    int32_t capacity);
 
-// Platform thread. Dart chose the frame `frame_id` in display slot `slot` for
-// the Flutter frame it builds. Marks the texture available, or on Android
-// gives the frame's image to the texture, before the Flutter frame is
-// rasterized (designs D123 and D132) and returns MAP_TEXTURE_OK; Dart then
-// displays that slot's texture. Returns MAP_TEXTURE_NOT_SELECTED and records
-// nothing if the slot no longer holds the frame, because a newer frame
-// replaced it or a resize replaced the slots; Dart then keeps displaying the
-// frame it chose before.
-MAP_TEXTURE_EXPORT int32_t map_texture_select(int64_t handle, int32_t slot,
-                                              int64_t frame_id);
+// Platform thread. Dart chooses, for the Flutter frame it builds, the newest
+// finished frame that it hasn't chosen (designs D139 and D140). Marks the
+// frame's texture available, or on Android gives the frame's image to the
+// texture, before the Flutter frame is rasterized (designs D123 and D132),
+// writes the frame to `out` and returns MAP_TEXTURE_OK; Dart then displays
+// the slot's texture. Returns MAP_TEXTURE_NOT_SELECTED and records nothing if
+// no such frame is finished; Dart then keeps displaying the frame it chose
+// before.
+MAP_TEXTURE_EXPORT int32_t map_texture_select_newest(int64_t handle,
+                                                     map_texture_frame* out);
 
 MAP_TEXTURE_EXPORT int32_t map_texture_load_style_url(int64_t handle,
                                                       const char* url);

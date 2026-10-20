@@ -47,12 +47,12 @@ class _FakeController implements MapTextureController {
   /// each is its index plus one.
   final List<MapCamera> cameras = [];
 
-  /// The frames whose choice [select] recorded, in order.
+  /// The frames that [selectNewest] chose, in order.
   final List<FrameCamera> selected = [];
 
-  /// The ids of the frames that [select] refuses, as the map does for a frame
-  /// it replaced.
-  final Set<int> refused = {};
+  /// The newest finished frame that [selectNewest] hasn't chosen, as the map
+  /// holds it.
+  FrameCamera? finished;
 
   @override
   final List<int> textureIds;
@@ -63,18 +63,23 @@ class _FakeController implements MapTextureController {
   @override
   Stream<FrameCamera> get readyFrames => _readyFrames.stream;
 
-  /// Reports [frame] as ready, as the native map does after a render.
+  /// Finishes [frame] and reports it as ready, as the native map does after
+  /// a render.
   void addReadyFrame(FrameCamera frame) {
+    finished = frame;
     readyFrame = frame;
     _readyFrames.add(frame);
   }
 
   @override
-  bool select(FrameCamera frame) {
-    if (refused.contains(frame.frameId)) return false;
+  FrameCamera? selectNewest() {
+    final frame = finished;
+    if (frame == null) return null;
+    finished = null;
     selected.add(frame);
-    return true;
+    return frame;
   }
+
   @override
   bool get isDisposed => _disposed;
   @override
@@ -90,6 +95,7 @@ class _FakeController implements MapTextureController {
     cameras.add(camera);
     return cameras.length;
   }
+
   @override
   void resize(Size logicalSize, double pixelRatio) {}
   @override
@@ -433,12 +439,11 @@ void main() {
               MapTextureLayer(
                 styleUrl: 'https://example.com/style.json',
                 alignment: alignment,
-                createController:
-                    ({
-                      required double pixelRatio,
-                      required bool copyFree,
-                      required List<HttpHeaderRule> httpHeaders,
-                    }) => layerController,
+                createController: ({
+                  required double pixelRatio,
+                  required bool copyFree,
+                  required List<HttpHeaderRule> httpHeaders,
+                }) => layerController,
                 onChildCamera: (id, camera) => childCameras.add((id, camera)),
                 children: children ?? [probe('child')],
               ),
@@ -506,7 +511,36 @@ void main() {
       expect(controller.selected.map((f) => f.frameId), [1, 2]);
     });
 
-    testWidgets('keep the frame chosen before when the map refuses one', (
+    testWidgets('get a frame newer than the frame reported last', (
+      tester,
+    ) async {
+      await tester.pumpWidget(map());
+      await ready(tester, 1, 2, 1);
+      mapController.move(const LatLng(49.3, -123.0), 10);
+      await tester.pump();
+      final second = mapController.camera;
+      FrameCamera frame(int id, int slot) => FrameCamera(
+        frameId: id,
+        camera: controller.cameras[1],
+        physicalSize: const Size(800, 600),
+        scaleFactor: 1,
+        displayTime: null,
+        slot: slot,
+        seq: 2,
+      );
+      // The map reports frame 2, then replaces it with frame 3 before the
+      // layer builds; the layer hasn't handled the report of frame 3.
+      controller.addReadyFrame(frame(2, 0));
+      controller.finished = frame(3, 3);
+      await tester.pump();
+      await tester.pump();
+      expect(controller.selected.map((f) => f.frameId), [1, 3]);
+      expect(controller.readyFrame?.frameId, 2);
+      expect(childCameras.last, (3, second));
+      expect(displayedTexture(tester), 13);
+    });
+
+    testWidgets('keep the frame chosen before when no frame has finished', (
       tester,
     ) async {
       await tester.pumpWidget(map());
@@ -514,24 +548,13 @@ void main() {
       await ready(tester, 1, 2, 1);
       mapController.move(const LatLng(49.3, -123.0), 10);
       await tester.pump();
-      final second = mapController.camera;
-      // The map replaced frame 2 before the layer chose it.
-      controller.refused.add(2);
-      await ready(tester, 2, 0, 2);
       expect(controller.selected.map((f) => f.frameId), [1]);
       expect(seen['child'], same(first));
       expect(childCameras.last, (1, first));
       expect(displayedTexture(tester), 12);
-
-      await ready(tester, 3, 3, 2);
-      expect(controller.selected.map((f) => f.frameId), [1, 3]);
-      expect(seen['child'], same(second));
-      expect(displayedTexture(tester), 13);
     });
 
-    testWidgets('get the predicted camera of the chosen frame', (
-      tester,
-    ) async {
+    testWidgets('get the predicted camera of the chosen frame', (tester) async {
       await tester.pumpWidget(
         map(alignment: const LayerAlignment.prediction()),
       );
@@ -654,9 +677,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('MapInheritedModel gives its camera to layers', (
-      tester,
-    ) async {
+    testWidgets('MapInheritedModel gives its camera to layers', (tester) async {
       final camera = fm.MapCamera(
         crs: const Epsg3857(),
         center: center,

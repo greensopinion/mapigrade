@@ -12,10 +12,10 @@ import 'map_texture_controller.dart';
 /// display's refresh rate, which decides when the map renders ahead.
 ///
 /// With [slot], the view displays that display slot's texture, which the
-/// caller has chosen with [MapTextureController.select]. Without it, the view
-/// chooses the newest ready frame itself in each build and displays the slot
-/// of [MapTextureController.selectedFrame], and rebuilds when a frame is
-/// ready.
+/// caller has chosen with [MapTextureController.selectNewest]. Without it,
+/// the view chooses the newest finished frame itself in each build and
+/// displays the slot of [MapTextureController.selectedFrame], and rebuilds
+/// when a frame has finished.
 class MapTextureView extends StatefulWidget {
   /// A view of the map of [controller].
   const MapTextureView({super.key, required this.controller, this.slot});
@@ -53,9 +53,7 @@ class _MapTextureViewState extends State<MapTextureView> {
 
   void _listen() {
     if (widget.slot != null || widget.controller.isDisposed) return;
-    _readyFrames = widget.controller.readyFrames.listen(
-      (_) => setState(() {}),
-    );
+    _readyFrames = widget.controller.readyFrames.listen((_) => setState(() {}));
   }
 
   @override
@@ -64,16 +62,11 @@ class _MapTextureViewState extends State<MapTextureView> {
     super.dispose();
   }
 
-  // The slot that the view chooses: that of the newest ready frame, which it
-  // selects unless it selected it already, or if the map refuses the choice,
-  // that of the frame selected before.
+  // The slot that the view chooses: that of the newest finished frame, or if
+  // no frame has finished since the last choice, that of the frame chosen
+  // before (design D141 of the synchronous-frame-choice change).
   int _chooseSlot(MapTextureController controller) {
-    final ready = controller.readyFrame;
-    if (ready != null &&
-        !controller.isDisposed &&
-        ready.frameId > (controller.selectedFrame?.frameId ?? 0)) {
-      controller.select(ready);
-    }
+    if (!controller.isDisposed) controller.selectNewest();
     return controller.selectedFrame?.slot ?? 0;
   }
 

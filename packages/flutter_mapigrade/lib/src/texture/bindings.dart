@@ -58,6 +58,29 @@ final class MapTextureEventStruct extends Struct {
   external Pointer<Utf8> message;
 }
 
+final class MapTextureFrameStruct extends Struct {
+  @Int64()
+  external int frameId;
+  @Int32()
+  external int slot;
+  @Int64()
+  external int seq;
+  @Double()
+  external double latitude;
+  @Double()
+  external double longitude;
+  @Double()
+  external double zoom;
+  @Double()
+  external double bearing;
+  @Int32()
+  external int physicalWidth;
+  @Int32()
+  external int physicalHeight;
+  @Double()
+  external double scaleFactor;
+}
+
 final class MapTextureStatsStruct extends Struct {
   @Int64()
   external int renderedFrames;
@@ -141,10 +164,19 @@ external int mapTextureSetMaximumCacheSize(int bytes);
 @Native<Int32 Function(Int64, Pointer<Int64>, Int32)>(
   symbol: 'map_texture_texture_ids',
 )
-external int mapTextureTextureIds(int handle, Pointer<Int64> outIds, int capacity);
+external int mapTextureTextureIds(
+  int handle,
+  Pointer<Int64> outIds,
+  int capacity,
+);
 
-@Native<Int32 Function(Int64, Int32, Int64)>(symbol: 'map_texture_select')
-external int mapTextureSelect(int handle, int slot, int frameId);
+@Native<Int32 Function(Int64, Pointer<MapTextureFrameStruct>)>(
+  symbol: 'map_texture_select_newest',
+)
+external int mapTextureSelectNewest(
+  int handle,
+  Pointer<MapTextureFrameStruct> out,
+);
 
 @Native<Int32 Function(Int64, Pointer<Utf8>)>(
   symbol: 'map_texture_load_style_url',

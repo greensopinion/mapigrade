@@ -289,41 +289,38 @@ void MapTexture::Signal() {
   if (wake_ != MLN_HANDLE_NULL) mln_wake_source_signal(wake_);
 }
 
-bool MapTexture::Select(int slot, uint64_t frame_id) {
+bool MapTexture::SelectNewest(int* out_slot, FrameInfo* out_info) {
   if (auto* surface = target_->AsSurfaceTarget()) {
-    bool new_choice = false;
-    FrameInfo info;
-    bool selected = buffers_.Select(
-        slot, frame_id, [&](bool is_new, const FrameInfo& selected_info) {
-          new_choice = is_new;
-          info = selected_info;
-          if (is_new) surface->FrameAvailable(slot);
-        });
-    if (!selected) return false;
+    int slot = buffers_.SelectNewest([&](int index, const FrameInfo& info) {
+      *out_info = info;
+      surface->FrameAvailable(index);
+    });
+    if (slot < 0) return false;
+    *out_slot = slot;
     int64_t now = NowNs();
     selected_at_ns_.store(now);
-    if (new_choice) {
-      int64_t published = published_at_ns_.load();
-      {
-        std::lock_guard lock(stats_mutex_);
-        ++stats_.presented_frames;
-        if (published != 0) {
-          ++stats_.pickup_wait_count;
-          stats_.pickup_wait_total_ns += now - published;
-        }
+    int64_t published = published_at_ns_.load();
+    {
+      std::lock_guard lock(stats_mutex_);
+      ++stats_.presented_frames;
+      if (published != 0) {
+        ++stats_.pickup_wait_count;
+        stats_.pickup_wait_total_ns += now - published;
       }
-      Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, &info, -1, slot);
     }
+    Emit(MAP_TEXTURE_EVENT_FRAME_DISPLAYED, nullptr, out_info, -1, slot);
     if (waiting_for_buffer_.exchange(false)) Signal();
     return true;
   }
   auto* target = target_->AsBufferTarget();
   // The first choice of a frame of a new set releases the frame kept from
   // before the resize (design D126).
-  bool selected = buffers_.Select(
-      slot, frame_id,
-      [target](bool, const FrameInfo&) { target->ReleaseFallbackLocked(); });
-  if (!selected) return false;
+  int slot = buffers_.SelectNewest([&](int, const FrameInfo& info) {
+    *out_info = info;
+    target->ReleaseFallbackLocked();
+  });
+  if (slot < 0) return false;
+  *out_slot = slot;
   selected_at_ns_.store(NowNs());
   target->FrameAvailable(slot);
   if (waiting_for_buffer_.exchange(false)) Signal();
@@ -765,7 +762,8 @@ void MapTexture::MaybeRender() {
 }
 
 // Normally the next frame renders only after Dart has chosen the latest one,
-// and Select() signals the wake source to retry the render (design D124). While a frame takes longer than a display refresh interval, waiting
+// and SelectNewest() signals the wake source to retry the render (design
+// D124). While a frame takes longer than a display refresh interval, waiting
 // would cost a whole refresh interval per frame, so the next frame renders
 // right away; a frame Dart hasn't chosen yet is then replaced (design D19).
 bool MapTexture::MayRender(bool* render_ahead) {
@@ -778,15 +776,15 @@ bool MapTexture::MayRender(bool* render_ahead) {
     ++stats_.waits_for_display;
   }
   waiting_for_buffer_.store(true);
-  // Select() may have run between the check and the store, and found no wait
-  // to end.
+  // SelectNewest() may have run between the check and the store, and found no
+  // wait to end.
   if (buffers_.LatestReadyChosen() && waiting_for_buffer_.exchange(false)) {
     Signal();
   }
   return false;
 }
 
-// Present() and Select() free held slots and then wake the map thread.
+// Present() and SelectNewest() free held slots and then wake the map thread.
 int MapTexture::AcquireSlot() {
   int index = buffers_.AcquireFree(-1);
   if (index < 0) {
