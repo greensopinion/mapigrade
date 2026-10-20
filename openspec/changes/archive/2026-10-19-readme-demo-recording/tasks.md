@@ -1,3 +1,5 @@
+> **Note (2026-10-19):** Tasks 1.2 and 3.3 are unchecked because the case without Screen Recording permission wasn't run from an app that lacks it; the user chose to archive without that test. Everything else in them is implemented and verified: `check` exits with 0 with the permission, and the scenarios "Tool missing" and "Video too large" pass.
+
 ## 1. Pipes and permission
 
 - [x] 1.1 Check D147 before any other work: in a temporary branch of `lib/main.dart`, write a line with `stdout.writeln` at startup and echo each line read from `stdin` to `stdout`; build with `flutter build macos --release`, start `build/macos/Build/Products/Release/mapigrade_demo.app/Contents/MacOS/mapigrade_demo` from a shell with both pipes connected, and verify that the line arrives and an input line is echoed. Revert the branch. If either fails, switch D147, the spec delta and the tasks below to the file fallback before continuing, and record the result here. Result (2026-10-19): with the release build started from zsh, `stdout.writeln` reached the pipe, lines from `stdin` arrived, `Platform.environment` had the variable, and `exit(3)` gave status 3, in the App Sandbox; D147 stands
@@ -26,5 +28,5 @@
 ## 5. Publishing and documentation
 
 - [x] 5.1 The user uploads `packages/demo/build/readme_demo.mp4` by dragging it into the editor of `README.md`, an issue or a pull request on github.com, and gives the attachment URL; record it here. Result (2026-10-19): https://github.com/user-attachments/assets/fe764361-10ca-4e47-acc8-d8824cf6dbdf
-- [ ] 5.2 Add the attachment URL to `README.md` below the first paragraph, on a line of its own (D152), and verify on github.com, after the README change is pushed, that the video plays in the rendered README and that its first frame shows the card
+- [x] 5.2 Add the attachment URL to `README.md` below the first paragraph, on a line of its own (D152), and verify on github.com, after the README change is pushed, that the video plays in the rendered README and that its first frame shows the card. Result (2026-10-19): the user's screenshot of the rendered README on github.com shows the player, titled readme_demo.mp4, with the card as its first frame; GitHub's Markdown API renders the URL as a `<video>` element with controls, muted
 - [x] 5.3 Add the section on making and publishing the video to `CONTRIBUTING.md` and describe the variable in `packages/demo/README.md` (D152); verify by reading that every command and path they name exists, and that the text follows the writing guide
