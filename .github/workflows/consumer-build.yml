@@ -15,6 +15,7 @@ on:
       - packages/flutter_mapigrade/.pubignore
       - scripts/consumer_build.sh
       - scripts/fetch_ffi_release.sh
+      - scripts/emulator_integration_tests.sh
       - .github/workflows/consumer-build.yml
   workflow_dispatch:
 
@@ -74,18 +75,20 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
       # The checkout has no local FFI build, so the test harness uses the FFI
-      # release from Maven Central. Each test file runs in its own flutter test
-      # call, which installs the test harness's APK.
+      # release from Maven Central.
       - name: Run the integration tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: google_apis
-          # The tests lay out widgets at least 400 logical pixels wide; the
-          # default device profile's screen is 320 wide.
-          profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           working-directory: packages/test_harness
-          script: status=0; for test in integration_test/*_test.dart; do flutter test "$test" -d emulator-5554 || status=1; done; exit $status
+          script: ../../scripts/emulator_integration_tests.sh
+      - name: Upload the logcat of failed test files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logcat
+          path: packages/test_harness/build/logcat/
