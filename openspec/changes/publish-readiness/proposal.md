@@ -39,7 +39,7 @@ The `map-texture` delta modifies the requirement "Supported platforms" as the in
 
 ## Impact
 
-- Package: `pubspec.yaml`, `.pubignore`, `android/build.gradle.kts`, `android/src/main/cpp/CMakeLists.txt`, `android/consumer-rules.pro`, `darwin/flutter_mapigrade/Package.swift`, a new FFI lock file and the FFI headers for Android, `notices/`, `README.md`, `CHANGELOG.md`.
+- Package: `pubspec.yaml`, `.pubignore`, `android/build.gradle.kts`, `android/src/main/cpp/CMakeLists.txt`, `android/consumer-rules.pro`, `darwin/flutter_mapigrade/Package.swift`, a new FFI lock file, `notices/`, `README.md`, `CHANGELOG.md`.
 - Scripts: `scripts/build_maplibre_ffi.sh` reads the lock file in the package; a new script writes the URL and checksum of the xcframework zip from the lock file; a new script assembles an xcframework zip from the upstream tarballs, as a fallback; `scripts/copy_ffi_notices.sh` reads the release.
 - Upstream: the xcframework zip in the native release, which upstream added in #838 in place of our #822, and a Prefab module in the AAR (#820, #821).
 - CI: a GitHub Actions workflow on a macOS runner.

@@ -91,10 +91,9 @@ The script:
 3. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
 4. for Android presets, checks that the pinned NDK is installed under `ANDROID_HOME`, adds the Rust target, and runs the FFI's `.mise/bin/sync-rustls-platform-verifier`, which provides the patched `rustls-platform-verifier` source;
 5. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
-6. runs `scripts/copy_ffi_notices.sh` with the presets it built, which copies each preset's `share/maplibre-native-c/LICENSE` and `licenses/` unchanged into `packages/flutter_mapigrade/notices/`; the package shows them in Flutter's license registry (`docs/limitations.md`, "Licenses and third-party notices");
-7. for Android presets, builds the FFI's patched `rustls-platform-verifier` Android component with the FFI's Gradle build, and installs its AAR with a POM into a file-based Maven repository;
-8. combines the `Frameworks/MaplibreNativeC.framework` that the install of each Apple preset creates into `MaplibreNativeC.xcframework` for the Flutter plugin; Android presets are not part of it;
-9. deletes Swift Package Manager's manifest cache, `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*`.
+6. for Android presets, builds the FFI's patched `rustls-platform-verifier` Android component with the FFI's Gradle build, and installs its AAR with a POM into a file-based Maven repository;
+7. combines the `Frameworks/MaplibreNativeC.framework` that the install of each Apple preset creates into `MaplibreNativeC.xcframework` for the Flutter plugin; Android presets are not part of it;
+8. deletes Swift Package Manager's manifest cache, `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*`.
 
 `darwin/flutter_mapigrade/Package.swift` uses `MaplibreNativeC.xcframework` when the symlink `Frameworks/MaplibreNativeC.xcframework` resolves, and otherwise downloads the xcframework zip that `packages/flutter_mapigrade/maplibre_ffi.lock` names. Swift Package Manager caches its choice by the manifest's contents, so after you remove or rename `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework`, delete `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*` before the next build. Otherwise the build fails with "does not contain a binary artifact". After you change the zip's URL or checksum in the lock file, run `scripts/update_ffi_pins.sh`, which writes them into `Package.swift`.
 
@@ -125,6 +124,12 @@ The window shows a map of San Francisco.
 
 ## Update the FFI
 
-To update MapLibre Native FFI, change the commit in `packages/flutter_mapigrade/maplibre_ffi.lock`, run `scripts/build_maplibre_ffi.sh`, and run the tests.
+To update MapLibre Native FFI to a new upstream release:
 
-`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of a preset installed at the pinned commit. `scripts/copy_ffi_notices.sh` fails when a preset installs a notice file that the script doesn't list; add the file to the script, to `lib/src/notices/third_party_notices.dart` and, for a new directory, to the package's `pubspec.yaml`.
+1. In `packages/flutter_mapigrade/maplibre_ffi.lock`, set `MAPLIBRE_FFI_VERSION` to the release's version, `MAPLIBRE_FFI_COMMIT` to the commit of its tag, `MAPLIBRE_FFI_XCFRAMEWORK_URL` to the URL of the release's `MaplibreNativeC.xcframework.zip`, and `MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM` to `swift package compute-checksum` of that zip.
+2. Run `scripts/update_ffi_pins.sh`, which writes the URL and checksum into `Package.swift`.
+3. Run `scripts/fetch_ffi_release.sh`, which downloads the release's tarballs into `third_party/maplibre-native-ffi-release/<version>/`.
+4. Run `scripts/copy_ffi_notices.sh`, which copies the notices of the tarballs into `packages/flutter_mapigrade/notices/`.
+5. Run the tests. If you keep a local build (below), run `scripts/build_maplibre_ffi.sh` to rebuild it at the new commit.
+
+`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of the fetched release. `scripts/copy_ffi_notices.sh` fails when a tarball has a notice file that the script doesn't list; add the file to the script, to `lib/src/notices/third_party_notices.dart` and, for a new directory, to the package's `pubspec.yaml`.

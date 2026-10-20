@@ -48,7 +48,7 @@ The APK stores native libraries uncompressed, so the app can map them without ex
 
 The package is licensed under the BSD 3-Clause License (`packages/flutter_mapigrade/LICENSE`, and an identical `LICENSE` at the repository root).
 
-Apps built with the package show the notices of MapLibre Native FFI in Flutter's license registry, so `showLicensePage` lists them without code in the app (third-party-notices change). The FFI build installs the notices in `third_party/maplibre-native-ffi/<preset>/share/maplibre-native-c/`. `scripts/copy_ffi_notices.sh` copies them unchanged into `packages/flutter_mapigrade/notices/`, and the package registers one entry per file:
+Apps built with the package show the notices of MapLibre Native FFI in Flutter's license registry, so `showLicensePage` lists them without code in the app (third-party-notices change). Each tarball of an FFI release has the notices in `share/maplibre-native-c/`. `scripts/copy_ffi_notices.sh` copies them from the pinned release unchanged into `packages/flutter_mapigrade/notices/`, and the package registers one entry per file:
 
 | File | Entry | Component | License | Platforms |
 | --- | --- | --- | --- | --- |

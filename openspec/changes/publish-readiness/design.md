@@ -61,15 +61,18 @@ Alternatives:
 - Download the `android-*-egl` tarballs in a Gradle task and check them against pinned SHA-256 values. Rejected: the verifier would have to be vendored, the downloads bypass Maven repository proxies, and the task has to manage its own cache.
 - Publish our own AAR with a Prefab module. Rejected: Maven Central publishing (namespace, signing) for an artifact upstream already publishes.
 
-### D101. Linking against the AAR's library
+### D101. Linking against the AAR's library through Prefab
 
-CMake needs the library and the headers at link time, and the AAR has neither a Prefab module nor headers.
+CMake needs the library and the headers at link time. From 0.202610.1 the runtime AAR contains the Prefab module `maplibre-native-c` (#821, D107), with the headers and, for each ABI, a copy of the `.so` in `jni/`, with `"stl": "none"`.
 
-- Library: a Gradle task resolves the AAR through a configuration with the same coordinates, extracts `jni/<abi>/libmaplibre-native-c.so` into `build/`, and passes the directory to CMake as the imported library's location. CMake links against it only. The APK gets the copy that AGP packages from the AAR, so the plugin adds nothing to `jniLibs` and no duplicate file arises.
-- Headers: the release's `include/` is committed to `android/src/main/cpp/ffi-include/`, unchanged, as D91 does for the notices: an FFI update then shows API changes in the diff. A test compares the committed headers with the release tarball's `include/` when the tarball is present (D106). Apple builds use the headers in the framework, through `src/core/mln.h`.
+In release mode `android/build.gradle.kts` enables AGP's `prefab` build feature, and `CMakeLists.txt` uses `find_package(maplibre-native-c REQUIRED CONFIG)` and links against `maplibre-native-c::maplibre-native-c`. The APK gets the copy that AGP packages from the AAR's `jni/`, so the plugin adds nothing to `jniLibs` and no duplicate file arises. Apple builds use the headers in the framework, through `src/core/mln.h`. The package therefore contains no FFI headers, and the headers, the library and the framework all come from the release version of the lock file.
+
+In local mode (D103) CMake uses the local build's library and `include/` as an imported library, as before.
+
+On 2026-10-20 the user chose Prefab over the first implementation of this decision, which the plugin used from 2026-10-19 with 0.202610.0, whose AAR had no Prefab module: a Gradle task extracted `jni/<abi>/libmaplibre-native-c.so` from the AAR for CMake, and the release's `include/` was committed to `android/src/main/cpp/ffi-include/` with a test that compared it with the release tarball.
 
 Alternatives:
-- Upstream adds a Prefab module to the AAR, and CMake uses `find_package(maplibre-native-c CONFIG REQUIRED)`. This is the better result; we propose it upstream (D107) and adopt it in a later version. It doesn't block this change.
+- The extraction and the committed headers above. Replaced: they need a Gradle task, a second copy of the headers and a test that keeps them equal to the release.
 - `libflutter_mapigrade.so` resolves the FFI functions at runtime through `dlopen` and a function table. Rejected: changes every call site in `src/core`.
 
 ### D102. Apple uses a remote binary target
@@ -110,7 +113,7 @@ A GitHub Actions workflow on a macOS runner, which has no FFI build:
 2. Creates an app with `flutter create` outside the checkout, with a path dependency on that directory and the example's `lib/main.dart`.
 3. Builds `flutter build apk --release`, `flutter build ios --simulator`, `flutter build ios --no-codesign` and `flutter build macos`.
 4. Checks that the APK's `lib/` has both libraries for each of the three ABIs, and that the iOS and macOS apps contain `MaplibreNativeC.framework`.
-5. Runs `scripts/fetch_ffi_release.sh`, which downloads the pinned release's tarballs and `SHA256SUMS` into the git-ignored `third_party/maplibre-native-ffi-release/<version>/` and checks them, and runs the tests that compare the committed headers (D101) and notices (D108) with them. `scripts/package_xcframework.sh` (the fallback of D102) and `scripts/copy_ffi_notices.sh` (D108) read the tarballs from the same directory.
+5. Runs `scripts/fetch_ffi_release.sh`, which downloads the pinned release's tarballs and `SHA256SUMS` into the git-ignored `third_party/maplibre-native-ffi-release/<version>/` and checks them, and runs the test that compares the committed notices (D108) with them. `scripts/package_xcframework.sh` (the fallback of D102) and `scripts/copy_ffi_notices.sh` (D108) read the tarballs from the same directory.
 
 The workflow runs on pull requests that change the package's native build files, the lock file or `.pubignore`. A second job on a Linux runner with KVM installs the APK on an x86_64 emulator and runs the test harness's integration tests: the Android emulator on Apple-silicon Macs runs only arm64 system images. The other runtime checks need devices and are tasks, not CI: an arm64 Android device, `armeabi-v7a` through `adb install --abi armeabi-v7a` on a device whose `ro.product.cpu.abilist` lists it, an iPhone and macOS. Each runs a release build that loads a style over HTTPS, which exercises the verifier's keep rules under R8.
 
@@ -153,5 +156,4 @@ Nothing is published before stage 2, so there is no rollback beyond reverting co
 
 ## Open Questions
 
-- Prefab: whether upstream accepts it, and in which release. Adopting it replaces D101's extraction task without changing the specs.
 - The exact `topics`.

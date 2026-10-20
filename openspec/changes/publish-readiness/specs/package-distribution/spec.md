@@ -26,10 +26,6 @@ The package SHALL state one version of the upstream MapLibre Native FFI release.
 - **WHEN** the release version, the framework URL or the checksum that one platform's build uses differs from the version or the values that the package states for it
 - **THEN** a unit test of the package fails and names the value that differs
 
-#### Scenario: Headers differ from the release
-- **WHEN** the FFI headers in the package differ from the headers of the pinned release, and the release's artifacts are available to the test
-- **THEN** a test fails and names the header
-
 ### Requirement: Application build from the published archive
 An application that depends on the package, with the package's files exactly as the published archive contains them, SHALL build on a machine that has no checkout of this repository and no local FFI build. The release Android build SHALL contain, for each of `arm64-v8a`, `armeabi-v7a` and `x86_64`, the FFI library and the plugin's native library. The iOS and macOS builds SHALL contain the FFI framework. The build SHALL need network access only until the downloads that the requirement "Native libraries from the pinned release" names are cached on the machine.
 

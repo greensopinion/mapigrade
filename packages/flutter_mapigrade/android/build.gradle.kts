@@ -9,16 +9,14 @@
 // - Release mode: the runtime AAR of the FFI release in ../maplibre_ffi.lock,
 //   from Maven Central. The AAR gives the APK the library for arm64-v8a,
 //   armeabi-v7a and x86_64, the rustls-platform-verifier classes and their keep
-//   rules. CMake links against the library extracted from the AAR and compiles
-//   against the release's headers in src/main/cpp/ffi-include/.
+//   rules. CMake finds the library and its headers through the AAR's Prefab
+//   module maplibre-native-c.
 // - Local mode, when the Gradle property mapigrade.ffiDir names an existing
 //   directory: the output of scripts/build_maplibre_ffi.sh in that directory,
 //   for the ABIs of the Android presets it installed. The plugin packages the
 //   library itself and depends on the verifier from the local Maven repository
 //   that the script installs. The example and the test harness set the property
 //   in their android/gradle.properties.
-import javax.inject.Inject
-
 group = "com.greensopinion.flutter_mapigrade"
 version = "1.0-SNAPSHOT"
 
@@ -97,12 +95,9 @@ plugins {
     id("com.android.library")
 }
 
-// The directory that holds <abi>/libmaplibre-native-c.so, which CMake links
-// against. In local mode the plugin also packages it through jniLibs.
+// In local mode, the directory that holds <abi>/libmaplibre-native-c.so, which
+// CMake links against and the plugin packages through jniLibs.
 val ffiLibraryDir = layout.buildDirectory.dir("ffi-lib")
-val ffiIncludeDir =
-    localPresets.values.firstOrNull()?.resolve("include")
-        ?: projectDir.resolve("src/main/cpp/ffi-include")
 
 android {
     namespace = "com.greensopinion.flutter_mapigrade"
@@ -121,6 +116,11 @@ android {
         }
     }
 
+    // Release mode: CMake finds the FFI through the runtime AAR's Prefab module.
+    buildFeatures {
+        prefab = localFfiDir == null
+    }
+
     defaultConfig {
         minSdk = 29
         consumerProguardFiles("consumer-rules.pro")
@@ -129,11 +129,13 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments += listOf(
-                    "-DANDROID_STL=c++_static",
-                    "-DMLN_FFI_LIBRARY_DIR=${ffiLibraryDir.get().asFile.absolutePath}",
-                    "-DMLN_FFI_INCLUDE_DIR=${ffiIncludeDir.absolutePath}",
-                )
+                arguments += "-DANDROID_STL=c++_static"
+                localPresets.values.firstOrNull()?.let { preset ->
+                    arguments += listOf(
+                        "-DMLN_FFI_LIBRARY_DIR=${ffiLibraryDir.get().asFile.absolutePath}",
+                        "-DMLN_FFI_INCLUDE_DIR=${preset.resolve("include").absolutePath}",
+                    )
+                }
             }
         }
     }
@@ -174,73 +176,25 @@ abstract class CopyFfiLibrary : DefaultTask() {
     }
 }
 
-// Extracts jni/<abi>/libmaplibre-native-c.so of the FFI runtime AAR into
-// outputDirectory/<abi>/, for CMake. The APK gets the library from the AAR
-// itself.
-abstract class ExtractFfiLibrary : DefaultTask() {
-    @get:InputFiles
-    abstract val aar: ConfigurableFileCollection
-
-    @get:Input
-    abstract val abis: ListProperty<String>
-
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
-
-    @get:Inject
-    abstract val archives: ArchiveOperations
-
-    @get:Inject
-    abstract val files: FileSystemOperations
-
-    @TaskAction
-    fun extract() {
-        files.sync {
-            from(archives.zipTree(aar.singleFile)) {
-                include(abis.get().map { "jni/$it/libmaplibre-native-c.so" })
-                eachFile { path = path.removePrefix("jni/") }
-            }
-            includeEmptyDirs = false
-            into(outputDirectory)
-        }
-        abis.get().forEach { abi ->
-            check(outputDirectory.get().asFile.resolve("$abi/libmaplibre-native-c.so").isFile) {
-                "${aar.singleFile.name} has no jni/$abi/libmaplibre-native-c.so"
-            }
-        }
-    }
-}
-
-val prepareFfiLibrary =
-    if (localFfiDir != null) {
-        tasks.register<CopyFfiLibrary>("copyMapLibreNativeFfi") {
-            abis.set(localPresets.keys.toList())
-            libraries.from(localPresets.values.map { it.resolve("lib/libmaplibre-native-c.so") })
-            outputDirectory.set(ffiLibraryDir)
-        }
-    } else {
-        val ffiAar = configurations.detachedConfiguration(dependencies.create("$ffiRuntime@aar"))
-        tasks.register<ExtractFfiLibrary>("extractMapLibreNativeFfi") {
-            aar.from(ffiAar)
-            abis.set(releaseAbis)
-            outputDirectory.set(ffiLibraryDir)
-        }
-    }
-
-// CMake links against the library, so it must be in place before any CMake
-// task of any variant and ABI.
-tasks.configureEach {
-    if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) {
-        dependsOn(prepareFfiLibrary)
-    }
-}
-
 if (localFfiDir != null) {
+    val copyFfiLibrary = tasks.register<CopyFfiLibrary>("copyMapLibreNativeFfi") {
+        abis.set(localPresets.keys.toList())
+        libraries.from(localPresets.values.map { it.resolve("lib/libmaplibre-native-c.so") })
+        outputDirectory.set(ffiLibraryDir)
+    }
+
+    // CMake links against the library, so it must be in place before any
+    // CMake task of any variant and ABI.
+    tasks.configureEach {
+        if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) {
+            dependsOn(copyFfiLibrary)
+        }
+    }
+
     androidComponents {
         onVariants { variant ->
             variant.sources.jniLibs?.addGeneratedSourceDirectory(
-                prepareFfiLibrary as TaskProvider<CopyFfiLibrary>,
-                CopyFfiLibrary::outputDirectory)
+                copyFfiLibrary, CopyFfiLibrary::outputDirectory)
         }
     }
 }

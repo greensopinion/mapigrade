@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Copies the third-party notices of MapLibre Native FFI presets, installed by
-# scripts/build_maplibre_ffi.sh in
-# third_party/maplibre-native-ffi/<preset>/share/maplibre-native-c/, into
+# Copies the third-party notices of the MapLibre Native FFI release in
+# packages/flutter_mapigrade/maplibre_ffi.lock into
 # packages/flutter_mapigrade/notices/, unchanged (design D91 and D92 of the
-# third-party-notices change). build_maplibre_ffi.sh runs it with the presets
-# it built. The copies are committed with a change to maplibre_ffi.lock.
+# third-party-notices change, D108 of the publish-readiness change). It reads
+# the release tarballs that scripts/fetch_ffi_release.sh downloads into
+# third_party/maplibre-native-ffi-release/<version>/. The copies are committed
+# with a change to maplibre_ffi.lock.
 #
-#   scripts/copy_ffi_notices.sh macos-arm64-metal android-arm64-egl
+#   scripts/fetch_ffi_release.sh
+#   scripts/copy_ffi_notices.sh
 #
 # The notices are share/maplibre-native-c/LICENSE and the files in
-# share/maplibre-native-c/licenses/. The script fails, names the file and
-# changes nothing when a preset wasn't built at the pinned commit, when a
-# preset installs a notice that the tables below don't list, or when a common
-# notice differs between two of the given presets.
+# share/maplibre-native-c/licenses/ of each tarball of the presets in
+# MAPLIBRE_FFI_PRESETS and MAPLIBRE_FFI_ANDROID_PRESETS. The script fails,
+# names the file and changes nothing when a tarball isn't fetched, when a
+# preset's tarball has a notice that the tables below don't list, or when a
+# common notice differs between two presets.
 #
 # The Dart registration (lib/src/notices/third_party_notices.dart) and the
 # package's tests (test/notices/) list the same files. A new file goes in all
@@ -23,11 +26,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
 source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
 
-ffi_dir="$repo_root/third_party/maplibre-native-ffi"
+release_dir="$repo_root/third_party/maplibre-native-ffi-release/$MAPLIBRE_FFI_VERSION"
 notices_dir="$repo_root/packages/flutter_mapigrade/notices"
 
-# "<path in share/maplibre-native-c/> <path in notices/>". Every preset
-# installs the common notices.
+# "<path in share/maplibre-native-c/> <path in notices/>". The tarball of every
+# preset has the common notices.
 common_notices=(
   "LICENSE common/maplibre-native-ffi.txt"
   "licenses/maplibre-native.md common/maplibre-native.md"
@@ -36,28 +39,29 @@ common_notices=(
   "licenses/nunicode.txt common/nunicode.txt"
   "licenses/pmtiles.txt common/pmtiles.txt"
 )
-# Android presets also install these.
+# The tarballs of Android presets also have these.
 android_notices=(
   "licenses/rust.md android/rust.md"
   "licenses/cxx-runtime.txt android/cxx-runtime.txt"
 )
 
-if [[ $# -eq 0 ]]; then
-  echo "usage: $0 <preset>..." >&2
-  exit 1
-fi
+read -r -a presets <<< "$MAPLIBRE_FFI_PRESETS $MAPLIBRE_FFI_ANDROID_PRESETS"
 
 # The copies are collected in a staging directory first, so that a failure
 # leaves notices/ unchanged.
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
-for preset in "$@"; do
-  share="$ffi_dir/$preset/share/maplibre-native-c"
-  if [[ "$(cat "$ffi_dir/$preset/BUILD_INFO" 2>/dev/null)" != "$MAPLIBRE_FFI_COMMIT $preset" ]]; then
-    echo "$preset is not installed at the pinned commit $MAPLIBRE_FFI_COMMIT" >&2
+for preset in "${presets[@]}"; do
+  tarball="$release_dir/maplibre-native-c-$preset.tar.gz"
+  if [[ ! -f "$tarball" ]]; then
+    echo "$tarball doesn't exist; run scripts/fetch_ffi_release.sh" >&2
     exit 1
   fi
+  mkdir -p "$stage/tarballs"
+  tar -xzf "$tarball" -C "$stage/tarballs" \
+    "maplibre-native-c-$preset/share/maplibre-native-c"
+  share="$stage/tarballs/maplibre-native-c-$preset/share/maplibre-native-c"
   notices=("${common_notices[@]}")
   if [[ "$preset" == android-* ]]; then
     notices+=("${android_notices[@]}")
@@ -75,7 +79,7 @@ for preset in "$@"; do
       fi
     done
     if [[ "$listed" != true ]]; then
-      echo "$preset installs $file, which scripts/copy_ffi_notices.sh doesn't list for $preset; add it to the tables" >&2
+      echo "$preset's tarball has $file, which scripts/copy_ffi_notices.sh doesn't list for $preset; add it to the tables" >&2
       exit 1
     fi
   done
@@ -84,21 +88,21 @@ for preset in "$@"; do
     source_file="$share/${entry%% *}"
     target="${entry##* }"
     if [[ ! -f "$source_file" ]]; then
-      echo "$preset doesn't install ${entry%% *}" >&2
+      echo "$preset's tarball has no ${entry%% *}" >&2
       exit 1
     fi
-    if [[ -e "$stage/$target" ]]; then
-      if ! cmp -s "$source_file" "$stage/$target"; then
-        echo "$preset's ${entry%% *} differs from the same notice of another given preset" >&2
+    if [[ -e "$stage/notices/$target" ]]; then
+      if ! cmp -s "$source_file" "$stage/notices/$target"; then
+        echo "$preset's ${entry%% *} differs from the same notice of another preset" >&2
         exit 1
       fi
     else
-      mkdir -p "$stage/$(dirname "$target")"
-      cp "$source_file" "$stage/$target"
+      mkdir -p "$stage/notices/$(dirname "$target")"
+      cp "$source_file" "$stage/notices/$target"
     fi
   done
 done
 
 mkdir -p "$notices_dir"
-cp -R "$stage/." "$notices_dir/"
-echo "Copied the notices of $* into $notices_dir"
+cp -R "$stage/notices/." "$notices_dir/"
+echo "Copied the notices of $MAPLIBRE_FFI_VERSION (${presets[*]}) into $notices_dir"
