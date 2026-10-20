@@ -33,7 +33,7 @@ buildscript {
     }
 }
 
-val ffiLock = projectDir.resolve("../maplibre_ffi.lock").readLines()
+val ffiLock = projectDir.resolve("../../../packages/flutter_mapigrade/maplibre_ffi.lock").readLines()
 fun ffiLockValue(key: String) =
     ffiLock.first { it.startsWith("$key=") }.substringAfter("=")
 val ffiVersion = ffiLockValue("MAPLIBRE_FFI_VERSION")
