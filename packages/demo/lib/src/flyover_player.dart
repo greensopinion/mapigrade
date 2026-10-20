@@ -11,6 +11,10 @@ enum FlyoverPhase {
 
   /// The pass that loads the tiles before the run.
   warmingUp,
+
+  /// After the warm-up pass, at the flyover's start until [FlyoverPlayer.start]
+  /// (design D145).
+  waiting,
   playing,
 }
 
@@ -30,6 +34,10 @@ class FlyoverPlayer extends ChangeNotifier {
   /// The ticker's elapsed time at the start of the current pass.
   Duration _passStart = Duration.zero;
 
+  /// The length of the warm-up pass.
+  Duration _warmUp = Duration.zero;
+  bool _waitAfterWarmUp = false;
+
   /// Where the rider is while the flyover follows a route, otherwise null.
   /// Updated on every tick, separately from the other state, so that only the
   /// rider's marker rebuilds.
@@ -43,13 +51,28 @@ class FlyoverPlayer extends ChangeNotifier {
   int? get stage => _stage;
   int? _stage;
 
-  /// Plays [flyover] from the start; with [warmUp], plays it once first.
-  void play(Flyover flyover, {required bool warmUp}) {
+  /// Plays [flyover] from the start. With [warmUp], first plays a warm-up
+  /// pass from the start to [warmUp], or to the end if that is earlier. With
+  /// [waitAfterWarmUp], it then waits at the start until [start] is called.
+  void play(Flyover flyover, {Duration? warmUp, bool waitAfterWarmUp = false}) {
     _ticker.stop();
     _flyover = flyover;
+    _warmUp = warmUp == null || warmUp > flyover.duration
+        ? flyover.duration
+        : warmUp;
+    _waitAfterWarmUp = waitAfterWarmUp;
     _passStart = Duration.zero;
-    _phase = warmUp ? FlyoverPhase.warmingUp : FlyoverPhase.playing;
+    _phase = warmUp != null ? FlyoverPhase.warmingUp : FlyoverPhase.playing;
     _stage = null;
+    _ticker.start();
+    notifyListeners();
+  }
+
+  /// Starts the run when the player is [FlyoverPhase.waiting].
+  void start() {
+    if (_phase != FlyoverPhase.waiting) return;
+    _passStart = Duration.zero;
+    _phase = FlyoverPhase.playing;
     _ticker.start();
     notifyListeners();
   }
@@ -68,7 +91,11 @@ class FlyoverPlayer extends ChangeNotifier {
   void _tick(Duration elapsed) {
     final flyover = _flyover!;
     var t = elapsed - _passStart;
-    if (t >= flyover.duration && _phase == FlyoverPhase.warmingUp) {
+    if (t >= _warmUp && _phase == FlyoverPhase.warmingUp) {
+      if (_waitAfterWarmUp) {
+        _wait(flyover);
+        return;
+      }
       // The run starts again from the start of the first stage.
       _passStart = elapsed;
       _phase = FlyoverPhase.playing;
@@ -86,6 +113,18 @@ class FlyoverPlayer extends ChangeNotifier {
       notifyListeners();
     }
     if (t >= flyover.duration) stop();
+  }
+
+  /// Holds the camera at the flyover's start, without the rider; [start]
+  /// restarts the ticker, so the run's time starts from 0.
+  void _wait(Flyover flyover) {
+    _ticker.stop();
+    _phase = FlyoverPhase.waiting;
+    final camera = flyover.cameraAt(Duration.zero);
+    controller.moveAndRotate(camera.center, camera.zoom, camera.rotation);
+    rider.value = null;
+    _stage = flyover.segmentAt(Duration.zero).stage;
+    notifyListeners();
   }
 
   @override

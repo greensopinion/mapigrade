@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'flyover.dart';
 import 'flyover_player.dart';
 import 'metrics_panel.dart';
+import 'recording.dart';
 import 'stage_layers.dart';
 import 'stages.dart';
 import 'styles.dart';
@@ -48,16 +49,63 @@ class _MapScreenState extends State<MapScreen>
   DemoStyle _style = demoStyles.first;
   bool _showStages = true;
   bool _warmUp = false;
-  bool _settingsOpen = true;
+
+  /// The recording mode, or null (design D144 of readme-demo-recording).
+  final _recording = Recording.fromEnvironment();
+  late bool _settingsOpen = _recording == null;
+  bool _styleLoaded = false;
+  bool _recordingStarted = false;
+  bool _readyWritten = false;
 
   @override
   void initState() {
     super.initState();
     _player = FlyoverPlayer(vsync: this, controller: _mapController)
-      ..addListener(() => setState(() {}));
+      ..addListener(_onPlayerChanged);
     loadStages(rootBundle).then((stages) {
-      if (mounted) setState(() => _stages = stages);
+      if (!mounted) return;
+      setState(() => _stages = stages);
+      _startRecording();
     });
+  }
+
+  void _onPlayerChanged() {
+    setState(() {});
+    final recording = _recording;
+    if (recording != null &&
+        _player.phase == FlyoverPhase.waiting &&
+        !_readyWritten) {
+      _readyWritten = true;
+      recording.ready(_metrics).then((_) {
+        if (mounted) _player.start();
+      });
+    }
+  }
+
+  void _onStyleLoaded() {
+    _styleLoaded = true;
+    _startRecording();
+  }
+
+  /// In the recording mode, plays the warm-up pass and waits at the start
+  /// once the style and the stages have loaded (design D145).
+  void _startRecording() {
+    final recording = _recording;
+    final stages = _stages;
+    if (recording == null || _recordingStarted) return;
+    if (!_styleLoaded || stages == null) return;
+    _recordingStarted = true;
+    final camera = _mapController.camera;
+    recording.log(
+      'warm-up ${recording.warmUp.inSeconds} s, viewport '
+      '${camera.nonRotatedSize.width.round()} x '
+      '${camera.nonRotatedSize.height.round()}',
+    );
+    _player.play(
+      Flyover.build(stages, camera),
+      warmUp: recording.warmUp,
+      waitAfterWarmUp: true,
+    );
   }
 
   @override
@@ -88,6 +136,7 @@ class _MapScreenState extends State<MapScreen>
   /// Shows a failure of the map. The layer can report one while it builds,
   /// so the snack bar is shown after the frame.
   void _showError(LayerException exception) {
+    if (_recording != null) Recording.fail(exception.message);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -101,10 +150,8 @@ class _MapScreenState extends State<MapScreen>
     if (_player.isActive || stages == null) {
       _player.stop();
     } else {
-      _player.play(
-        Flyover.build(stages, _mapController.camera),
-        warmUp: _warmUp,
-      );
+      final flyover = Flyover.build(stages, _mapController.camera);
+      _player.play(flyover, warmUp: _warmUp ? flyover.duration : null);
     }
   }
 
@@ -132,6 +179,7 @@ class _MapScreenState extends State<MapScreen>
               // camera moves; the attribution is screen UI and follows it.
               MapigradeLayer(
                 styleUrl: _style.url,
+                onStyleLoaded: _onStyleLoaded,
                 onError: _showError,
                 metrics: _metrics,
                 children: [
@@ -198,10 +246,13 @@ class _MapScreenState extends State<MapScreen>
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
-                    player.phase == FlyoverPhase.warmingUp
-                        ? 'Warming up: loading tiles'
-                              '${player.stage == null ? '' : ' (stage ${player.stage})'}'
-                        : 'Flyover: stage ${player.stage ?? ''}',
+                    switch (player.phase) {
+                      FlyoverPhase.warmingUp =>
+                        'Warming up: loading tiles'
+                            '${player.stage == null ? '' : ' (stage ${player.stage})'}',
+                      FlyoverPhase.waiting => 'Waiting to start',
+                      _ => 'Flyover: stage ${player.stage ?? ''}',
+                    },
                     style: theme.textTheme.bodySmall!.copyWith(
                       fontWeight: FontWeight.bold,
                     ),

@@ -38,6 +38,17 @@ Frame rates are only meaningful in a release or profile build on a device. On a 
 
 The styles and tiles come from OpenFreeMap and demotiles.maplibre.org, so the demo needs a network connection.
 
+## Recording mode
+
+On macOS, the environment variable `MAPIGRADE_DEMO_RECORDING_SECONDS=<L>` starts the demo in the recording mode that `tool/record_readme.sh` uses for the video in the repository's README. In this mode the window has no title bar and a content area of 1280 × 720 points, the settings are collapsed, and when the style and the stages have loaded, the demo plays the first L + 1 s of the flyover as a warm-up pass and moves the camera back to the start. When the map is at rest there, the demo writes `ready` to standard output, and it starts the flyover when it reads `go` on standard input. It exits with an error when the map isn't at rest within 30 s, when `go` doesn't arrive within 30 s, or when the map reports a failure.
+
+To try it, start the binary in the app bundle from a shell, and type `go` after `ready`:
+
+```sh
+flutter build macos --release
+MAPIGRADE_DEMO_RECORDING_SECONDS=20 build/macos/Build/Products/Release/mapigrade_demo.app/Contents/MacOS/mapigrade_demo
+```
+
 ## Stage data
 
 `assets/tdff_2026.geojson` holds one `LineString` feature per stage, with the stage's facts as properties. Open it in a GeoJSON viewer, such as [geojson.io](https://geojson.io), to check the routes.

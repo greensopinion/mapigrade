@@ -61,6 +61,25 @@ The iOS and Android lifecycle tests use test hooks (`package:flutter_mapigrade/s
 
 The benchmark and the memory and color measurements are described, with their commands and results, in [docs/benchmarks.md](docs/benchmarks.md).
 
+## README video
+
+The video in the [README](README.md) is a 20 s recording of the demo's flyover on macOS. `packages/demo/tool/record_readme.sh` makes it without input: it builds the demo in release mode, starts it in its recording mode, captures the demo's window, adds a title card, and writes `packages/demo/build/readme_demo.mp4`. Make it again when a change to the demo or the styles changes what the video shows.
+
+Before the first run:
+
+- Install the tools: `brew install ffmpeg imagemagick librsvg`. The script also needs `swiftc`, from Xcode or the Xcode command line tools.
+- Grant Screen Recording permission to the app that you run the script from (Terminal, iTerm or VS Code) in System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen that app. When the permission is missing, the script asks macOS for it and stops before it builds. macOS can ask for the permission again later.
+
+Run the script from the repository root:
+
+```sh
+packages/demo/tool/record_readme.sh
+```
+
+A run takes about 3 minutes: about 1 minute to build, 21 s of warm-up, 20 s of recording and about 1 minute to encode. The demo's window opens without a title bar. You can use the Mac during the run, because the capture records the demo's window even where other windows cover it. The script stops without changing the video when a tool or the permission is missing, or when the video is over 10,000,000 bytes at CRF 24, 25 and 26; 10 MB is the limit for a video attachment on GitHub's free plan.
+
+To publish the video, edit `README.md` on github.com, drag `packages/demo/build/readme_demo.mp4` into the editor, and replace the earlier video's URL with the `https://github.com/user-attachments/assets/...` URL that GitHub inserts, on a line of its own. GitHub doesn't list or delete attachments, so the earlier video stays at its URL.
+
 ## Build MapLibre Native FFI
 
 `scripts/build_maplibre_ffi.sh` builds the FFI at the commit and presets pinned in `packages/flutter_mapigrade/maplibre_ffi.lock`: the Apple presets in `MAPLIBRE_FFI_PRESETS` and the Android presets in `MAPLIBRE_FFI_ANDROID_PRESETS`. A preset name as argument builds only that preset.

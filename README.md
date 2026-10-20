@@ -6,6 +6,8 @@
 
 Mapigrade is an experimental Flutter plugin that renders MapLibre Native maps directly into a Flutter `Texture` widget, using MapLibre Native FFI and GPU rendering. It uses no platform view and no CPU pixel readback.
 
+https://github.com/user-attachments/assets/fe764361-10ca-4e47-acc8-d8824cf6dbdf
+
 `MapigradeLayer` draws its `flutter_map` overlays at the camera of the map frame that each Flutter frame displays, so markers and routes stay aligned with the map while the camera moves. In the alignment benchmark on macOS and iOS, no Flutter frame had an alignment error over 1 logical pixel during steady pans, flings, abrupt stops and reversals. On Android we checked alignment by hand. The map and the overlays still lag the live `flutter_map` camera together, by about one Flutter frame of camera movement.
 
 Unlike a map in a platform view on iOS, the map can be captured with `RepaintBoundary.toImage`: our integration tests capture it on macOS, iOS and Android. We haven't yet tested whether effects such as `ColorFiltered` and `ShaderMask` apply to the map. The comparison with a platform view is in [docs/platform-view-comparison.md](docs/platform-view-comparison.md).
