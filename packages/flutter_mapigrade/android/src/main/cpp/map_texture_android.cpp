@@ -20,6 +20,7 @@
 // pbuffer surface and no frame is rendered. The map thread never calls into
 // Java.
 #include <EGL/egl.h>
+#include <GLES3/gl3.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -246,6 +247,12 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // session queues on the window, so that the image tells which frame it
   // holds (design D131).
   void WillRender(uint64_t frame_id) override {
+    // MapLibre leaves the scissor test enabled with the frame's size, and the
+    // FFI's surface session assumes at the start of each frame that it is
+    // disabled, so it doesn't disable it. After the size grows, the next frame
+    // would be clipped to the previous size. Disabling it makes the GL state
+    // match the assumption.
+    glDisable(GL_SCISSOR_TEST);
     if (window_surface_ == EGL_NO_SURFACE || presentation_time_ == nullptr) {
       return;
     }
