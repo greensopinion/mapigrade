@@ -285,11 +285,14 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
   }
 
   /// The layer, with [overlays] as its children or followed by them.
-  List<Widget> _layers(MapTextureLayer Function(List<Widget> children) layer,
-      Widget overlays) =>
-      alignmentChildren
-          ? [layer([overlays])]
-          : [layer(const []), overlays];
+  List<Widget> _layers(
+    MapTextureLayer Function(List<Widget> children) layer,
+    Widget overlays,
+  ) => alignmentChildren
+      ? [
+          layer([overlays]),
+        ]
+      : [layer(const []), overlays];
 
   void _onChildCamera(int? frameId, fm.MapCamera camera) {
     lastChildCamera = camera;
@@ -462,10 +465,7 @@ class AlignmentRecorder {
         continue;
       }
       if (build != null) matchedBuilds++;
-      final error = alignmentError(
-        target: lastBuild.target,
-        shown: shown.view,
-      );
+      final error = alignmentError(target: lastBuild.target, shown: shown.view);
       drawn.add(error.error);
       if (error.error > 1 && over.length < 10) {
         over.add({
@@ -534,8 +534,10 @@ class AlignmentBenchmark {
     if (Platform.isAndroid) {
       // Android reports no display times (design D58); alignment is checked
       // by hand there.
-      writeLine('alignment benchmark: needs display times, which Android '
-          'does not report; exiting');
+      writeLine(
+        'alignment benchmark: needs display times, which Android '
+        'does not report; exiting',
+      );
       exit(1);
     }
     if (alignmentMode == null) {
@@ -725,16 +727,20 @@ class AlignmentBenchmark {
       'rendered': rendered,
       'displayed': displayed,
       'undisplayed_share': rendered == 0 ? 0 : r(1 - displayed / rendered),
-      'skipped_renders_per_s':
-          r((after.skippedRenders - before.skippedRenders) / seconds),
+      'skipped_renders_per_s': r(
+        (after.skippedRenders - before.skippedRenders) / seconds,
+      ),
       'waits_for_display': after.waitsForDisplay - before.waitsForDisplay,
       'render_ahead_frames': after.renderAheadFrames - before.renderAheadFrames,
-      'render_update_avg_ms': after.renderUpdateCount == before.renderUpdateCount
+      'render_update_avg_ms':
+          after.renderUpdateCount == before.renderUpdateCount
           ? 0
-          : r((after.renderUpdateTotal - before.renderUpdateTotal)
-                    .inMicroseconds /
-                1000 /
-                (after.renderUpdateCount - before.renderUpdateCount)),
+          : r(
+              (after.renderUpdateTotal - before.renderUpdateTotal)
+                      .inMicroseconds /
+                  1000 /
+                  (after.renderUpdateCount - before.renderUpdateCount),
+            ),
       'max_slots_in_use': after.maxSlotsInUse,
     };
   }

@@ -103,10 +103,12 @@ void main() {
     await read()!.frames.first.timeout(const Duration(seconds: 20));
   }
 
-  test('MapigradeLayer.isSupported is true in an app with the native library',
-      () {
-    expect(MapigradeLayer.isSupported, isTrue);
-  });
+  test(
+    'MapigradeLayer.isSupported is true in an app with the native library',
+    () {
+      expect(MapigradeLayer.isSupported, isTrue);
+    },
+  );
 
   testWidgets('the layer fills the FlutterMap below the markers', (
     tester,
@@ -142,40 +144,50 @@ void main() {
     expect(pixel(200, 150), [0, 0, 255]);
   });
 
-  testWidgets('a camera jump larger than the viewport shows the new camera',
-      (tester) async {
+  testWidgets('a camera jump larger than the viewport shows the new camera', (
+    tester,
+  ) async {
     final mapController = MapController();
     MapTextureController? controller;
-    await tester.pumpWidget(MaterialApp(
-      home: Center(
-        child: SizedBox(
-          width: 400,
-          height: 300,
-          child: FlutterMap(
-            mapController: mapController,
-            options: const MapOptions(initialCenter: center, initialZoom: 12),
-            children: [
-              MapTextureLayer(
-                  styleJson: redStyle, onController: (c) => controller = c),
-            ],
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 400,
+            height: 300,
+            child: FlutterMap(
+              mapController: mapController,
+              options: const MapOptions(initialCenter: center, initialZoom: 12),
+              children: [
+                MapTextureLayer(
+                  styleJson: redStyle,
+                  onController: (c) => controller = c,
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ));
+    );
     await firstFrame(tester, () => controller);
     await Future<void>.delayed(const Duration(milliseconds: 200));
 
     // Two viewport widths east at flutter_map zoom 12.
     final degreesPerPx = 360 / (256 * (1 << 12));
-    final target =
-        LatLng(center.latitude, center.longitude + 800 * degreesPerPx);
+    final target = LatLng(
+      center.latitude,
+      center.longitude + 800 * degreesPerPx,
+    );
     mapController.move(target, 12);
     final shown = await controller!.frames
-        .firstWhere(
-            (f) => (f.camera.longitude - target.longitude).abs() < 1e-9)
-        .timeout(const Duration(seconds: 5),
-            onTimeout: () => fail('no frame with the new camera was '
-                'displayed; last ${controller!.displayedFrame}'));
+        .firstWhere((f) => (f.camera.longitude - target.longitude).abs() < 1e-9)
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => fail(
+            'no frame with the new camera was '
+            'displayed; last ${controller!.displayedFrame}',
+          ),
+        );
     expect(shown.camera.longitude, closeTo(target.longitude, 1e-9));
   });
 
@@ -195,10 +207,7 @@ void main() {
           options: const MapOptions(initialCenter: center, initialZoom: 12),
           children: [
             if (alignment == null)
-              MapTextureLayer(
-                styleJson: redStyle,
-                onController: onController,
-              )
+              MapTextureLayer(styleJson: redStyle, onController: onController)
             else
               MapTextureLayer(
                 styleJson: redStyle,
@@ -246,11 +255,7 @@ void main() {
         );
         await tester.pump();
         expect(controller!.displayedFrame, isNotNull);
-        expect(
-          transformInLayer,
-          findsNothing,
-          reason: 'step $i',
-        );
+        expect(transformInLayer, findsNothing, reason: 'step $i');
       }
     });
   }
@@ -316,13 +321,19 @@ void main() {
     expect(controller!.isDisposed, isTrue);
   });
 
-  testWidgets('50 layer insert/remove cycles keep threads and memory stable',
-      (tester) async {
+  testWidgets('50 layer insert/remove cycles keep threads and memory stable', (
+    tester,
+  ) async {
     final boundaryKey = GlobalKey();
     Future<void> cycle() async {
       MapTextureController? controller;
-      await tester.pumpWidget(mapApp(boundaryKey,
-          withLayer: true, onController: (c) => controller = c));
+      await tester.pumpWidget(
+        mapApp(
+          boundaryKey,
+          withLayer: true,
+          onController: (c) => controller = c,
+        ),
+      );
       await firstFrame(tester, () => controller);
       await tester.pumpWidget(mapApp(boundaryKey, withLayer: false));
       expect(controller!.isDisposed, isTrue);
@@ -346,10 +357,14 @@ void main() {
     final threadsAfter = processThreadCount();
     final footprintAfter = memoryFootprintForTesting();
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
-    debugPrint('LAYER_LIFECYCLE threads $threadsBefore -> $threadsAfter; '
-        'footprint ${mib(footprintBefore)} MiB -> ${mib(footprintAfter)} MiB; '
-        'after cycles 10/20/30/40/50: '
-        '${[for (final i in [9, 19, 29, 39, 49]) mib(footprints[i])]}');
+    debugPrint(
+      'LAYER_LIFECYCLE threads $threadsBefore -> $threadsAfter; '
+      'footprint ${mib(footprintBefore)} MiB -> ${mib(footprintAfter)} MiB; '
+      'after cycles 10/20/30/40/50: '
+      '${[
+        for (final i in [9, 19, 29, 39, 49]) mib(footprints[i]),
+      ]}',
+    );
     expect(threadsAfter, lessThanOrEqualTo(threadsBefore));
     expect(footprintAfter - footprintBefore, lessThan(100 * 1024 * 1024));
   });
@@ -484,28 +499,30 @@ void main() {
     final mapController = MapController();
     final metrics = LayerMetrics();
     final loaded = Completer<void>();
-    await tester.pumpWidget(MaterialApp(
-      home: Center(
-        child: SizedBox(
-          width: 400,
-          height: 300,
-          child: FlutterMap(
-            mapController: mapController,
-            options: const MapOptions(initialCenter: center, initialZoom: 12),
-            children: [
-              MapigradeLayer(
-                styleJson: redStyle,
-                metrics: metrics,
-                onStyleLoaded: () {
-                  if (!loaded.isCompleted) loaded.complete();
-                },
-                onError: (e) => fail('unexpected failure $e'),
-              ),
-            ],
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 400,
+            height: 300,
+            child: FlutterMap(
+              mapController: mapController,
+              options: const MapOptions(initialCenter: center, initialZoom: 12),
+              children: [
+                MapigradeLayer(
+                  styleJson: redStyle,
+                  metrics: metrics,
+                  onStyleLoaded: () {
+                    if (!loaded.isCompleted) loaded.complete();
+                  },
+                  onError: (e) => fail('unexpected failure $e'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ));
+    );
     await loaded.future.timeout(const Duration(seconds: 20));
     await Future<void>.delayed(const Duration(milliseconds: 500));
 
@@ -528,9 +545,7 @@ void main() {
     expect(second.displayedFrames, lessThanOrEqualTo(second.renderedFrames));
   });
 
-  testWidgets('metrics stay the same while the map is at rest', (
-    tester,
-  ) async {
+  testWidgets('metrics stay the same while the map is at rest', (tester) async {
     final metrics = LayerMetrics();
     MapTextureController? controller;
     // Subscribed before the style loads, so that no idle event is missed.

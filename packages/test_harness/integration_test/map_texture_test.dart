@@ -18,20 +18,23 @@ const demoStyleUrl = 'https://demotiles.maplibre.org/style.json';
 const unreachableStyleUrl = 'https://invalid.example.invalid/style.json';
 
 String colorStyle(String color) => jsonEncode({
-      'version': 8,
-      'sources': {},
-      'layers': [
-        {
-          'id': 'background',
-          'type': 'background',
-          'paint': {'background-color': color},
-        },
-      ],
-    });
+  'version': 8,
+  'sources': {},
+  'layers': [
+    {
+      'id': 'background',
+      'type': 'background',
+      'paint': {'background-color': color},
+    },
+  ],
+});
 
 /// Waits for the first event on [stream] that satisfies [test].
-Future<T> waitFor<T>(Stream<Object> stream, bool Function(T) test,
-    {Duration timeout = const Duration(seconds: 20)}) {
+Future<T> waitFor<T>(
+  Stream<Object> stream,
+  bool Function(T) test, {
+  Duration timeout = const Duration(seconds: 20),
+}) {
   return stream
       .where((e) => e is T && test(e as T))
       .cast<T>()
@@ -62,20 +65,27 @@ void main() {
   const copyFree = !bool.fromEnvironment('COPY');
 
   /// Creates a controller and shows it in a 400x300 view.
-  Future<MapTextureController> showMap(WidgetTester tester,
-      {bool copyFree = copyFree}) async {
+  Future<MapTextureController> showMap(
+    WidgetTester tester, {
+    bool copyFree = copyFree,
+  }) async {
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(controller);
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Center(
-        child: SizedBox(
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
             width: 400,
             height: 300,
-            child: MapTextureView(controller: controller)),
+            child: MapTextureView(controller: controller),
+          ),
+        ),
       ),
-    ));
+    );
     return controller;
   }
 
@@ -87,14 +97,18 @@ void main() {
   });
 
   testWidgets('create and dispose', (tester) async {
-    final controller =
-        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+    final controller = await MapTextureController.create(
+      pixelRatio: 2,
+      copyFree: copyFree,
+    );
     // Four slots with a texture each on macOS and iOS; six slots that share
     // one texture on Android (design D135).
     expect(controller.textureIds, hasLength(Platform.isAndroid ? 6 : 4));
     expect(controller.textureIds, everyElement(greaterThanOrEqualTo(0)));
-    expect(controller.textureIds.toSet(),
-        hasLength(Platform.isAndroid ? 1 : controller.textureIds.length));
+    expect(
+      controller.textureIds.toSet(),
+      hasLength(Platform.isAndroid ? 1 : controller.textureIds.length),
+    );
     controller.dispose();
     expect(controller.isDisposed, isTrue);
   });
@@ -106,8 +120,10 @@ void main() {
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
     final displayed = await frame;
-    expect(displayed.physicalSize.width,
-        closeTo(400 * tester.view.devicePixelRatio, 1));
+    expect(
+      displayed.physicalSize.width,
+      closeTo(400 * tester.view.devicePixelRatio, 1),
+    );
   });
 
   testWidgets('style fails to load from an unreachable URL', (tester) async {
@@ -151,14 +167,19 @@ void main() {
     controller.loadStyleJson(colorStyle('#3366cc'));
     await loaded;
 
-    const camera =
-        MapCamera(latitude: 48.8566, longitude: 2.3522, zoom: 11, bearing: 30);
+    const camera = MapCamera(
+      latitude: 48.8566,
+      longitude: 2.3522,
+      zoom: 11,
+      bearing: 30,
+    );
     final frame = waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            near(f.camera.latitude, camera.latitude) &&
-            near(f.camera.longitude, camera.longitude) &&
-            near(f.camera.zoom, camera.zoom));
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, camera.latitude) &&
+          near(f.camera.longitude, camera.longitude) &&
+          near(f.camera.zoom, camera.zoom),
+    );
     controller.setCamera(camera);
     final displayed = await frame;
     // The frame reports the bearing with the sign it was set with; the
@@ -176,8 +197,7 @@ void main() {
     final displayed = <FrameCamera>[];
     final sub = controller.frames.listen(displayed.add);
     for (var i = 0; i < 30; i++) {
-      controller
-          .setCamera(MapCamera(latitude: 0, longitude: i * 0.1, zoom: 3));
+      controller.setCamera(MapCamera(latitude: 0, longitude: i * 0.1, zoom: 3));
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -186,14 +206,15 @@ void main() {
     expect(displayed.length, greaterThan(10));
     expect(displayed.first.displayTime, greaterThan(0));
     for (var k = 1; k < displayed.length; k++) {
-      expect(displayed[k].displayTime,
-          greaterThan(displayed[k - 1].displayTime!),
-          reason: 'frame ${displayed[k].frameId}');
+      expect(
+        displayed[k].displayTime,
+        greaterThan(displayed[k - 1].displayTime!),
+        reason: 'frame ${displayed[k].frameId}',
+      );
     }
   });
 
-  testWidgets('rapid camera updates do not build up a backlog',
-      (tester) async {
+  testWidgets('rapid camera updates do not build up a backlog', (tester) async {
     final controller = await showMap(tester);
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
@@ -209,7 +230,8 @@ void main() {
       final longitude = -10 + i * 0.01;
       sent.add(longitude);
       controller.setCamera(
-          MapCamera(latitude: 0, longitude: longitude, zoom: 3));
+        MapCamera(latitude: 0, longitude: longitude, zoom: 3),
+      );
       i++;
       await Future<void>.delayed(const Duration(milliseconds: 8));
     }
@@ -223,21 +245,27 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     await sub.cancel();
-    final lastIndex =
-        displayed.indexWhere((f) => near(f.camera.longitude, last));
+    final lastIndex = displayed.indexWhere(
+      (f) => near(f.camera.longitude, last),
+    );
     // Frames with an earlier camera displayed after the last update.
-    final staleFrames =
-        lastIndex < 0 ? -1 : lastIndex - displayedBeforeLast;
-    debugPrint('rapid updates: sent ${sent.length} cameras, '
-        'displayed ${displayed.length} frames, caught up in '
-        '${caughtUp.elapsedMilliseconds} ms after $staleFrames earlier '
-        'frames; ${controller.stats()}');
+    final staleFrames = lastIndex < 0 ? -1 : lastIndex - displayedBeforeLast;
+    debugPrint(
+      'rapid updates: sent ${sent.length} cameras, '
+      'displayed ${displayed.length} frames, caught up in '
+      '${caughtUp.elapsedMilliseconds} ms after $staleFrames earlier '
+      'frames; ${controller.stats()}',
+    );
 
-    expect(lastIndex, greaterThanOrEqualTo(0),
-        reason: 'the last camera (longitude $last) was never displayed; the '
-            'last displayed frame was '
-            '${displayed.isEmpty ? 'none' : displayed.last}; '
-            '${controller.stats()}');
+    expect(
+      lastIndex,
+      greaterThanOrEqualTo(0),
+      reason:
+          'the last camera (longitude $last) was never displayed; the '
+          'last displayed frame was '
+          '${displayed.isEmpty ? 'none' : displayed.last}; '
+          '${controller.stats()}',
+    );
     // No backlog: when the last update arrives, at most one frame is ready
     // and one is rendering with an earlier camera, and the next render
     // takes the last camera.
@@ -248,11 +276,12 @@ void main() {
       // and D134), so camera updates that arrive between renders are
       // coalesced.
       final refreshRate = tester.view.display.refreshRate;
-      final seconds = (stopwatch.elapsedMilliseconds +
-              caughtUp.elapsedMilliseconds) /
-          1000;
-      expect(stats.renderedFrames,
-          lessThanOrEqualTo((seconds * refreshRate).ceil() + 1));
+      final seconds =
+          (stopwatch.elapsedMilliseconds + caughtUp.elapsedMilliseconds) / 1000;
+      expect(
+        stats.renderedFrames,
+        lessThanOrEqualTo((seconds * refreshRate).ceil() + 1),
+      );
       expect(stats.intervalWaits, greaterThan(0));
     } else {
       // The map renders at most one frame ahead of what Dart chooses, so
@@ -260,44 +289,59 @@ void main() {
       // start before Dart chose the latest frame (while frames take longer
       // than a refresh interval, design D19) can replace an undisplayed
       // frame.
-      expect(stats.renderedFrames,
-          lessThanOrEqualTo(
-              stats.presentedFrames + stats.renderAheadFrames + 1));
+      expect(
+        stats.renderedFrames,
+        lessThanOrEqualTo(stats.presentedFrames + stats.renderAheadFrames + 1),
+      );
       expect(stats.intervalWaits, 0);
     }
     // From the first frame that shows a sent camera on, displayed cameras
     // never go backwards: no stale camera is shown after a newer one. Camera
     // updates coalesce, so the first sent camera may never be displayed.
     final first = displayed.indexWhere(
-        (f) => sent.any((longitude) => near(f.camera.longitude, longitude)));
+      (f) => sent.any((longitude) => near(f.camera.longitude, longitude)),
+    );
     expect(first, greaterThanOrEqualTo(0));
     for (var k = first + 1; k < displayed.length; k++) {
-      expect(displayed[k].camera.longitude,
-          greaterThanOrEqualTo(displayed[k - 1].camera.longitude - 1e-9));
+      expect(
+        displayed[k].camera.longitude,
+        greaterThanOrEqualTo(displayed[k - 1].camera.longitude - 1e-9),
+      );
     }
   });
 
   testWidgets('calls after dispose report an error', (tester) async {
-    final controller =
-        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+    final controller = await MapTextureController.create(
+      pixelRatio: 2,
+      copyFree: copyFree,
+    );
     controller.dispose();
     expect(
-        () => controller.setCamera(
-            const MapCamera(latitude: 0, longitude: 0, zoom: 1)),
-        throwsA(isA<MapTextureDisposedException>()));
-    expect(() => controller.loadStyleUrl(demoStyleUrl),
-        throwsA(isA<MapTextureDisposedException>()));
-    expect(() => controller.stats(),
-        throwsA(isA<MapTextureDisposedException>()));
+      () => controller.setCamera(
+        const MapCamera(latitude: 0, longitude: 0, zoom: 1),
+      ),
+      throwsA(isA<MapTextureDisposedException>()),
+    );
+    expect(
+      () => controller.loadStyleUrl(demoStyleUrl),
+      throwsA(isA<MapTextureDisposedException>()),
+    );
+    expect(
+      () => controller.stats(),
+      throwsA(isA<MapTextureDisposedException>()),
+    );
     // A second dispose is a no-op.
     controller.dispose();
   });
 
-  testWidgets('50 create/dispose cycles keep the thread count stable',
-      (tester) async {
+  testWidgets('50 create/dispose cycles keep the thread count stable', (
+    tester,
+  ) async {
     Future<void> cycle() async {
-      final controller =
-        await MapTextureController.create(pixelRatio: 2, copyFree: copyFree);
+      final controller = await MapTextureController.create(
+        pixelRatio: 2,
+        copyFree: copyFree,
+      );
       final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
       controller.resize(const Size(400, 300), 2);
       controller.loadStyleJson(colorStyle('#123456'));
@@ -318,9 +362,11 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final after = processThreadCount();
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
-    debugPrint('thread count: before $before, after 50 cycles $after; '
-        'memory footprint ${mib(footprintBefore)} MiB before, '
-        '${mib(memoryFootprintForTesting())} MiB after');
+    debugPrint(
+      'thread count: before $before, after 50 cycles $after; '
+      'memory footprint ${mib(footprintBefore)} MiB before, '
+      '${mib(memoryFootprintForTesting())} MiB after',
+    );
     // A thread leaked by each cycle adds 50 threads. The Dart VM and Android
     // start and stop threads of their own pools as needed, so the count may
     // grow by a few: DartWorker and binder threads don't count, and two other
@@ -332,8 +378,10 @@ void main() {
       poolThreadsAdded = added
           .where((name) => name == 'DartWorker' || name.startsWith('binder:'))
           .length;
-      debugPrint('threads added: $added; '
-          'removed: ${_subtract(namesBefore, namesAfter)}');
+      debugPrint(
+        'threads added: $added; '
+        'removed: ${_subtract(namesBefore, namesAfter)}',
+      );
     }
     expect(after - poolThreadsAdded, lessThanOrEqualTo(before + 2));
   });
@@ -348,7 +396,8 @@ void main() {
       // Keep the map rendering, then dispose while frames are in progress.
       for (var i = 0; i < 20; i++) {
         controller.setCamera(
-            MapCamera(latitude: 0, longitude: i.toDouble(), zoom: 2));
+          MapCamera(latitude: 0, longitude: i.toDouble(), zoom: 2),
+        );
         await Future<void>.delayed(const Duration(milliseconds: 4));
       }
       await tester.pumpWidget(const SizedBox());
@@ -364,8 +413,10 @@ void main() {
     final before = controller.stats();
     await Future<void>.delayed(const Duration(seconds: 10));
     final after = controller.stats();
-    debugPrint('idle: rendered ${before.renderedFrames} -> '
-        '${after.renderedFrames} over 10 s');
+    debugPrint(
+      'idle: rendered ${before.renderedFrames} -> '
+      '${after.renderedFrames} over 10 s',
+    );
     expect(after.renderedFrames, before.renderedFrames);
   });
 
@@ -383,8 +434,9 @@ void main() {
 
   // Selecting a display buffer as the target before each render made the map
   // render without end before maplibre-native-ffi#807 (design D20).
-  testWidgets('idle copy-free map renders no frames for 10 seconds',
-      (tester) async {
+  testWidgets('idle copy-free map renders no frames for 10 seconds', (
+    tester,
+  ) async {
     final controller = await showMap(tester, copyFree: true);
     final idle = waitFor<MapIdle>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
@@ -392,8 +444,10 @@ void main() {
     final before = controller.stats();
     await Future<void>.delayed(const Duration(seconds: 10));
     final after = controller.stats();
-    debugPrint('idle copy-free: rendered ${before.renderedFrames} -> '
-        '${after.renderedFrames} over 10 s');
+    debugPrint(
+      'idle copy-free: rendered ${before.renderedFrames} -> '
+      '${after.renderedFrames} over 10 s',
+    );
     expect(after.renderedFrames, before.renderedFrames);
   });
 
@@ -415,8 +469,9 @@ void main() {
     }
   });
 
-  testWidgets('idle map with the copy renders no frames for 10 seconds',
-      (tester) async {
+  testWidgets('idle map with the copy renders no frames for 10 seconds', (
+    tester,
+  ) async {
     final controller = await showMap(tester, copyFree: false);
     final idle = waitFor<MapIdle>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
@@ -424,16 +479,19 @@ void main() {
     final before = controller.stats();
     await Future<void>.delayed(const Duration(seconds: 10));
     final after = controller.stats();
-    debugPrint('idle with copy: rendered ${before.renderedFrames} -> '
-        '${after.renderedFrames} over 10 s');
+    debugPrint(
+      'idle with copy: rendered ${before.renderedFrames} -> '
+      '${after.renderedFrames} over 10 s',
+    );
     expect(after.renderedFrames, before.renderedFrames);
   });
 
   // The lifecycle tests use the test hooks, which call the same native
   // functions as the iOS background, foreground and memory warning handlers
   // (design D15).
-  testWidgets('no rendering while paused; resume shows the latest camera',
-      (tester) async {
+  testWidgets('no rendering while paused; resume shows the latest camera', (
+    tester,
+  ) async {
     addTearDown(() => setRenderingPausedForTesting(false));
     final controller = await showMap(tester);
     final idle = waitFor<MapIdle>(controller.events, (_) => true);
@@ -452,7 +510,8 @@ void main() {
     var i = 0;
     while (stopwatch.elapsed < const Duration(seconds: 2)) {
       controller.setCamera(
-          MapCamera(latitude: 0, longitude: -20 + i * 0.05, zoom: 3));
+        MapCamera(latitude: 0, longitude: -20 + i * 0.05, zoom: 3),
+      );
       i++;
       await Future<void>.delayed(const Duration(milliseconds: 8));
     }
@@ -462,17 +521,20 @@ void main() {
     final whilePaused = controller.stats();
 
     final frame = waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            near(f.camera.latitude, last.latitude) &&
-            near(f.camera.longitude, last.longitude) &&
-            near(f.camera.zoom, last.zoom));
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, last.latitude) &&
+          near(f.camera.longitude, last.longitude) &&
+          near(f.camera.zoom, last.zoom),
+    );
     setRenderingPausedForTesting(false);
     await frame;
     await sub.cancel();
-    debugPrint('paused: sent $i cameras; rendered '
-        '${paused.renderedFrames} -> ${whilePaused.renderedFrames} while '
-        'paused; ${controller.stats()}');
+    debugPrint(
+      'paused: sent $i cameras; rendered '
+      '${paused.renderedFrames} -> ${whilePaused.renderedFrames} while '
+      'paused; ${controller.stats()}',
+    );
 
     expect(whilePaused.renderedFrames, paused.renderedFrames);
     expect(whilePaused.renderUpdateCount, paused.renderUpdateCount);
@@ -480,8 +542,9 @@ void main() {
     expect(errors, isEmpty);
   });
 
-  testWidgets('a map created while paused renders after resume',
-      (tester) async {
+  testWidgets('a map created while paused renders after resume', (
+    tester,
+  ) async {
     addTearDown(() => setRenderingPausedForTesting(false));
     setRenderingPausedForTesting(true);
     final controller = await showMap(tester);
@@ -536,10 +599,11 @@ void main() {
     reduceMemoryUseForTesting();
     const camera = MapCamera(latitude: 30, longitude: -40, zoom: 3);
     final frame = waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            near(f.camera.latitude, camera.latitude) &&
-            near(f.camera.longitude, camera.longitude));
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, camera.latitude) &&
+          near(f.camera.longitude, camera.longitude),
+    );
     controller.setCamera(camera);
     await frame;
     await sub.cancel();
@@ -550,8 +614,9 @@ void main() {
   // The plugin releases the image reader when the activity stops and creates
   // one when the activity starts (design D137). The test hook makes it do both
   // while the activity runs.
-  testWidgets('surface removal and restore keep the map and its style',
-      (tester) async {
+  testWidgets('surface removal and restore keep the map and its style', (
+    tester,
+  ) async {
     if (!Platform.isAndroid) {
       markTestSkipped('the plugin releases surfaces only on Android');
       return;
@@ -578,29 +643,36 @@ void main() {
     final whileRemoved = controller.stats();
 
     final frame = waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            near(f.camera.latitude, camera.latitude) &&
-            near(f.camera.longitude, camera.longitude) &&
-            near(f.camera.zoom, camera.zoom));
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, camera.latitude) &&
+          near(f.camera.longitude, camera.longitude) &&
+          near(f.camera.zoom, camera.zoom),
+    );
     trimSurfacesForTesting(restore: true);
     await frame;
     await Future<void>.delayed(const Duration(milliseconds: 200));
     await sub.cancel();
-    debugPrint('surface removed: rendered ${removed.renderedFrames} -> '
-        '${whileRemoved.renderedFrames}; events after removal $events');
+    debugPrint(
+      'surface removed: rendered ${removed.renderedFrames} -> '
+      '${whileRemoved.renderedFrames}; events after removal $events',
+    );
 
     expect(whileRemoved.renderedFrames, removed.renderedFrames);
     expect(events.whereType<RenderError>(), isEmpty);
-    expect(events.whereType<StyleLoaded>(), isEmpty,
-        reason: 'the style must not load again');
+    expect(
+      events.whereType<StyleLoaded>(),
+      isEmpty,
+      reason: 'the style must not load again',
+    );
   });
 
   // The maximum cache size is process-wide, so these tests set the default
   // again when they end. They set values above 50 MiB so that they don't
   // evict the resources that the other tests use.
-  testWidgets('a map with a maximum cache size loads its style',
-      (tester) async {
+  testWidgets('a map with a maximum cache size loads its style', (
+    tester,
+  ) async {
     addTearDown(() => MapigradeLayer.maximumCacheSizeBytes = 50 << 20);
     MapigradeLayer.maximumCacheSizeBytes = 100 << 20;
     final controller = await showMap(tester);
@@ -626,17 +698,29 @@ void main() {
 
     MapigradeLayer.maximumCacheSizeBytes = 80 << 20;
     final second = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(second);
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Row(children: [
-        SizedBox(
-            width: 200, height: 300, child: MapTextureView(controller: first)),
-        SizedBox(
-            width: 200, height: 300, child: MapTextureView(controller: second)),
-      ]),
-    ));
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 200,
+              height: 300,
+              child: MapTextureView(controller: first),
+            ),
+            SizedBox(
+              width: 200,
+              height: 300,
+              child: MapTextureView(controller: second),
+            ),
+          ],
+        ),
+      ),
+    );
     final errors = <RenderError>[];
     final subs = [
       for (final c in [first, second])
@@ -659,22 +743,27 @@ void main() {
 
   testWidgets('resizing on every frame for 10 seconds', (tester) async {
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(controller);
     final size = ValueNotifier(const Size(400, 300));
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: ValueListenableBuilder<Size>(
-          valueListenable: size,
-          builder: (context, s, _) => SizedBox(
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: ValueListenableBuilder<Size>(
+            valueListenable: size,
+            builder: (context, s, _) => SizedBox(
               width: s.width,
               height: s.height,
-              child: MapTextureView(controller: controller)),
+              child: MapTextureView(controller: controller),
+            ),
+          ),
         ),
       ),
-    ));
+    );
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
@@ -693,8 +782,9 @@ void main() {
       // Sizes between minSize and maxSize, changing every frame.
       final t = (i % 120) / 120;
       size.value = Size(
-          minSize.width + (maxSize.width - minSize.width) * t,
-          minSize.height + (maxSize.height - minSize.height) * (1 - t));
+        minSize.width + (maxSize.width - minSize.width) * t,
+        minSize.height + (maxSize.height - minSize.height) * (1 - t),
+      );
       i++;
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 8));
@@ -705,8 +795,10 @@ void main() {
     // The core rounds the physical size to whole pixels; with a device pixel
     // ratio such as 2.625 (Android) whole logical pixels don't give whole
     // physical pixels.
-    final finalSize = Size((view.width * 0.8).floorToDouble(),
-        (view.height * 0.6).floorToDouble());
+    final finalSize = Size(
+      (view.width * 0.8).floorToDouble(),
+      (view.height * 0.6).floorToDouble(),
+    );
     size.value = finalSize;
     FrameCamera? lastFrame;
     final lastFrames = controller.frames.listen((f) => lastFrame = f);
@@ -714,24 +806,28 @@ void main() {
     final FrameCamera frame;
     try {
       frame = await waitFor<FrameCamera>(
-          controller.frames,
-          (f) =>
-              f.physicalSize.width == (finalSize.width * ratio).roundToDouble() &&
-              f.physicalSize.height ==
-                  (finalSize.height * ratio).roundToDouble());
+        controller.frames,
+        (f) =>
+            f.physicalSize.width == (finalSize.width * ratio).roundToDouble() &&
+            f.physicalSize.height == (finalSize.height * ratio).roundToDouble(),
+      );
     } on TimeoutException {
-      debugPrint('resize: no frame of ${finalSize * ratio} (rounded); last frame '
-          '$lastFrame; ${controller.stats()}');
+      debugPrint(
+        'resize: no frame of ${finalSize * ratio} (rounded); last frame '
+        '$lastFrame; ${controller.stats()}',
+      );
       rethrow;
     } finally {
       await lastFrames.cancel();
     }
     await Future<void>.delayed(const Duration(seconds: 1));
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
-    debugPrint('resize: $i sizes, final frame $frame; ${controller.stats()}; '
-        'memory footprint ${mib(footprintBefore)} MiB before, '
-        '${mib(footprintMax)} MiB max during, '
-        '${mib(memoryFootprintForTesting())} MiB after');
+    debugPrint(
+      'resize: $i sizes, final frame $frame; ${controller.stats()}; '
+      'memory footprint ${mib(footprintBefore)} MiB before, '
+      '${mib(footprintMax)} MiB max during, '
+      '${mib(memoryFootprintForTesting())} MiB after',
+    );
     expect(frame.scaleFactor, ratio);
   });
 
@@ -739,28 +835,34 @@ void main() {
   // display buffer replaced by a resize stayed alive until the map was
   // disposed. Flutter's own texture cache keeps them during a burst of
   // resizes; the plugin makes it free them after the burst.
-  testWidgets('display buffers replaced by resizes are freed afterwards',
-      (tester) async {
+  testWidgets('display buffers replaced by resizes are freed afterwards', (
+    tester,
+  ) async {
     if (skipOnAndroid('the plugin owns no display buffers on Android')) {
       return;
     }
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(controller);
     final size = ValueNotifier(const Size(200, 200));
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: ValueListenableBuilder<Size>(
-          valueListenable: size,
-          builder: (context, s, _) => SizedBox(
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: ValueListenableBuilder<Size>(
+            valueListenable: size,
+            builder: (context, s, _) => SizedBox(
               width: s.width,
               height: s.height,
-              child: MapTextureView(controller: controller)),
+              child: MapTextureView(controller: controller),
+            ),
+          ),
         ),
       ),
-    ));
+    );
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
@@ -768,21 +870,26 @@ void main() {
     final view = tester.view.physicalSize / tester.view.devicePixelRatio;
     for (var i = 0; i < 120; i++) {
       final t = i / 120;
-      size.value = Size(view.width * (0.3 + 0.6 * t),
-          view.height * (0.2 + 0.5 * (1 - t)));
+      size.value = Size(
+        view.width * (0.3 + 0.6 * t),
+        view.height * (0.2 + 0.5 * (1 - t)),
+      );
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
     await Future<void>.delayed(const Duration(milliseconds: 2500));
     final r = releasedBuffersForTesting();
-    debugPrint('released buffers: ${r.alive} of ${r.released} alive '
-        '2.5 s after the last resize');
+    debugPrint(
+      'released buffers: ${r.alive} of ${r.released} alive '
+      '2.5 s after the last resize',
+    );
     expect(r.released, greaterThan(100));
     expect(r.alive, lessThanOrEqualTo(r.released ~/ 4));
   });
 
-  testWidgets('example shows a style load failure and keeps running',
-      (tester) async {
+  testWidgets('example shows a style load failure and keeps running', (
+    tester,
+  ) async {
     await tester.pumpWidget(const MaterialApp(home: app.MapScreen()));
     // The screen creates its map asynchronously (design D155 of the
     // multiple-flutter-engines change).
@@ -877,17 +984,19 @@ void main() {
         .listen(errors.add);
     for (var i = 0; i < 600; i++) {
       controller.setCamera(
-          MapCamera(latitude: 0, longitude: -10 + i * 0.01, zoom: 3));
+        MapCamera(latitude: 0, longitude: -10 + i * 0.01, zoom: 3),
+      );
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
     // A map that ran out of images would never display this camera.
     const last = MapCamera(latitude: 5, longitude: 5, zoom: 3);
     final shown = waitFor<FrameCamera>(
-        controller.frames,
-        (f) =>
-            near(f.camera.latitude, last.latitude) &&
-            near(f.camera.longitude, last.longitude));
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, last.latitude) &&
+          near(f.camera.longitude, last.longitude),
+    );
     controller.setCamera(last);
     await shown;
     await sub.cancel();
@@ -899,25 +1008,33 @@ void main() {
 
   testWidgets('a selected frame is displayed', (tester) async {
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(controller);
     final log = <_SlotEntry>[];
-    final displayed = controller.frames
-        .listen((f) => log.add(_SlotEntry(selected: false, frame: f)));
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Center(
-        child: SizedBox(
+    final displayed = controller.frames.listen(
+      (f) => log.add(_SlotEntry(selected: false, frame: f)),
+    );
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
             width: 400,
             height: 300,
-            child: _SelectingView(controller: controller, log: log)),
+            child: _SelectingView(controller: controller, log: log),
+          ),
+        ),
       ),
-    ));
+    );
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
     for (var i = 0; i < 30; i++) {
-      controller.setCamera(MapCamera(latitude: 10, longitude: i * 0.2, zoom: 4));
+      controller.setCamera(
+        MapCamera(latitude: 10, longitude: i * 0.2, zoom: 4),
+      );
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
@@ -925,9 +1042,11 @@ void main() {
     // frames; wait until the frame chosen last has been displayed.
     bool lastSelectedDisplayed() {
       final selected = log.lastWhere((e) => e.selected);
-      return log.any((e) =>
-          !e.selected && e.frame.frameId == selected.frame.frameId);
+      return log.any(
+        (e) => !e.selected && e.frame.frameId == selected.frame.frameId,
+      );
     }
+
     final settle = Stopwatch()..start();
     do {
       await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -942,12 +1061,17 @@ void main() {
       for (final e in log)
         if (!e.selected) e.frame,
     ];
-    debugPrint('select: ${selectedIds.length} frames selected, '
-        '${displayedFrames.length} displayed; ${controller.stats()}');
+    debugPrint(
+      'select: ${selectedIds.length} frames selected, '
+      '${displayedFrames.length} displayed; ${controller.stats()}',
+    );
     expect(displayedFrames, isNotEmpty);
     for (final frame in displayedFrames) {
-      expect(selectedIds, contains(frame.frameId),
-          reason: 'displayed $frame was never selected');
+      expect(
+        selectedIds,
+        contains(frame.frameId),
+        reason: 'displayed $frame was never selected',
+      );
     }
     // The frame selected last is the frame displayed last.
     final lastSelected = log.lastWhere((e) => e.selected).frame;
@@ -959,29 +1083,36 @@ void main() {
   // Design D126: during a resize the texture keeps showing the frame Dart
   // chose last, until Dart chooses a frame of the new size. On Android the
   // image texture keeps the image Dart chose last (design D136).
-  testWidgets('resize keeps the selected frame until a new-size selection',
-      (tester) async {
+  testWidgets('resize keeps the selected frame until a new-size selection', (
+    tester,
+  ) async {
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     controllers.add(controller);
     final log = <_SlotEntry>[];
-    final displayed = controller.frames
-        .listen((f) => log.add(_SlotEntry(selected: false, frame: f)));
+    final displayed = controller.frames.listen(
+      (f) => log.add(_SlotEntry(selected: false, frame: f)),
+    );
     // Widths up to 400 fit every screen the tests run on.
     final size = ValueNotifier(const Size(200, 300));
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: ValueListenableBuilder<Size>(
-          valueListenable: size,
-          builder: (context, s, _) => SizedBox(
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: ValueListenableBuilder<Size>(
+            valueListenable: size,
+            builder: (context, s, _) => SizedBox(
               width: s.width,
               height: s.height,
-              child: _SelectingView(controller: controller, log: log)),
+              child: _SelectingView(controller: controller, log: log),
+            ),
+          ),
         ),
       ),
-    ));
+    );
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
     controller.loadStyleUrl(demoStyleUrl);
     await loaded;
@@ -990,24 +1121,33 @@ void main() {
       final oldWidth = (size.value.width * ratio).roundToDouble();
       if (controller.displayedFrame?.physicalSize.width != oldWidth) {
         await waitFor<FrameCamera>(
-            controller.frames, (f) => f.physicalSize.width == oldWidth);
+          controller.frames,
+          (f) => f.physicalSize.width == oldWidth,
+        );
       }
       final start = log.length;
       size.value = Size(size.value.width + 40, 300);
       final newWidth = (size.value.width * ratio).roundToDouble();
       final newFrame = waitFor<FrameCamera>(
-          controller.frames, (f) => f.physicalSize.width == newWidth);
+        controller.frames,
+        (f) => f.physicalSize.width == newWidth,
+      );
       await tester.pump();
       await newFrame;
       final entries = log.sublist(start);
       final firstNew = entries.indexWhere(
-          (e) => e.selected && e.frame.physicalSize.width == newWidth);
+        (e) => e.selected && e.frame.physicalSize.width == newWidth,
+      );
       expect(firstNew, greaterThanOrEqualTo(0));
       for (final e in entries.take(firstNew)) {
         if (e.selected) continue;
-        expect(e.frame.physicalSize.width, oldWidth,
-            reason: 'round $round: displayed ${e.frame} before the first '
-                'selection of a ${newWidth}px frame');
+        expect(
+          e.frame.physicalSize.width,
+          oldWidth,
+          reason:
+              'round $round: displayed ${e.frame} before the first '
+              'selection of a ${newWidth}px frame',
+        );
       }
     }
     await displayed.cancel();
@@ -1058,7 +1198,9 @@ class _SelectingViewState extends State<_SelectingView> {
       widget.log.add(_SlotEntry(selected: true, frame: chosen));
     }
     return MapTextureView(
-        controller: controller, slot: controller.selectedFrame?.slot ?? 0);
+      controller: controller,
+      slot: controller.selectedFrame?.slot ?? 0,
+    );
   }
 }
 
@@ -1080,5 +1222,8 @@ List<String> _threadNames() {
 /// The elements of [a] that [b] doesn't have, counting repeated names.
 List<String> _subtract(List<String> a, List<String> b) {
   final rest = [...b];
-  return [for (final name in a) if (!rest.remove(name)) name];
+  return [
+    for (final name in a)
+      if (!rest.remove(name)) name,
+  ];
 }

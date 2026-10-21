@@ -26,19 +26,24 @@ class MapStyle {
 }
 
 const styles = [
-  MapStyle('OpenFreeMap Liberty', 'https://tiles.openfreemap.org/styles/liberty'),
+  MapStyle(
+    'OpenFreeMap Liberty',
+    'https://tiles.openfreemap.org/styles/liberty',
+  ),
   MapStyle('MapLibre demo tiles', 'https://demotiles.maplibre.org/style.json'),
   MapStyle('Invalid URL', 'https://invalid.example.invalid/style.json'),
 ];
 
-void main() => runApp(MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: alignmentBenchmarkEnabled
-          ? const AlignmentBenchmarkPage()
-          : flutterMapPageAtLaunch
-              ? FlutterMapPage(styleUrl: styles.first.url)
-              : const MapScreen(),
-    ));
+void main() => runApp(
+  MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: alignmentBenchmarkEnabled
+        ? const AlignmentBenchmarkPage()
+        : flutterMapPageAtLaunch
+        ? FlutterMapPage(styleUrl: styles.first.url)
+        : const MapScreen(),
+  ),
+);
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -54,8 +59,11 @@ class _MapScreenState extends State<MapScreen>
   final _subscriptions = <StreamSubscription<Object>>[];
   late final Ticker _panTicker = createTicker(_onPanTick);
 
-  MapCamera _camera =
-      const MapCamera(latitude: 37.7749, longitude: -122.4194, zoom: 12);
+  MapCamera _camera = const MapCamera(
+    latitude: 37.7749,
+    longitude: -122.4194,
+    zoom: 12,
+  );
   int _styleIndex = 0;
   String _status = 'loading style';
   String? _error;
@@ -94,7 +102,9 @@ class _MapScreenState extends State<MapScreen>
 
   Future<void> _create(double pixelRatio) async {
     final controller = await MapTextureController.create(
-        pixelRatio: pixelRatio, copyFree: copyFree);
+      pixelRatio: pixelRatio,
+      copyFree: copyFree,
+    );
     if (!mounted) {
       controller.dispose();
       return;
@@ -107,16 +117,22 @@ class _MapScreenState extends State<MapScreen>
     setState(() => _controller = controller);
     if (continuousPanAtLaunch && !benchmarkEnabled) _panTicker.start();
     if (benchmarkEnabled) {
-      Benchmark(controller, onCamera: (camera) {
-        _camera = camera;
-        controller.setCamera(camera);
-      }).run();
+      Benchmark(
+        controller,
+        onCamera: (camera) {
+          _camera = camera;
+          controller.setCamera(camera);
+        },
+      ).run();
     }
     if (timingProbeEnabled) {
-      TimingProbe(controller, onCamera: (camera) {
-        _camera = camera;
-        controller.setCamera(camera);
-      }).run();
+      TimingProbe(
+        controller,
+        onCamera: (camera) {
+          _camera = camera;
+          controller.setCamera(camera);
+        },
+      ).run();
     }
     _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() {
@@ -161,8 +177,10 @@ class _MapScreenState extends State<MapScreen>
     // On standard output, which reaches the console in release builds too
     // (for example through devicectl --console), unlike debugPrint on iOS.
     if (frame.physicalSize != _frame?.physicalSize) {
-      stdout.writeln('frame size: ${frame.physicalSize.width.toInt()}x'
-          '${frame.physicalSize.height.toInt()} @${frame.scaleFactor}');
+      stdout.writeln(
+        'frame size: ${frame.physicalSize.width.toInt()}x'
+        '${frame.physicalSize.height.toInt()} @${frame.scaleFactor}',
+      );
     }
     _framesInLastSecond++;
     _frame = frame;
@@ -174,17 +192,23 @@ class _MapScreenState extends State<MapScreen>
     setState(() {});
   }
 
-  void _zoom(double delta) => _setCamera(MapCamera(
+  void _zoom(double delta) => _setCamera(
+    MapCamera(
       latitude: _camera.latitude,
       longitude: _camera.longitude,
       zoom: (_camera.zoom + delta).clamp(0, 22),
-      bearing: _camera.bearing));
+      bearing: _camera.bearing,
+    ),
+  );
 
-  void _rotate(double delta) => _setCamera(MapCamera(
+  void _rotate(double delta) => _setCamera(
+    MapCamera(
       latitude: _camera.latitude,
       longitude: _camera.longitude,
       zoom: _camera.zoom,
-      bearing: (_camera.bearing + delta) % 360));
+      bearing: (_camera.bearing + delta) % 360,
+    ),
+  );
 
   /// Pans by a fraction of the viewport in screen directions.
   void _pan(double dx, double dy) {
@@ -192,26 +216,34 @@ class _MapScreenState extends State<MapScreen>
     final b = _camera.bearing * math.pi / 180;
     final east = dx * math.cos(b) + dy * math.sin(b);
     final north = -(-dx * math.sin(b) + dy * math.cos(b));
-    _setCamera(MapCamera(
-        latitude: (_camera.latitude + north * degreesPerViewport * 0.5)
-            .clamp(-85, 85),
+    _setCamera(
+      MapCamera(
+        latitude: (_camera.latitude + north * degreesPerViewport * 0.5).clamp(
+          -85,
+          85,
+        ),
         longitude: _camera.longitude + east * degreesPerViewport,
         zoom: _camera.zoom,
-        bearing: _camera.bearing));
+        bearing: _camera.bearing,
+      ),
+    );
   }
 
   Duration? _lastTick;
 
   /// Changes the camera on every Flutter frame.
   void _onPanTick(Duration elapsed) {
-    final dt = _lastTick == null ? 0.0 : (elapsed - _lastTick!).inMicroseconds / 1e6;
+    final dt = _lastTick == null
+        ? 0.0
+        : (elapsed - _lastTick!).inMicroseconds / 1e6;
     _lastTick = elapsed;
     final degreesPerSecond = 0.2 * 360 / math.pow(2, _camera.zoom);
     _camera = MapCamera(
-        latitude: _camera.latitude,
-        longitude: _camera.longitude + degreesPerSecond * dt,
-        zoom: _camera.zoom,
-        bearing: _camera.bearing);
+      latitude: _camera.latitude,
+      longitude: _camera.longitude + degreesPerSecond * dt,
+      zoom: _camera.zoom,
+      bearing: _camera.bearing,
+    );
     _controller?.setCamera(_camera);
   }
 
@@ -238,17 +270,19 @@ class _MapScreenState extends State<MapScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(children: [
-        if (_controller case final controller?)
-          Positioned.fill(child: MapTextureView(controller: controller)),
-        // SafeArea keeps the panel clear of the iPhone status bar and
-        // Dynamic Island; on macOS the insets are zero.
-        Positioned(
-          top: 12,
-          left: 12,
-          child: SafeArea(child: _buildPanel(context)),
-        ),
-      ]),
+      body: Stack(
+        children: [
+          if (_controller case final controller?)
+            Positioned.fill(child: MapTextureView(controller: controller)),
+          // SafeArea keeps the panel clear of the iPhone status bar and
+          // Dynamic Island; on macOS the insets are zero.
+          Positioned(
+            top: 12,
+            left: 12,
+            child: SafeArea(child: _buildPanel(context)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -275,23 +309,48 @@ class _MapScreenState extends State<MapScreen>
                 ],
                 onChanged: (i) => _selectStyle(i!),
               ),
-              Wrap(spacing: 4, children: [
-                _button('zoom-in', Icons.add, () => _zoom(1)),
-                _button('zoom-out', Icons.remove, () => _zoom(-1)),
-                _button('rotate-left', Icons.rotate_left, () => _rotate(-15)),
-                _button('rotate-right', Icons.rotate_right, () => _rotate(15)),
-                _button('open-flutter-map', Icons.layers, _openFlutterMapPage),
-              ]),
-              Wrap(spacing: 4, children: [
-                _button('pan-west', Icons.arrow_back, () => _pan(-0.25, 0)),
-                _button('pan-north', Icons.arrow_upward, () => _pan(0, -0.25)),
-                _button('pan-south', Icons.arrow_downward, () => _pan(0, 0.25)),
-                _button('pan-east', Icons.arrow_forward, () => _pan(0.25, 0)),
-                // Shows the license registry, including the FFI's notices
-                // (task 4.2 of the third-party-notices change).
-                _button('open-licenses', Icons.description,
-                    () => showLicensePage(context: context)),
-              ]),
+              Wrap(
+                spacing: 4,
+                children: [
+                  _button('zoom-in', Icons.add, () => _zoom(1)),
+                  _button('zoom-out', Icons.remove, () => _zoom(-1)),
+                  _button('rotate-left', Icons.rotate_left, () => _rotate(-15)),
+                  _button(
+                    'rotate-right',
+                    Icons.rotate_right,
+                    () => _rotate(15),
+                  ),
+                  _button(
+                    'open-flutter-map',
+                    Icons.layers,
+                    _openFlutterMapPage,
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 4,
+                children: [
+                  _button('pan-west', Icons.arrow_back, () => _pan(-0.25, 0)),
+                  _button(
+                    'pan-north',
+                    Icons.arrow_upward,
+                    () => _pan(0, -0.25),
+                  ),
+                  _button(
+                    'pan-south',
+                    Icons.arrow_downward,
+                    () => _pan(0, 0.25),
+                  ),
+                  _button('pan-east', Icons.arrow_forward, () => _pan(0.25, 0)),
+                  // Shows the license registry, including the FFI's notices
+                  // (task 4.2 of the third-party-notices change).
+                  _button(
+                    'open-licenses',
+                    Icons.description,
+                    () => showLicensePage(context: context),
+                  ),
+                ],
+              ),
               SwitchListTile(
                 key: const Key('continuous-pan'),
                 contentPadding: EdgeInsets.zero,
@@ -302,13 +361,17 @@ class _MapScreenState extends State<MapScreen>
               ),
               Text('Status: $_status', key: const Key('status')),
               if (_error != null)
-                Text('Error: $_error',
-                    key: const Key('error'),
-                    style: const TextStyle(color: Colors.red)),
+                Text(
+                  'Error: $_error',
+                  key: const Key('error'),
+                  style: const TextStyle(color: Colors.red),
+                ),
               Text('Requested: ${_fmt(_camera)}'),
-              Text(frame == null
-                  ? 'Displayed: -'
-                  : 'Displayed #${frame.frameId}: ${_fmt(frame.camera)}'),
+              Text(
+                frame == null
+                    ? 'Displayed: -'
+                    : 'Displayed #${frame.frameId}: ${_fmt(frame.camera)}',
+              ),
               Text('Map frames/s: $_mapFps'),
             ],
           ),
@@ -318,13 +381,18 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _openFlutterMapPage() => Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-          builder: (_) => FlutterMapPage(styleUrl: styles[_styleIndex].url)));
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => FlutterMapPage(styleUrl: styles[_styleIndex].url),
+    ),
+  );
 
   Widget _button(String key, IconData icon, VoidCallback onPressed) =>
       IconButton.filledTonal(
-          key: Key(key), icon: Icon(icon), onPressed: onPressed);
+        key: Key(key),
+        icon: Icon(icon),
+        onPressed: onPressed,
+      );
 
   static String _fmt(MapCamera c) =>
       '${c.latitude.toStringAsFixed(4)}, ${c.longitude.toStringAsFixed(4)} '

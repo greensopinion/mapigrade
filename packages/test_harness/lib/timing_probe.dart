@@ -43,8 +43,10 @@ class TimingProbe {
   Future<void> run() async {
     if (Platform.isAndroid) {
       // Android reports no display times (design D58).
-      writeLine('timing probe: needs display times, which Android does not '
-          'report; exiting');
+      writeLine(
+        'timing probe: needs display times, which Android does not '
+        'report; exiting',
+      );
       exit(1);
     }
     controller.frames.listen((f) {
@@ -83,12 +85,14 @@ class TimingProbe {
     void tick(Duration timestamp) {
       first ??= timestamp;
       final elapsed = timestamp - first!;
-      onCamera(MapCamera(
-        latitude: start.latitude,
-        longitude: start.longitude +
-            degreesPerSecond * elapsed.inMicroseconds / 1e6,
-        zoom: start.zoom,
-      ));
+      onCamera(
+        MapCamera(
+          latitude: start.latitude,
+          longitude:
+              start.longitude + degreesPerSecond * elapsed.inMicroseconds / 1e6,
+          zoom: start.zoom,
+        ),
+      );
       if (elapsed < probeDuration) {
         SchedulerBinding.instance.scheduleFrameCallback(tick);
       } else {
@@ -164,8 +168,9 @@ class TimingProbe {
       numberHistogram['${matches.length}'] =
           (numberHistogram['${matches.length}'] ?? 0) + 1;
       if (matches.length == 1) {
-        targetMinusStart
-            .add(_buildVsyncs[i] - at(matches.single, FramePhase.vsyncStart));
+        targetMinusStart.add(
+          _buildVsyncs[i] - at(matches.single, FramePhase.vsyncStart),
+        );
       }
     }
     targetMinusStart.sort();
@@ -173,8 +178,10 @@ class TimingProbe {
 
     List<int> sample(List<int> sorted) => sorted.isEmpty
         ? const []
-        : [for (final q in [0.0, 0.1, 0.5, 0.9, 1.0])
-            sorted[((sorted.length - 1) * q).round()]];
+        : [
+            for (final q in [0.0, 0.1, 0.5, 0.9, 1.0])
+              sorted[((sorted.length - 1) * q).round()],
+          ];
 
     return {
       'platform': Platform.operatingSystem,
@@ -186,19 +193,23 @@ class TimingProbe {
       'frame_timings': _timings.length,
       'builds': _buildVsyncs.length,
       'build_matches': matchHistogram,
-      'unmatched_build_nearest_diff_us_min_p10_p50_p90_max':
-          sample(nearestDiffs),
+      'unmatched_build_nearest_diff_us_min_p10_p50_p90_max': sample(
+        nearestDiffs,
+      ),
       'frame_timings_without_build': vsyncCounts.keys
           .where((v) => !buildSet.contains(v))
           .length,
       'build_frame_number_matches': numberHistogram,
-      'frame_timings_without_build_by_number':
-          timingsByNumber.keys.where((n) => !buildNumberSet.contains(n)).length,
-      'build_vsync_minus_timing_vsync_us_min_p10_p50_p90_max':
-          sample(targetMinusStart),
+      'frame_timings_without_build_by_number': timingsByNumber.keys
+          .where((n) => !buildNumberSet.contains(n))
+          .length,
+      'build_vsync_minus_timing_vsync_us_min_p10_p50_p90_max': sample(
+        targetMinusStart,
+      ),
       'example_build_vsync_us': _buildVsyncs.isEmpty ? 0 : _buildVsyncs.first,
-      'example_timing_vsync_us':
-          _timings.isEmpty ? 0 : at(_timings.first, FramePhase.vsyncStart),
+      'example_timing_vsync_us': _timings.isEmpty
+          ? 0
+          : at(_timings.first, FramePhase.vsyncStart),
       'example_display_us': _displayTimes.isEmpty ? 0 : _displayTimes.first,
     };
   }

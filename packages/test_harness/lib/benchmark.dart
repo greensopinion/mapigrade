@@ -143,9 +143,7 @@ class Benchmark {
   /// reports the displayed map frame rate and the thermal state for each
   /// [sustainedInterval].
   Future<void> _runSustained() async {
-    writeLine(
-      'benchmark: sustained pan for ${sustainedDuration.inSeconds} s',
-    );
+    writeLine('benchmark: sustained pan for ${sustainedDuration.inSeconds} s');
     final measureStart = _measureStart = _clock.elapsed;
     final thermal = [thermalStateForTesting()];
     final timer = Timer.periodic(

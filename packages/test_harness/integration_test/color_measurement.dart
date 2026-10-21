@@ -18,32 +18,36 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
-  testWidgets('map colors match Flutter swatches within 2/255',
-      (tester) async {
+  testWidgets('map colors match Flutter swatches within 2/255', (tester) async {
     final boundaryKey = GlobalKey();
-    await tester.pumpWidget(MaterialApp(
-        home: RepaintBoundary(key: boundaryKey, child: const ColorCheck(
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RepaintBoundary(
+          key: boundaryKey,
+          child: const ColorCheck(
             // `--dart-define=COPY=true` checks a map with the copy.
-            copyFree: !bool.fromEnvironment('COPY')))));
+            copyFree: !bool.fromEnvironment('COPY'),
+          ),
+        ),
+      ),
+    );
     // The style has no tiles to load; a few seconds cover loading and the
     // first frames.
     await Future<void>.delayed(const Duration(seconds: 3));
     await tester.pump();
 
-    final boundary = boundaryKey.currentContext!.findRenderObject()!
-        as RenderRepaintBoundary;
+    final boundary =
+        boundaryKey.currentContext!.findRenderObject()!
+            as RenderRepaintBoundary;
     final image = await boundary.toImage();
-    final bytes =
-        (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+    final bytes = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
     final width = image.width;
     final height = image.height;
     List<int> pixel(double fx, double fy) {
       final x = (width * fx).round();
       final y = (height * fy).round();
       final offset = (y * width + x) * 4;
-      return [
-        for (var c = 0; c < 3; c++) bytes.getUint8(offset + c),
-      ];
+      return [for (var c = 0; c < 3; c++) bytes.getUint8(offset + c)];
     }
 
     // The map fills the screen above a 100-logical-pixel swatch strip; its
@@ -57,14 +61,18 @@ void main() {
       'map background': pixel(0.75, mapCenterY),
       'swatch background': pixel(0.75, stripY),
     };
-    int maxDiff(List<int> a, List<int> b) => [
-          for (var c = 0; c < 3; c++) (a[c] - b[c]).abs(),
-        ].reduce((x, y) => x > y ? x : y);
+    int maxDiff(List<int> a, List<int> b) =>
+        [for (var c = 0; c < 3; c++) (a[c] - b[c]).abs()]
+            .reduce((x, y) => x > y ? x : y);
     final fillDiff = maxDiff(samples['map fill']!, samples['swatch fill']!);
-    final backgroundDiff =
-        maxDiff(samples['map background']!, samples['swatch background']!);
-    debugPrint('COLOR_RESULT ${image.width}x${image.height} $samples '
-        'fill diff $fillDiff, background diff $backgroundDiff');
+    final backgroundDiff = maxDiff(
+      samples['map background']!,
+      samples['swatch background']!,
+    );
+    debugPrint(
+      'COLOR_RESULT ${image.width}x${image.height} $samples '
+      'fill diff $fillDiff, background diff $backgroundDiff',
+    );
     expect(fillDiff, lessThanOrEqualTo(2));
     expect(backgroundDiff, lessThanOrEqualTo(2));
   });

@@ -31,7 +31,11 @@ class ExampleApp extends StatelessWidget {
                     width: 40,
                     height: 40,
                     alignment: Alignment.topCenter,
-                    child: Icon(Icons.location_pin, size: 40, color: Colors.red),
+                    child: Icon(
+                      Icons.location_pin,
+                      size: 40,
+                      color: Colors.red,
+                    ),
                   ),
                 ],
               ),

@@ -25,10 +25,13 @@ void main() {
   // `--dart-define=COPY=true` measures maps with the copy.
   const copyFree = !bool.fromEnvironment('COPY');
 
-  testWidgets('memory footprint before and after a memory reduction',
-      (tester) async {
+  testWidgets('memory footprint before and after a memory reduction', (
+    tester,
+  ) async {
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     addTearDown(controller.dispose);
     await tester.pumpWidget(MapTextureView(controller: controller));
 
@@ -42,14 +45,18 @@ void main() {
     var loaded = idle();
     controller.loadStyleUrl(libertyStyleUrl);
     controller.setCamera(
-        const MapCamera(latitude: 37.7749, longitude: -122.4194, zoom: 10));
+      const MapCamera(latitude: 37.7749, longitude: -122.4194, zoom: 10),
+    );
     await loaded;
     for (var zoom = 11; zoom <= 16; zoom++) {
       loaded = idle();
-      controller.setCamera(MapCamera(
+      controller.setCamera(
+        MapCamera(
           latitude: 37.7749,
           longitude: -122.4194 + (zoom - 10) * 0.01,
-          zoom: zoom.toDouble()));
+          zoom: zoom.toDouble(),
+        ),
+      );
       await loaded;
     }
     await Future<void>.delayed(const Duration(seconds: 2));
@@ -63,25 +70,18 @@ void main() {
     final after7s = memoryFootprintForTesting();
     final statsAfter = controller.stats();
 
-    debugPrint('MEMORY_RESULT ${jsonEncode({
-          'copy_free': copyFree,
-          'baseline_before_map_mib': mib(baseline),
-          'before_reduction_mib': mib(before),
-          'after_2s_mib': mib(after2s),
-          'after_7s_mib': mib(after7s),
-          'memory_reductions':
-              statsAfter.memoryReductions - statsBefore.memoryReductions,
-          'frames_rendered_after_reduction':
-              statsAfter.renderedFrames - statsBefore.renderedFrames,
-        })}');
+    debugPrint(
+      'MEMORY_RESULT ${jsonEncode({'copy_free': copyFree, 'baseline_before_map_mib': mib(baseline), 'before_reduction_mib': mib(before), 'after_2s_mib': mib(after2s), 'after_7s_mib': mib(after7s), 'memory_reductions': statsAfter.memoryReductions - statsBefore.memoryReductions, 'frames_rendered_after_reduction': statsAfter.renderedFrames - statsBefore.renderedFrames})}',
+    );
     expect(statsAfter.memoryReductions, statsBefore.memoryReductions + 1);
   });
 
   // Display buffers that stay alive after the plugin released them when the
   // map is resized repeatedly. Before the fixes, they stayed alive until the
   // map was disposed.
-  testWidgets('released buffers and memory footprint during resizing',
-      (tester) async {
+  testWidgets('released buffers and memory footprint during resizing', (
+    tester,
+  ) async {
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
     String phase(String name) {
       final r = releasedBuffersForTesting();
@@ -91,21 +91,26 @@ void main() {
     }
 
     final controller = await MapTextureController.create(
-        pixelRatio: tester.view.devicePixelRatio, copyFree: copyFree);
+      pixelRatio: tester.view.devicePixelRatio,
+      copyFree: copyFree,
+    );
     final size = ValueNotifier(const Size(200, 200));
-    await tester.pumpWidget(Directionality(
-      textDirection: TextDirection.ltr,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: ValueListenableBuilder<Size>(
-          valueListenable: size,
-          builder: (context, s, _) => SizedBox(
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: ValueListenableBuilder<Size>(
+            valueListenable: size,
+            builder: (context, s, _) => SizedBox(
               width: s.width,
               height: s.height,
-              child: MapTextureView(controller: controller)),
+              child: MapTextureView(controller: controller),
+            ),
+          ),
         ),
       ),
-    ));
+    );
     final loaded = controller.events.firstWhere((e) => e is StyleLoaded);
     controller.loadStyleUrl('https://demotiles.maplibre.org/style.json');
     await loaded;
@@ -115,8 +120,10 @@ void main() {
     final view = tester.view.physicalSize / tester.view.devicePixelRatio;
     for (var i = 0; i < 300; i++) {
       final t = (i % 120) / 120;
-      size.value = Size(view.width * (0.3 + 0.6 * t),
-          view.height * (0.2 + 0.5 * (1 - t)));
+      size.value = Size(
+        view.width * (0.3 + 0.6 * t),
+        view.height * (0.2 + 0.5 * (1 - t)),
+      );
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 16));
       if ((i + 1) % 60 == 0) lines.add(phase('after ${i + 1} resizes'));
