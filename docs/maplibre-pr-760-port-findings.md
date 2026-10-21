@@ -87,6 +87,11 @@ Lines of the native code on `main` (commit `d71c9bc`), in `packages/flutter_mapi
 | Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | |
 | Native tests | `test/native/*` | 2,371 | not built (D172) |
 
+## Build
+
+- `macos-arm64-metal` (task 2.1): `scripts/build_maplibre_ffi.sh` built #760 at `3b56ef916` without changes; only `MAPLIBRE_FFI_COMMIT` in `maplibre_ffi.lock` changed. #760 still has the presets, the `[vars]` of `mise.toml` and the scripts `.mise/bin/sync-submodules` and `sync-rustls-platform-verifier` that the script uses. The build took 148 s on top of an earlier build directory.
+- A defect of mapigrade's script, not of #760: the script reuses the FFI's install directory, so headers that #760 removed (`callback_adapter.h`, `diagnostics.h`) stayed in the framework. Deleting `third_party/maplibre-native-ffi-src/build/<preset>/install` before the build removes them. The real port should make the script delete the install directory.
+
 ## What broke
 
 Nothing yet.

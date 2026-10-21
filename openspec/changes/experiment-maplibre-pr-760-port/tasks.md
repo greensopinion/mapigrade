@@ -7,7 +7,7 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 
 ## 2. Build against #760
 
-- [ ] 2.1 Set `MAPLIBRE_FFI_COMMIT` to `3b56ef916` in `maplibre_ffi.lock` and build `macos-arm64-metal` with `scripts/build_maplibre_ffi.sh` (D166); verify that `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework` contains the macOS slice, and record any change that the script or the build needed
+- [x] 2.1 Set `MAPLIBRE_FFI_COMMIT` to `3b56ef916` in `maplibre_ffi.lock` and build `macos-arm64-metal` with `scripts/build_maplibre_ffi.sh` (D166); verify that `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework` contains the macOS slice, and record any change that the script or the build needed
 - [ ] 2.2 Build `android-arm64-egl` the same way; verify that the Android preset installs into `third_party/maplibre-native-ffi/android-arm64-egl/`, or record why it doesn't
 
 ## 3. macOS minimal port
