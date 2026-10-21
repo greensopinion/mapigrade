@@ -38,7 +38,7 @@ android {
     }
 
     // With -Pmapigrade.omitNativeLibrary=true, the APK lacks flutter_mapigrade's
-    // native library, as on a device without an arm64 ABI, for
+    // native library, as on a device with none of the package's ABIs, for
     // integration_test/unsupported_test.dart (design D88 of the
     // unsupported-architectures change).
     if (providers.gradleProperty("mapigrade.omitNativeLibrary").orNull == "true") {
