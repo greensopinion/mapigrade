@@ -29,9 +29,11 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 - [ ] 5.2 Verify that parking on the pbuffer and window replacement work by stopping and resuming the activity during a pan, and run `map_texture_test.dart` and `map_layer_test.dart` on the Pixel; record each failure that `main` doesn't have
 - [ ] 5.3 Run the frame-rate benchmark and the alignment benchmark on the Pixel, 3 runs each, at the baseline commit and on the branch; verify that the findings document compares them
 
-## 6. iOS (only if macOS shows something that depends on the device)
+## 6. iOS
 
-- [ ] 6.1 Build `ios-arm64-metal`, run the frame-rate benchmark on the iPhone at the baseline commit and on the branch, and record the results; verify that the findings document has them, or that it records why this section was skipped
+- [ ] 6.1 Build `ios-arm64-metal` and `ios-simulator-arm64-metal` (D166) and the test harness for the iPhone; verify that the xcframework has all three slices and that the test harness on the iPhone 15 Pro Max shows the map and reports frames with cameras
+- [ ] 6.2 Run the frame-rate benchmark and the alignment benchmark (`ALIGNMENT_CHILDREN=1`, the phases of task 1.2) on the iPhone, 3 runs each, alternating between the baseline commit (built in a worktree without the local FFI build, so that it uses the released FFI) and the branch, with auto-lock off, on cable power, and the thermal state recorded at the start and end of each run; verify that the findings document compares frame rate, frame cycle, alignment error, lag and camera-to-frame latency for both
+- [ ] 6.3 Run `map_texture_test.dart` and `map_layer_test.dart` on the iOS simulator; record each failure that the baseline commit doesn't have
 
 ## 7. Conclusions and feedback
 

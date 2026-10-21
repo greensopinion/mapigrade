@@ -112,8 +112,9 @@ The map thread records, for each `seq`, when `SetCamera` queued it and when the 
 The branch:
 - doesn't build or update the native tests in `test/native/`;
 - leaves the specs, the README and `docs/` other than the findings document unchanged;
-- doesn't keep the copy path (D3b) unless D168 fails;
-- ports iOS only if macOS shows something that depends on the device.
+- doesn't keep the copy path (D3b) unless D168 fails.
+
+iOS isn't a shortcut. It shares the Metal target with macOS, so it needs no port of its own, but phones are mapigrade's main platforms, and the iPhone's thermal limits and 120 Hz frame budget (a `render_update` of about 8.2 ms against an 8.3 ms refresh interval) show per-frame overhead that the Mac's headroom hides. The branch measures it on the iPhone as well as on the Pixel.
 
 For each shortcut, the findings document states what the real port would need.
 

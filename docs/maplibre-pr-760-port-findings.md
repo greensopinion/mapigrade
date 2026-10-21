@@ -74,7 +74,12 @@ Open. On `main`, Android switches the session's surface only when the window is 
 
 ## Q6. Lifecycle
 
-Open.
+Open; task 3.4 tests it. What the port showed so far:
+
+- Pausing (D13): the port keeps "no GPU work while paused" by not servicing the driver while paused; demands and target replacements wait in the session. This needs no #760 change.
+- Memory reduction while paused regresses. Before #760, `mln_render_session_reduce_memory_use` released cached tiles and images at once, also while paused, which is when iOS sends memory warnings. Under #760 it is driver work, so with a caller-graphics-thread driver it runs only when the map thread services the driver, which it doesn't do while paused. Servicing it anyway would also run any queued render. A way to run CPU-only driver work, such as cache release, without running GPU work would fix this; a core-worker session wouldn't have the problem.
+- Resize: before #760 `set_target` replaced the target at once. Under #760 it is an ordered operation, while mapigrade releases the previous buffer set in the same step (D126). The previous textures must stay valid until the replacement runs, so the port services the driver until the replacement's completion before it continues. A replacement that the host could apply synchronously on the graphics thread would avoid the wait loop.
+- Teardown: detach (servicing until its completion), then release the map and the runtime and wait for each completion, so that no completion or event callback reaches the map's object afterwards. Before #760 this was three synchronous destroy calls.
 
 ## Q7. Other API
 
