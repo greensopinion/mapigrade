@@ -39,7 +39,15 @@ class SurfaceRenderTarget;
 struct TargetSize {
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
-  mln_render_target_extent extent{};
+  mln_logical_extent extent{};
+};
+
+// The arguments that every asynchronous FFI call of a target takes
+// (maplibre-native-ffi PR #760): the completion, and the diagnostic of a
+// rejected call.
+struct AsyncCall {
+  const mln_completion* completion = nullptr;
+  mln_diagnostic* diagnostic = nullptr;
 };
 
 class RenderTarget {
@@ -60,13 +68,19 @@ class RenderTarget {
   // for the map thread. `size` is the size the map thread will apply.
   virtual void WillResize(const TargetSize& size) {}
 
-  // Map thread. Attaches a render session to `map`.
+  // Map thread. Starts the attachment of a render session to `map` with
+  // `options`; the map thread services the session until `call.completion`
+  // runs.
   virtual mln_status Attach(mln_map map, const TargetSize& size,
-                            mln_render_session* out_session) = 0;
+                            const mln_render_session_attach_options& options,
+                            mln_render_session* out_session,
+                            const AsyncCall& call) = 0;
 
-  // Map thread. Changes the session's target after a resize.
+  // Map thread. Starts the replacement of the session's target after a
+  // resize, ordered with the session's other driver work.
   virtual mln_status SetTarget(mln_render_session session,
-                               const TargetSize& size) = 0;
+                               const TargetSize& size,
+                               const AsyncCall& call) = 0;
 
   // The thread that disposes the map, after the map thread has stopped.
   // Unregisters the Flutter textures.
@@ -110,9 +124,12 @@ class BufferRenderTarget : public RenderTarget {
 
   // Whether the session renders directly into the display buffers (a
   // copy-free map, design D20). Then SelectBuffer() makes buffer `index` the
-  // session's target before each render, and no copy is needed.
+  // session's target before each render, and no copy is needed. Under #760
+  // this is an ordered replacement of a borrowed ring of one texture (design
+  // D168 of the experiment-maplibre-pr-760-port change).
   virtual bool RendersIntoBuffers() const { return false; }
-  virtual mln_status SelectBuffer(mln_render_session session, int index) {
+  virtual mln_status SelectBuffer(mln_render_session session, int index,
+                                  const AsyncCall& call) {
     return MLN_STATUS_OK;
   }
 

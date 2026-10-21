@@ -8,12 +8,12 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 ## 2. Build against #760
 
 - [x] 2.1 Set `MAPLIBRE_FFI_COMMIT` to `3b56ef916` in `maplibre_ffi.lock` and build `macos-arm64-metal` with `scripts/build_maplibre_ffi.sh` (D166); verify that `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework` contains the macOS slice, and record any change that the script or the build needed
-- [ ] 2.2 Build `android-arm64-egl` the same way; verify that the Android preset installs into `third_party/maplibre-native-ffi/android-arm64-egl/`, or record why it doesn't
+- [x] 2.2 Build `android-arm64-egl` the same way; verify that the Android preset installs into `third_party/maplibre-native-ffi/android-arm64-egl/`, or record why it doesn't
 
 ## 3. macOS minimal port
 
-- [ ] 3.1 Port runtime and map creation, teardown, style loading, HTTP header rules, the cache size and events in `src/core/map_texture.cpp` to #760, and replace `mln_runtime_pump` with a loop that waits on the command queue, signaled by `driver_work_wake` and `frame_wake` (D167); verify that the plugin builds for macOS with `flutter build macos` in `packages/test_harness`
-- [ ] 3.2 Port rendering to `request_frame`, `service_driver_work` and `drain_frame_results`, with the frame's camera from `result.view` and `seq` from the generation of each `update_camera` completion (D169); verify that the test harness on macOS shows the map and reports frames with cameras
+- [x] 3.1 Port runtime and map creation, teardown, style loading, HTTP header rules, the cache size and events in `src/core/map_texture.cpp` to #760, and replace `mln_runtime_pump` with a loop that waits on the command queue, signaled by `driver_work_wake` and `frame_wake` (D167); verify that the plugin builds for macOS with `flutter build macos` in `packages/test_harness`
+- [x] 3.2 Port rendering to `request_frame`, `service_driver_work` and `drain_frame_results`, with the frame's camera from `result.view` and `seq` from the generation of each `update_camera` completion (D169); verify that the test harness on macOS shows the map and reports frames with cameras
 - [ ] 3.3 Port the Metal target in `MapTextureMetal.mm` to a borrowed ring of one texture replaced before each render (D168); verify that the map renders into all 4 display slots during a pan, or record why it doesn't and try the alternatives of D168 in order
 - [ ] 3.4 Port pausing, resizing, memory reduction and engine detach (Q6); verify with `map_texture_test.dart`, `map_layer_test.dart` and `engines_test.dart` (with `flutter drive`) on macOS, and record each failure that `main` doesn't have
 - [ ] 3.5 Find a way to report glyph load failures per map (Q4); verify with the glyph failure scenario of `map_layer_test.dart`, or record that #760 offers no way

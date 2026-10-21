@@ -219,16 +219,27 @@ class MetalRenderTarget : public BufferRenderTarget {
     }
   }
 
+  // A borrowed ring of one texture (design D168 of the
+  // experiment-maplibre-pr-760-port change).
   mln_status Attach(mln_map map, const TargetSize& size,
-                    mln_render_session* out_session) override {
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size);
-    return mln_metal_borrowed_texture_attach(map, &descriptor, out_session);
+                    const mln_render_session_attach_options& options,
+                    mln_render_session* out_session,
+                    const AsyncCall& call) override {
+    mln_metal_borrowed_texture texture{};
+    mln_metal_borrowed_texture_descriptor descriptor =
+        Descriptor(size, &texture);
+    return mln_map_attach_metal_borrowed_texture(
+        map, &descriptor, &options, out_session, call.completion,
+        call.diagnostic);
   }
 
-  mln_status SetTarget(mln_render_session session,
-                       const TargetSize& size) override {
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size);
-    return mln_metal_borrowed_texture_set_target(session, &descriptor);
+  mln_status SetTarget(mln_render_session session, const TargetSize& size,
+                       const AsyncCall& call) override {
+    mln_metal_borrowed_texture texture{};
+    mln_metal_borrowed_texture_descriptor descriptor =
+        Descriptor(size, &texture);
+    return mln_render_session_set_metal_borrowed_texture_target(
+        session, &descriptor, call.completion, call.diagnostic);
   }
 
   bool RendersIntoBuffers() const override { return renders_into_buffers_; }
@@ -236,10 +247,13 @@ class MetalRenderTarget : public BufferRenderTarget {
   // A same-size set_target doesn't make the map publish another render update
   // (maplibre-native-ffi#807); before that change, the map rendered without
   // end (design D3).
-  mln_status SelectBuffer(mln_render_session session, int index) override {
+  mln_status SelectBuffer(mln_render_session session, int index,
+                          const AsyncCall& call) override {
+    mln_metal_borrowed_texture texture{};
     mln_metal_borrowed_texture_descriptor descriptor =
-        Descriptor(current_.size, current_.textures[index]);
-    return mln_metal_borrowed_texture_set_target(session, &descriptor);
+        Descriptor(current_.size, current_.textures[index], &texture);
+    return mln_render_session_set_metal_borrowed_texture_target(
+        session, &descriptor, call.completion, call.diagnostic);
   }
 
   bool CopyToBuffer(int index) override {
@@ -306,19 +320,27 @@ class MetalRenderTarget : public BufferRenderTarget {
  private:
   // The descriptor for the current render texture, or with renders into
   // buffers, for the current set's first buffer, until SelectBuffer().
-  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size) {
-    return Descriptor(size, renders_into_buffers_ ? current_.textures[0]
-                                                  : current_.render_texture);
+  mln_metal_borrowed_texture_descriptor Descriptor(
+      const TargetSize& size, mln_metal_borrowed_texture* ring) {
+    return Descriptor(size,
+                      renders_into_buffers_ ? current_.textures[0]
+                                            : current_.render_texture,
+                      ring);
   }
 
-  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
-                                                   id<MTLTexture> texture) {
+  // `ring` is the ring's one entry, which the descriptor points to; the call
+  // copies it.
+  mln_metal_borrowed_texture_descriptor Descriptor(
+      const TargetSize& size, id<MTLTexture> texture,
+      mln_metal_borrowed_texture* ring) {
     mln_metal_borrowed_texture_descriptor descriptor =
         mln_metal_borrowed_texture_descriptor_default();
     descriptor.extent = size.extent;
     descriptor.physical_width = size.physical_width;
     descriptor.physical_height = size.physical_height;
-    descriptor.texture = (__bridge void*)texture;
+    ring->texture = (__bridge void*)texture;
+    descriptor.textures = ring;
+    descriptor.texture_count = 1;
     return descriptor;
   }
 

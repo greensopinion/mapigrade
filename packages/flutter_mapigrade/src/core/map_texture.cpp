@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -25,18 +26,16 @@ void SetClockForTesting(int64_t (*now_ns)()) { test_clock.store(now_ns); }
 
 namespace {
 
+// #760 has no render-update-available event: an armed frame demand waits for
+// the map's next update instead.
 constexpr uint64_t kMapEventMask =
     MLN_RUNTIME_EVENT_MASK_MAP_STYLE_LOADED |
     MLN_RUNTIME_EVENT_MASK_MAP_LOADING_FAILED |
-    MLN_RUNTIME_EVENT_MASK_MAP_RENDER_UPDATE_AVAILABLE |
     MLN_RUNTIME_EVENT_MASK_MAP_RENDER_ERROR | MLN_RUNTIME_EVENT_MASK_MAP_IDLE;
 
-// Park bound of a pump with nothing to render. Wakes come from the runtime and
-// from commands, so this only bounds a missed wake.
-constexpr int64_t kIdlePumpTimeoutMs = 250;
-// Drain budget per pump, so that style parsing and tile work don't hold up a
-// pending frame for long.
-constexpr int64_t kPumpBudgetMs = 8;
+// Park bound with nothing to do. Wakes come from #760's wakes and from
+// commands, so this only bounds a missed wake.
+constexpr int64_t kIdleWaitMs = 250;
 // The refresh interval a surface target paces by until the display's refresh
 // rate is set (design D53): 60 Hz.
 constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
@@ -46,9 +45,10 @@ constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 constexpr int64_t kResizeSettledNs = 1'100'000'000;
 
 // The map whose map thread this is; null on other threads. MapLibre logs
-// error records synchronously, on the thread that runs the failed work, and
-// each map's resource responses run on its own map thread, in
-// mln_runtime_pump().
+// error records synchronously, on the thread that runs the failed work. Before
+// #760 each map's resource responses ran on its own map thread, in
+// mln_runtime_pump(); under #760 they run on the runtime's scheduler thread
+// (findings Q4).
 thread_local MapTexture* map_thread_owner = nullptr;
 
 // Sets map_thread_owner for the lifetime of the map thread.
@@ -85,7 +85,6 @@ bool SizeForViewport(const Viewport& viewport, TargetSize* size) {
       RoundToPixels(viewport.logical_width * viewport.pixel_ratio);
   size->physical_height =
       RoundToPixels(viewport.logical_height * viewport.pixel_ratio);
-  size->extent.size = sizeof(mln_render_target_extent);
   size->extent.width = RoundToPixels(viewport.logical_width);
   size->extent.height = RoundToPixels(viewport.logical_height);
   size->extent.scale_factor = viewport.pixel_ratio;
@@ -106,6 +105,104 @@ struct TaskDone {
     cv.notify_all();
   }
 };
+
+mln_diagnostic NewDiagnostic() {
+  mln_diagnostic diagnostic{};
+  diagnostic.size = sizeof(diagnostic);
+  return diagnostic;
+}
+
+// The result of an asynchronous FFI call that the map thread waits for.
+struct Waiter {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool done = false;
+  int32_t status = MLN_STATUS_OK;
+  std::string diagnostic;
+  // The first element of the result's value, if any.
+  std::vector<uint8_t> value;
+
+  // A completion that records its result in `waiter`.
+  static mln_completion For(const std::shared_ptr<Waiter>& waiter) {
+    mln_completion completion{};
+    completion.size = sizeof(completion);
+    completion.callback = &Waiter::OnComplete;
+    completion.user_data = new std::shared_ptr<Waiter>(waiter);
+    completion.release_user_data = &Waiter::Release;
+    return completion;
+  }
+
+  // Frees the user data of a completion that its call rejected.
+  static void Discard(const mln_completion& completion) {
+    Release(completion.user_data);
+  }
+
+  bool Done() {
+    std::lock_guard lock(mutex);
+    return done;
+  }
+
+  // Waits until the completion has run, at most `timeout_ns`.
+  bool WaitFor(int64_t timeout_ns) {
+    std::unique_lock lock(mutex);
+    return cv.wait_for(lock, std::chrono::nanoseconds(timeout_ns),
+                       [this] { return done; });
+  }
+
+ private:
+  static void OnComplete(void* user_data, const mln_completion_result* result) {
+    auto& waiter = **static_cast<std::shared_ptr<Waiter>*>(user_data);
+    {
+      std::lock_guard lock(waiter.mutex);
+      waiter.status = result->status;
+      if (result->diagnostic.size > 0) {
+        waiter.diagnostic.assign(
+            static_cast<const char*>(result->diagnostic.data),
+            result->diagnostic.size);
+      }
+      if (result->value != nullptr && result->value_size > 0) {
+        const auto* bytes = static_cast<const uint8_t*>(result->value);
+        waiter.value.assign(bytes, bytes + result->value_size);
+      }
+      waiter.done = true;
+    }
+    waiter.cv.notify_all();
+  }
+
+  static void Release(void* user_data) {
+    delete static_cast<std::shared_ptr<Waiter>*>(user_data);
+  }
+};
+
+// A completion that runs a function on the completing thread.
+using CompletionFunction = std::function<void(const mln_completion_result&)>;
+
+void RunCompletionFunction(void* user_data,
+                           const mln_completion_result* result) {
+  (*static_cast<CompletionFunction*>(user_data))(*result);
+}
+
+void DeleteCompletionFunction(void* user_data) {
+  delete static_cast<CompletionFunction*>(user_data);
+}
+
+mln_completion FunctionCompletion(CompletionFunction function) {
+  mln_completion completion{};
+  completion.size = sizeof(completion);
+  completion.callback = &RunCompletionFunction;
+  completion.user_data = new CompletionFunction(std::move(function));
+  completion.release_user_data = &DeleteCompletionFunction;
+  return completion;
+}
+
+// Frees the user data of a FunctionCompletion() that its call rejected.
+void DiscardFunctionCompletion(const mln_completion& completion) {
+  DeleteCompletionFunction(completion.user_data);
+}
+
+mln_buffer_view View(const std::string& text) {
+  return mln_buffer_view{text.data(), text.size()};
+}
 
 }  // namespace
 
@@ -134,29 +231,7 @@ MapTexture::MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
       initial_pixel_ratio_(pixel_ratio),
       maximum_cache_size_(maximum_cache_size),
       header_rules_(std::move(header_rules)),
-      callback_(callback) {
-  // Filled before any rule points into it.
-  for (const auto& rule : header_rules_) {
-    for (const auto& [name, value] : rule.headers) {
-      transform_headers_.push_back({name.c_str(), value.c_str()});
-    }
-  }
-  size_t first_header = 0;
-  for (const auto& rule : header_rules_) {
-    mln_adapter_http_header_transform_rule transform_rule{};
-    transform_rule.kind = MLN_ADAPTER_RESOURCE_KIND_ANY;
-    transform_rule.flags = MLN_ADAPTER_URL_MATCH_GLOB;
-    transform_rule.url = rule.url.c_str();
-    transform_rule.headers = rule.headers.empty()
-                                 ? nullptr
-                                 : transform_headers_.data() + first_header;
-    transform_rule.header_count = rule.headers.size();
-    transform_rules_.push_back(transform_rule);
-    first_header += rule.headers.size();
-  }
-  transform_table_.rules = transform_rules_.data();
-  transform_table_.count = transform_rules_.size();
-}
+      callback_(callback) {}
 
 MapTexture::~MapTexture() {
   // Dispose() joins the thread; this only covers a failed Start().
@@ -289,8 +364,24 @@ void MapTexture::Dispose() {
 }
 
 void MapTexture::Signal() {
-  std::lock_guard lock(wake_mutex_);
-  if (wake_ != MLN_HANDLE_NULL) mln_wake_source_signal(wake_);
+  {
+    std::lock_guard lock(wake_mutex_);
+    woken_ = true;
+  }
+  wake_cv_.notify_one();
+}
+
+// #760 requires that a wake callback returns without waiting for another
+// thread. wake_mutex_ is held only briefly, and never while calling the FFI.
+void MapTexture::OnWake(void* user_data) {
+  static_cast<MapTexture*>(user_data)->Signal();
+}
+
+void MapTexture::WaitForWake(int64_t timeout_ms) {
+  std::unique_lock lock(wake_mutex_);
+  wake_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                    [this] { return woken_; });
+  woken_ = false;
 }
 
 bool MapTexture::SelectNewest(int* out_slot, FrameInfo* out_info) {
@@ -433,8 +524,11 @@ void MapTexture::Run() {
   RunInPlatformScope([&] { Teardown(); });
 }
 
+// Under #760 the map thread arms one frame demand at a time. The demand waits
+// for the map's next update, so a slot is taken for it as soon as one may be
+// rendered (design D167).
 bool MapTexture::RenderWanted() {
-  if (!render_pending_ || session_ == MLN_HANDLE_NULL || gate_.paused()) {
+  if (demand_outstanding_ || session_ == MLN_HANDLE_NULL || gate_.paused()) {
     return false;
   }
   if (auto* surface = target_->AsSurfaceTarget()) {
@@ -445,10 +539,10 @@ bool MapTexture::RenderWanted() {
 
 bool MapTexture::RunOnce() {
   bool render_now = RenderWanted();
-  int64_t timeout_ms = render_now ? 0 : kIdlePumpTimeoutMs;
+  int64_t timeout_ms = render_now ? 0 : kIdleWaitMs;
   if (render_now && target_->AsSurfaceTarget() != nullptr) {
     // A surface target's render waits for the end of the refresh interval
-    // (designs D53 and D134). The pump parks in whole milliseconds, so the
+    // (designs D53 and D134). The wait parks in whole milliseconds, so the
     // part of the wait below one millisecond is slept here.
     int64_t remaining = IntervalRemainingNs();
     if (remaining > 0 && remaining < 1'000'000) {
@@ -461,14 +555,15 @@ bool MapTexture::RunOnce() {
     int64_t until_ms = (notify_after_resize_at_ns_ - NowNs()) / 1'000'000;
     timeout_ms = std::clamp<int64_t>(until_ms, 0, timeout_ms);
   }
-  mln_status status = mln_runtime_pump(runtime_, timeout_ms, kPumpBudgetMs);
-  if (status != MLN_STATUS_OK) ReportStatus("mln_runtime_pump", status);
+  WaitForWake(timeout_ms);
   bool stop = false;
   ApplyCommands(&stop);
   if (stop) return true;
   ApplyCamera();
-  DrainEvents();
+  ServiceDriver();
   MaybeRender();
+  // A newly armed demand renders at once if the map has an update.
+  ServiceDriver();
   MaybeNotifyAfterResize();
   return false;
 }
@@ -496,84 +591,158 @@ bool MapTexture::Init() {
   // Without a path, MapLibre's default root makes asset:// URLs fail.
   std::string asset_path = PlatformAssetPath();
   mln_runtime_options runtime_options = mln_runtime_options_default();
-  runtime_options.cache_path = cache_path.empty() ? nullptr : cache_path.c_str();
-  runtime_options.asset_path = asset_path.empty() ? nullptr : asset_path.c_str();
-  runtime_options.event_mask = MLN_RUNTIME_EVENT_MASK_NONE;
+  if (!cache_path.empty()) runtime_options.cache_path = View(cache_path);
+  if (!asset_path.empty()) runtime_options.asset_path = View(asset_path);
 
   // Installed once for the process, before the first map loads a style. The
   // callback is process-global, so it replaces any other that the app set
   // through the FFI. If the call fails, the map renders without reporting
   // glyph failures.
   std::call_once(log_callback_once, [this] {
-    mln_status log_status =
-        mln_log_set_callback(&MapTexture::OnLogRecord, nullptr);
+    mln_log_handler handler{};
+    handler.size = sizeof(handler);
+    handler.callback = &MapTexture::OnLogRecord;
+    mln_diagnostic diagnostic = NewDiagnostic();
+    mln_status log_status = mln_log_set_callback(&handler, &diagnostic);
     if (log_status != MLN_STATUS_OK) {
-      ReportStatus("mln_log_set_callback", log_status);
+      ReportStatus("mln_log_set_callback", log_status, &diagnostic);
     }
   });
 
-  mln_status status = mln_runtime_create(&runtime_options, &runtime_);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_runtime_create(&runtime_options, &runtime_, &diagnostic);
   if (status != MLN_STATUS_OK) {
-    ReportInitStatus("mln_runtime_create", status);
+    ReportInitStatus("mln_runtime_create", status, &diagnostic);
     return false;
   }
 
-  // The database thread runs its messages in order, so the maximum size is in
-  // effect before the first resource request or write of the style load
-  // (design D62). If the call fails, the map uses MapLibre's default and
-  // continues to render (D63).
+  // Before the map, so that the handler receives its first events. The
+  // runtime calls it on its scheduler thread.
+  mln_runtime_event_handler handler{};
+  handler.size = sizeof(handler);
+  handler.callback = &MapTexture::OnEvents;
+  handler.user_data = this;
+  mln_completion handler_done =
+      ReportingCompletion("mln_runtime_set_event_handler");
+  status = mln_runtime_set_event_handler(runtime_, &handler, &handler_done,
+                                         &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(handler_done);
+    ReportInitStatus("mln_runtime_set_event_handler", status, &diagnostic);
+    return false;
+  }
+
+  // Runtime operations run in order, so the maximum size is in effect before
+  // the first resource request or write of the style load (design D62). If
+  // the call fails, the map uses MapLibre's default and continues to render
+  // (D63).
   if (maximum_cache_size_) {
-    mln_offline_operation_id operation = 0;
-    status = mln_runtime_set_maximum_ambient_cache_size_start(
-        runtime_, *maximum_cache_size_, &operation);
-    if (status == MLN_STATUS_OK) {
-      mln_runtime_offline_operation_discard(runtime_, operation);
-    } else {
-      ReportStatus("mln_runtime_set_maximum_ambient_cache_size_start", status);
+    mln_completion size_done =
+        ReportingCompletion("mln_runtime_set_maximum_ambient_cache_size");
+    status = mln_runtime_set_maximum_ambient_cache_size(
+        runtime_, *maximum_cache_size_, &size_done, &diagnostic);
+    if (status != MLN_STATUS_OK) {
+      DiscardFunctionCompletion(size_done);
+      ReportStatus("mln_runtime_set_maximum_ambient_cache_size", status,
+                   &diagnostic);
     }
   }
 
-  // Before the map, so that style requests carry the headers.
+  // Before the map, so that style requests carry the headers. #760 applies
+  // the rules in native code; the call copies them.
   if (!header_rules_.empty()) {
+    std::vector<mln_http_header> headers;
+    for (const auto& rule : header_rules_) {
+      for (const auto& [name, value] : rule.headers) {
+        headers.push_back({View(name), View(value)});
+      }
+    }
+    std::vector<mln_http_header_rule> rules;
+    size_t first_header = 0;
+    for (const auto& rule : header_rules_) {
+      mln_http_header_rule transform_rule = mln_http_header_rule_default();
+      transform_rule.kinds = MLN_RESOURCE_KIND_MASK_ALL;
+      transform_rule.flags = MLN_URL_MATCH_GLOB;
+      transform_rule.url = View(rule.url);
+      transform_rule.headers =
+          rule.headers.empty() ? nullptr : headers.data() + first_header;
+      transform_rule.header_count = rule.headers.size();
+      rules.push_back(transform_rule);
+      first_header += rule.headers.size();
+    }
     mln_http_header_transform transform{};
     transform.size = sizeof(transform);
-    transform.callback = mln_adapter_http_header_transform_callback;
-    transform.user_data = &transform_table_;
-    status = mln_runtime_set_http_header_transform(runtime_, &transform);
+    transform.rules = rules.data();
+    transform.rule_count = rules.size();
+    mln_completion transform_done =
+        ReportingCompletion("mln_runtime_set_http_header_transform");
+    status = mln_runtime_set_http_header_transform(runtime_, &transform,
+                                                   &transform_done, &diagnostic);
     if (status != MLN_STATUS_OK) {
-      ReportInitStatus("mln_runtime_set_http_header_transform", status);
+      DiscardFunctionCompletion(transform_done);
+      ReportInitStatus("mln_runtime_set_http_header_transform", status,
+                       &diagnostic);
       return false;
     }
   }
 
-  mln_wake_source wake = MLN_HANDLE_NULL;
-  status = mln_runtime_wake_source_acquire(runtime_, &wake);
-  if (status != MLN_STATUS_OK) {
-    ReportInitStatus("mln_runtime_wake_source_acquire", status);
-    return false;
-  }
-  {
-    std::lock_guard lock(wake_mutex_);
-    wake_ = wake;
-  }
-
   mln_map_options map_options = mln_map_options_default();
-  map_options.width = 256;
-  map_options.height = 256;
-  map_options.scale_factor = initial_pixel_ratio_;
+  map_options.initial_extent.width = 256;
+  map_options.initial_extent.height = 256;
+  map_options.initial_extent.scale_factor = initial_pixel_ratio_;
   map_options.event_mask = kMapEventMask;
-  status = mln_map_create(runtime_, &map_options, &map_);
+  auto created = std::make_shared<Waiter>();
+  mln_completion create_done = Waiter::For(created);
+  status = mln_runtime_create_map(runtime_, &map_options, &create_done,
+                                  &diagnostic);
   if (status != MLN_STATUS_OK) {
-    ReportInitStatus("mln_map_create", status);
+    Waiter::Discard(create_done);
+    ReportInitStatus("mln_runtime_create_map", status, &diagnostic);
     return false;
   }
+  created->WaitFor(30'000'000'000);
+  if (!created->Done() || created->status != MLN_STATUS_OK ||
+      created->value.size() < sizeof(mln_map)) {
+    init_error_ = "mln_runtime_create_map failed: " + created->diagnostic;
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
+    return false;
+  }
+  std::memcpy(&map_, created->value.data(), sizeof(mln_map));
   return true;
+}
+
+void MapTexture::ServiceUntil(const std::function<bool()>& done) {
+  while (!done()) {
+    if (session_ != MLN_HANDLE_NULL) {
+      mln_status status =
+          mln_render_session_service_driver_work(session_, nullptr);
+      if (status != MLN_STATUS_OK && status != MLN_STATUS_BUSY) break;
+    }
+    if (done()) break;
+    WaitForWake(1);
+  }
 }
 
 void MapTexture::DestroySession() {
   if (session_ != MLN_HANDLE_NULL) {
-    mln_render_session_destroy(session_);
+    mln_diagnostic diagnostic = NewDiagnostic();
+    auto detached = std::make_shared<Waiter>();
+    mln_completion detach_done = Waiter::For(detached);
+    mln_status status =
+        mln_render_session_detach(session_, &detach_done, &diagnostic);
+    if (status == MLN_STATUS_OK) {
+      ServiceUntil([&] { return detached->Done(); });
+    } else {
+      Waiter::Discard(detach_done);
+      mln_render_abandon_result abandoned{};
+      abandoned.size = sizeof(abandoned);
+      mln_render_session_abandon(session_, &abandoned, nullptr);
+    }
+    mln_render_session_release(session_, nullptr);
     session_ = MLN_HANDLE_NULL;
+    demand_outstanding_ = false;
+    demand_slot_ = -1;
   }
   if (auto* surface = target_->AsSurfaceTarget()) {
     surface->ReleaseSurfaces();
@@ -593,37 +762,62 @@ void MapTexture::Teardown() {
     target_tasks_stopped_ = true;
     commands_.TakeAll();
   }
+  {
+    // For the findings of the experiment-maplibre-pr-760-port change (Q1).
+    std::lock_guard lock(stats_mutex_);
+    std::printf("MLN760_ACQUIRE acquired=%lld not_ready=%lld\n",
+                static_cast<long long>(acquired_frames_),
+                static_cast<long long>(acquire_not_ready_));
+    std::fflush(stdout);
+  }
   DestroySession();
+  // Waiting for each release completion ensures that no completion or event
+  // callback runs into this object afterwards.
   if (map_ != MLN_HANDLE_NULL) {
-    mln_map_destroy(map_);
+    auto released = std::make_shared<Waiter>();
+    mln_completion release_done = Waiter::For(released);
+    if (mln_map_release(map_, &release_done, nullptr) == MLN_STATUS_OK) {
+      released->WaitFor(30'000'000'000);
+    } else {
+      Waiter::Discard(release_done);
+      mln_map_dispose(map_, nullptr);
+    }
     map_ = MLN_HANDLE_NULL;
   }
   if (runtime_ != MLN_HANDLE_NULL) {
-    mln_runtime_destroy(runtime_);
+    auto released = std::make_shared<Waiter>();
+    mln_completion release_done = Waiter::For(released);
+    if (mln_runtime_release(runtime_, &release_done, nullptr) ==
+        MLN_STATUS_OK) {
+      released->WaitFor(30'000'000'000);
+    } else {
+      Waiter::Discard(release_done);
+      mln_runtime_dispose(runtime_, nullptr);
+    }
     runtime_ = MLN_HANDLE_NULL;
   }
-  std::lock_guard lock(wake_mutex_);
-  mln_wake_source_destroy(wake_);
-  wake_ = MLN_HANDLE_NULL;
 }
 
 void MapTexture::ApplyCommands(bool* stop) {
   for (auto& command : commands_.TakeAll()) {
     switch (command.kind) {
+      // Commands with a discarded completion: a style that fails to load
+      // queues a loading-failed event, which carries the message.
       case Command::Kind::kStyleUrl: {
-        mln_status status = mln_map_set_style_url(map_, command.text.c_str());
+        mln_diagnostic diagnostic = NewDiagnostic();
+        mln_status status = mln_map_set_style_url(map_, View(command.text),
+                                                  nullptr, &diagnostic);
         if (status != MLN_STATUS_OK) {
-          ReportStatus("mln_map_set_style_url", status);
+          ReportStatus("mln_map_set_style_url", status, &diagnostic);
         }
         break;
       }
       case Command::Kind::kStyleJson: {
-        mln_buffer_view json{command.text.data(), command.text.size()};
-        mln_status status = mln_map_set_style_json(map_, json);
-        // A malformed document also queues a loading-failed event, which
-        // carries the message.
-        if (status != MLN_STATUS_OK && status != MLN_STATUS_NATIVE_ERROR) {
-          ReportStatus("mln_map_set_style_json", status);
+        mln_diagnostic diagnostic = NewDiagnostic();
+        mln_status status = mln_map_set_style_json(map_, View(command.text),
+                                                   nullptr, &diagnostic);
+        if (status != MLN_STATUS_OK) {
+          ReportStatus("mln_map_set_style_json", status, &diagnostic);
         }
         break;
       }
@@ -645,16 +839,21 @@ void MapTexture::ApplyCommands(bool* stop) {
 
 void MapTexture::ApplyReduceMemoryUse() {
   if (session_ == MLN_HANDLE_NULL) return;
-  // This releases cached tiles and images and submits no GPU work, so it also
-  // runs while rendering is paused.
-  mln_status status = mln_render_session_reduce_memory_use(session_);
-  if (status == MLN_STATUS_OK) {
-    std::lock_guard lock(stats_mutex_);
-    ++stats_.memory_reductions;
-  } else if (status != MLN_STATUS_INVALID_STATE) {
-    // MLN_STATUS_INVALID_STATE: no renderer exists yet, so there is nothing
-    // to release.
-    ReportStatus("mln_render_session_reduce_memory_use", status);
+  // This releases cached tiles and images. Under #760 it is driver work, which
+  // the map thread services, also while rendering is paused (findings Q6).
+  mln_completion done = FunctionCompletion(
+      [this](const mln_completion_result& result) {
+        if (result.status == MLN_STATUS_OK) {
+          std::lock_guard lock(stats_mutex_);
+          ++stats_.memory_reductions;
+        }
+      });
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_render_session_reduce_memory_use(session_, &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_render_session_reduce_memory_use", status, &diagnostic);
   }
 }
 
@@ -679,16 +878,52 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
       buffers_.ResetLocked();
     });
     notify_after_resize_at_ns_ = NowNs() + kResizeSettledNs;
+    // The armed demand's slot belongs to the replaced set.
+    if (demand_outstanding_) demand_stale_ = true;
   }
   size_ = size;
 
-  mln_status status;
+  mln_diagnostic diagnostic = NewDiagnostic();
   if (session_ == MLN_HANDLE_NULL) {
-    status = target_->Attach(map_, size_, &session_);
-    if (status != MLN_STATUS_OK) ReportStatus("attach", status);
+    mln_render_session_attach_options options =
+        mln_render_session_attach_options_default();
+    options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
+    options.frame_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
+    options.driver_work_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
+    auto attached = std::make_shared<Waiter>();
+    mln_completion attach_done = Waiter::For(attached);
+    mln_status status = target_->Attach(map_, size_, options, &session_,
+                                        {&attach_done, &diagnostic});
+    if (status != MLN_STATUS_OK) {
+      Waiter::Discard(attach_done);
+      session_ = MLN_HANDLE_NULL;
+      ReportStatus("attach", status, &diagnostic);
+      return;
+    }
+    // A caller-graphics-thread session completes its attachment in driver
+    // work that the map thread services.
+    ServiceUntil([&] { return attached->Done(); });
+    if (attached->status != MLN_STATUS_OK) {
+      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+           ("attach failed: " + attached->diagnostic).c_str());
+    }
   } else {
-    status = target_->SetTarget(session_, size_);
-    if (status != MLN_STATUS_OK) ReportStatus("set_target", status);
+    // The previous textures are released already, so the replacement must
+    // run before the session renders again (findings Q6).
+    auto replaced = std::make_shared<Waiter>();
+    mln_completion replace_done = Waiter::For(replaced);
+    mln_status status =
+        target_->SetTarget(session_, size_, {&replace_done, &diagnostic});
+    if (status != MLN_STATUS_OK) {
+      Waiter::Discard(replace_done);
+      ReportStatus("set_target", status, &diagnostic);
+      return;
+    }
+    ServiceUntil([&] { return replaced->Done(); });
+    if (replaced->status != MLN_STATUS_OK) {
+      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+           ("set_target failed: " + replaced->diagnostic).c_str());
+    }
   }
   render_pending_ = true;
 }
@@ -697,80 +932,83 @@ void MapTexture::ApplyCamera() {
   auto update = commands_.TakeCamera();
   if (!update) return;
   const Camera& camera = update->camera;
-  mln_camera_options options = mln_camera_options_default();
-  options.fields =
+  mln_camera_update camera_update = mln_camera_update_default();
+  camera_update.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
+  camera_update.camera = mln_camera_options_default();
+  camera_update.camera.fields =
       MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_BEARING;
-  options.latitude = camera.latitude;
-  options.longitude = camera.longitude;
-  options.zoom = camera.zoom;
-  options.bearing = camera.bearing;
-  mln_status status = mln_map_jump_to(map_, &options);
+  camera_update.camera.center = {camera.latitude, camera.longitude};
+  camera_update.camera.zoom = camera.zoom;
+  camera_update.camera.bearing = camera.bearing;
+  // The completion's generation counts map snapshots, while a frame result
+  // counts render updates. A snapshot read after the completion gives the
+  // render update that includes the camera, or a later one if another
+  // command has run since (design D169, findings Q2).
+  int64_t seq = update->seq;
+  int64_t set_at_ns = update->set_at_ns;
+  mln_completion done = FunctionCompletion(
+      [this, seq, set_at_ns](const mln_completion_result& result) {
+        if (result.status != MLN_STATUS_OK) return;
+        mln_map_snapshot snapshot{};
+        snapshot.size = sizeof(snapshot);
+        if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
+          return;
+        }
+        std::lock_guard lock(camera_generations_mutex_);
+        camera_generations_.push_back(
+            {snapshot.latest_render_update_generation, seq, set_at_ns});
+      });
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_map_update_camera(map_, &camera_update, &done, &diagnostic);
   if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_map_jump_to", status);
-    return;
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_map_update_camera", status, &diagnostic);
   }
-  applied_seq_ = update->seq;
-  applied_set_at_ns_ = update->set_at_ns;
 }
 
-void MapTexture::DrainEvents() {
-  mln_runtime_event_batch batch = mln_runtime_event_batch_default();
-  do {
-    mln_status status = mln_runtime_drain_events(runtime_, 0, &batch);
-    if (status != MLN_STATUS_OK) {
-      ReportStatus("mln_runtime_drain_events", status);
-      return;
+void MapTexture::OnEvents(void* user_data, const mln_event_batch_view* events) {
+  auto* self = static_cast<MapTexture*>(user_data);
+  const auto* base = reinterpret_cast<const char*>(events->events);
+  for (size_t i = 0; i < events->event_count; ++i) {
+    const auto* event =
+        reinterpret_cast<const mln_runtime_event*>(base + i * events->event_size);
+    std::string message;
+    if (event->message.size > 0) {
+      message.assign(static_cast<const char*>(event->message.data),
+                     event->message.size);
     }
-    const char* base = reinterpret_cast<const char*>(batch.events);
-    for (size_t i = 0; i < batch.event_count; ++i) {
-      const auto* event =
-          reinterpret_cast<const mln_runtime_event*>(base + i * batch.event_size);
-      std::string message;
-      if (event->message_size > 0) {
-        message.assign(batch.messages + event->message_offset,
-                       event->message_size);
-      }
-      switch (event->type) {
-        case MLN_RUNTIME_EVENT_MAP_STYLE_LOADED:
-          Emit(MAP_TEXTURE_EVENT_STYLE_LOADED);
-          break;
-        case MLN_RUNTIME_EVENT_MAP_LOADING_FAILED:
-          Emit(MAP_TEXTURE_EVENT_LOADING_FAILED,
-               message.empty() ? "map loading failed" : message.c_str());
-          break;
-        case MLN_RUNTIME_EVENT_MAP_RENDER_ERROR:
-          Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
-               message.empty() ? "render error" : message.c_str());
-          break;
-        case MLN_RUNTIME_EVENT_MAP_IDLE:
-          Emit(MAP_TEXTURE_EVENT_IDLE);
-          break;
-        case MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE: {
-          {
-            std::lock_guard lock(stats_mutex_);
-            ++stats_.render_update_available_events;
-          }
-          render_pending_ = true;
-          break;
-        }
-        default:
-          break;
-      }
+    switch (event->type) {
+      case MLN_RUNTIME_EVENT_MAP_STYLE_LOADED:
+        self->Emit(MAP_TEXTURE_EVENT_STYLE_LOADED);
+        break;
+      case MLN_RUNTIME_EVENT_MAP_LOADING_FAILED:
+        self->Emit(MAP_TEXTURE_EVENT_LOADING_FAILED,
+                   message.empty() ? "map loading failed" : message.c_str());
+        break;
+      case MLN_RUNTIME_EVENT_MAP_RENDER_ERROR:
+        self->Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+                   message.empty() ? "render error" : message.c_str());
+        break;
+      case MLN_RUNTIME_EVENT_MAP_IDLE:
+        self->Emit(MAP_TEXTURE_EVENT_IDLE);
+        break;
+      default:
+        break;
     }
-  } while (batch.remaining_count > 0);
+  }
 }
 
 void MapTexture::MaybeRender() {
-  if (!render_pending_ || session_ == MLN_HANDLE_NULL) return;
+  if (demand_outstanding_ || session_ == MLN_HANDLE_NULL) return;
 
-  // While paused, the render stays pending; SetPaused(false) wakes the map
-  // thread to render it (design D13).
-  if (!gate_.TryBeginRender()) {
+  // While paused, no demand is armed and ServiceDriver() renders nothing;
+  // SetPaused(false) wakes the map thread to arm one (design D13).
+  if (gate_.paused()) {
     std::lock_guard lock(stats_mutex_);
     ++stats_.paused_renders;
     return;
   }
-  RenderGateScope gate_scope(gate_);
 
   if (auto* surface = target_->AsSurfaceTarget()) {
     RenderIntoSurface(*surface);
@@ -828,6 +1066,9 @@ void MapTexture::RecordRenderStart(int64_t start, bool render_ahead) {
   render_waited_for_display_ = false;
 }
 
+// Under #760 the slot is taken and made the session's target when the demand
+// is armed, and the frame is published when its result arrives
+// (HandleFrameResult).
 void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   bool render_ahead = false;
   if (!MayRender(&render_ahead)) return;
@@ -835,23 +1076,158 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   if (index < 0) return;
 
   if (target.RendersIntoBuffers()) {
-    mln_status select_status = target.SelectBuffer(session_, index);
-    if (select_status != MLN_STATUS_OK) {
+    // An ordered replacement of the borrowed ring's one texture; it runs in
+    // the service call before the demand's render (design D168).
+    mln_completion done =
+        ReportingCompletion("mln_render_session_set_metal_borrowed_texture_target");
+    mln_diagnostic diagnostic = NewDiagnostic();
+    mln_status status =
+        target.SelectBuffer(session_, index, {&done, &diagnostic});
+    if (status != MLN_STATUS_OK) {
+      DiscardFunctionCompletion(done);
       buffers_.Release(index);
-      ReportStatus("select buffer", select_status);
+      ReportStatus("select buffer", status, &diagnostic);
       return;
     }
   }
+  ArmDemand(index, render_ahead);
+}
 
+// A surface target's session queues each frame on the surface, and the frame
+// is published when its image arrives (design D131). Renders are paced to one
+// per display refresh interval, not by Dart's choice: on Android a frame
+// reaches Dart only after its image arrives, and Dart chooses it in the next
+// Flutter frame, so waiting for the choice would cost a refresh interval per
+// frame (design D134). A ready frame that Dart hasn't chosen is replaced.
+void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
+  if (!target.CanPresent()) return;
+  if (IntervalRemainingNs() > 0) {
+    if (!interval_wait_counted_) {
+      interval_wait_counted_ = true;
+      std::lock_guard lock(stats_mutex_);
+      ++stats_.interval_waits;
+    }
+    return;
+  }
+  interval_wait_counted_ = false;
+  int index = AcquireSlot();
+  if (index < 0) return;
+  buffers_.Expect(index, next_frame_id_);
+  ArmDemand(index, false);
+}
+
+bool MapTexture::ArmDemand(int slot, bool render_ahead) {
+  mln_frame_demand demand = mln_frame_demand_default();
+  // After a frame that asked for another without a map update, as during a
+  // paint transition, the next frame renders unconditionally.
+  demand.flags = repaint_wanted_ ? 0u
+                                 : MLN_FRAME_DEMAND_IF_NEEDED |
+                                       MLN_FRAME_DEMAND_WAIT_FOR_UPDATE;
+  if (target_->AsSurfaceTarget() != nullptr) {
+    demand.flags |= MLN_FRAME_DEMAND_PRESENT;
+  }
+  demand.token = ++demand_token_;
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_render_session_request_frame(session_, &demand, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    buffers_.Release(slot);
+    ReportStatus("mln_render_session_request_frame", status, &diagnostic);
+    return false;
+  }
+  demand_outstanding_ = true;
+  demand_slot_ = slot;
+  demand_render_ahead_ = render_ahead;
+  demand_stale_ = false;
+  return true;
+}
+
+void MapTexture::ServiceDriver() {
+  if (session_ == MLN_HANDLE_NULL) return;
+  // While paused, the map thread submits no GPU work (design D13); the
+  // driver work waits until rendering resumes.
+  if (!gate_.TryBeginRender()) return;
+  RenderGateScope gate_scope(gate_);
+
+  if (auto* surface = target_->AsSurfaceTarget()) {
+    // The id goes with the next frame the session presents (design D131).
+    if (demand_outstanding_ && !demand_stale_) {
+      surface->WillRender(next_frame_id_);
+    }
+  }
+  mln_diagnostic diagnostic = NewDiagnostic();
   int64_t start = NowNs();
-  RecordRenderStart(start, render_ahead);
-  bool needs_repaint = false;
-  if (!RenderUpdate(start, &needs_repaint)) {
-    buffers_.Release(index);
+  mln_status status =
+      mln_render_session_service_driver_work(session_, &diagnostic);
+  int64_t elapsed = NowNs() - start;
+  if (status != MLN_STATUS_OK && status != MLN_STATUS_BUSY) {
+    ReportStatus("mln_render_session_service_driver_work", status, &diagnostic);
+  }
+
+  mln_render_frame_batch batch = MLN_HANDLE_NULL;
+  status = mln_render_session_drain_frame_results(session_, &batch, &diagnostic);
+  if (status == MLN_STATUS_NOT_READY) return;
+  if (status != MLN_STATUS_OK) {
+    ReportStatus("mln_render_session_drain_frame_results", status, &diagnostic);
+    return;
+  }
+  mln_render_frame_batch_view view{};
+  view.size = sizeof(view);
+  if (mln_render_frame_batch_get(batch, &view, &diagnostic) == MLN_STATUS_OK) {
+    const auto* base = reinterpret_cast<const char*>(view.results);
+    for (size_t i = 0; i < view.result_count; ++i) {
+      HandleFrameResult(*reinterpret_cast<const mln_render_frame_result*>(
+                            base + i * view.result_size),
+                        start, elapsed);
+    }
+  }
+  mln_render_frame_batch_release(batch);
+}
+
+void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
+                                   int64_t service_start, int64_t service_ns) {
+  if (!demand_outstanding_ || result.token != demand_token_) return;
+  demand_outstanding_ = false;
+  int index = demand_slot_;
+  bool stale = demand_stale_;
+  demand_slot_ = -1;
+  demand_stale_ = false;
+
+  if (result.disposition != MLN_RENDER_RESULT_RENDERED) {
+    if (!stale) buffers_.Release(index);
+    repaint_wanted_ = false;
+    return;
+  }
+  repaint_wanted_ = result.needs_repaint;
+  if (target_->AsBufferTarget() != nullptr && acquire_frames_) {
+    AcquireAndReleaseFrame();
+  }
+  // A resize reset the slots after the demand was armed; the frame has the
+  // old size and isn't published.
+  if (stale) return;
+
+  RecordRenderStart(service_start, demand_render_ahead_);
+  RecordRender(service_start, service_ns);
+  FrameInfo info = RenderedFrameInfo(result);
+  {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.rendered_frames;
+    if (result.needs_repaint) ++stats_.needs_repaint_frames;
+  }
+
+  if (target_->AsSurfaceTarget() != nullptr) {
+    bool published = buffers_.Queue(index, info);
+    // The listener may receive the image before the service call returns.
+    if (published) {
+      published_at_ns_.store(NowNs());
+      RecordCameraLatency(info);
+      Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
+    }
     return;
   }
 
-  int64_t cost = NowNs() - start;
+  BufferRenderTarget& target = *target_->AsBufferTarget();
+  int64_t cost = service_ns;
   if (!target.RendersIntoBuffers()) {
     int64_t copy_start = NowNs();
     bool copied = target.CopyToBuffer(index);
@@ -874,63 +1250,42 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   frame_cost_avg_ns_ = frame_cost_avg_ns_ == 0
                            ? cost
                            : frame_cost_avg_ns_ + (cost - frame_cost_avg_ns_) / 8;
-
-  FrameInfo info = RenderedFrameInfo();
   buffers_.Publish(index, info);
   published_at_ns_.store(NowNs());
-  {
-    std::lock_guard lock(stats_mutex_);
-    ++stats_.rendered_frames;
-    if (needs_repaint) ++stats_.needs_repaint_frames;
-  }
-  // The map publishes another render update by itself while a transition
-  // runs, so needs_repaint needs no action here (see
-  // mln_render_session_render_update in render_session.h). Dart marks the
-  // slot's texture available when it chooses the frame (design D123).
+  // Dart marks the slot's texture available when it chooses the frame
+  // (design D123).
   RecordCameraLatency(info);
   Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
 
-// A surface target's session queues each frame on the surface, and the frame
-// is published when its image arrives (design D131). Renders are paced to one
-// per display refresh interval, not by Dart's choice: on Android a frame
-// reaches Dart only after its image arrives, and Dart chooses it in the next
-// Flutter frame, so waiting for the choice would cost a refresh interval per
-// frame (design D134). A ready frame that Dart hasn't chosen is replaced.
-void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
-  if (!target.CanPresent()) return;
-  if (IntervalRemainingNs() > 0) {
-    if (!interval_wait_counted_) {
-      interval_wait_counted_ = true;
-      std::lock_guard lock(stats_mutex_);
-      ++stats_.interval_waits;
-    }
+void MapTexture::AcquireAndReleaseFrame() {
+  mln_acquired_frame frame = MLN_HANDLE_NULL;
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_render_session_acquire_frame(session_, &frame, &diagnostic);
+  if (status == MLN_STATUS_UNSUPPORTED) {
+    acquire_frames_ = false;
     return;
   }
-  interval_wait_counted_ = false;
-  int index = AcquireSlot();
-  if (index < 0) return;
-
-  int64_t start = NowNs();
-  buffers_.Expect(index, next_frame_id_);
-  target.WillRender(next_frame_id_);
-  bool needs_repaint = false;
-  if (!RenderUpdate(start, &needs_repaint)) {
-    buffers_.Release(index);
+  if (status == MLN_STATUS_NOT_READY) {
+    std::lock_guard lock(stats_mutex_);
+    ++acquire_not_ready_;
     return;
   }
-  FrameInfo info = RenderedFrameInfo();
-  bool published = buffers_.Queue(index, info);
+  if (status != MLN_STATUS_OK) {
+    ReportStatus("mln_render_session_acquire_frame", status, &diagnostic);
+    return;
+  }
   {
     std::lock_guard lock(stats_mutex_);
-    ++stats_.rendered_frames;
-    if (needs_repaint) ++stats_.needs_repaint_frames;
+    ++acquired_frames_;
   }
-  // The listener may receive the image before render_update returns.
-  if (published) {
-    published_at_ns_.store(NowNs());
-    RecordCameraLatency(info);
-    Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
+  // Flutter reads the texture later; the next replacement of the ring's
+  // texture, not the ring, decides when MapLibre writes to it again.
+  mln_gpu_sync sync = mln_gpu_sync_default();
+  status = mln_acquired_frame_release(frame, &sync, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    ReportStatus("mln_acquired_frame_release", status, &diagnostic);
   }
 }
 
@@ -942,54 +1297,50 @@ int64_t MapTexture::IntervalRemainingNs() {
   return std::max<int64_t>(remaining, 0);
 }
 
-bool MapTexture::RenderUpdate(int64_t start, bool* needs_repaint) {
-  {
-    std::lock_guard lock(stats_mutex_);
-    if (last_render_start_ns_ != 0 &&
-        start - last_render_start_ns_ < 100'000'000) {
-      ++stats_.frame_cycle_count;
-      stats_.frame_cycle_total_ns += start - last_render_start_ns_;
-    }
+void MapTexture::RecordRender(int64_t start, int64_t elapsed) {
+  std::lock_guard lock(stats_mutex_);
+  if (last_render_start_ns_ != 0 &&
+      start - last_render_start_ns_ < 100'000'000) {
+    ++stats_.frame_cycle_count;
+    stats_.frame_cycle_total_ns += start - last_render_start_ns_;
   }
   last_render_start_ns_ = start;
   render_pending_ = false;
-  mln_render_result result = MLN_RENDER_RESULT_NO_UPDATE;
-  mln_status status =
-      mln_render_session_render_update(session_, &result, needs_repaint);
-  int64_t elapsed = NowNs() - start;
-  {
-    std::lock_guard lock(stats_mutex_);
-    ++stats_.render_update_count;
-    stats_.render_update_total_ns += elapsed;
-    stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
-  }
-  if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_render_session_render_update", status);
-    return false;
-  }
-  return result == MLN_RENDER_RESULT_RENDERED;
+  // The service call that rendered the frame; render_update before #760.
+  ++stats_.render_update_count;
+  stats_.render_update_total_ns += elapsed;
+  stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
 }
 
-FrameInfo MapTexture::RenderedFrameInfo() {
+FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   FrameInfo info;
   info.frame_id = next_frame_id_++;
-  info.seq = applied_seq_;
-  info.camera_set_at_ns = applied_set_at_ns_;
   info.physical_width = size_.physical_width;
   info.physical_height = size_.physical_height;
   info.scale_factor = size_.extent.scale_factor;
-  mln_map_projection projection = MLN_HANDLE_NULL;
-  mln_status status = mln_render_session_projection_create(session_, &projection);
-  if (status == MLN_STATUS_OK) {
-    mln_camera_options camera = mln_camera_options_default();
-    if (mln_map_projection_get_camera(projection, &camera) == MLN_STATUS_OK) {
-      info.camera = {camera.latitude, camera.longitude, camera.zoom,
-                     camera.bearing};
+  // The view that the frame drew. Its center longitude is unwrapped.
+  const mln_camera_options& camera = result.view.camera;
+  info.camera = {camera.center.latitude, camera.center.longitude, camera.zoom,
+                 camera.bearing};
+  {
+    // The newest camera command whose generation the frame's update includes
+    // (design D169). Older entries are no longer needed.
+    std::lock_guard lock(camera_generations_mutex_);
+    size_t newest = camera_generations_.size();
+    for (size_t i = 0; i < camera_generations_.size(); ++i) {
+      if (camera_generations_[i].generation <= result.map_update_generation) {
+        newest = i;
+      }
     }
-    mln_map_projection_destroy(projection);
-  } else {
-    ReportStatus("mln_render_session_projection_create", status);
+    if (newest < camera_generations_.size()) {
+      applied_seq_ = camera_generations_[newest].seq;
+      applied_set_at_ns_ = camera_generations_[newest].set_at_ns;
+      camera_generations_.erase(camera_generations_.begin(),
+                                camera_generations_.begin() + newest);
+    }
   }
+  info.seq = applied_seq_;
+  info.camera_set_at_ns = applied_set_at_ns_;
   return info;
 }
 
@@ -1044,8 +1395,8 @@ void MapTexture::Emit(int32_t type, const char* message,
 
 namespace {
 
-std::string StatusMessage(const char* what, mln_status status) {
-  const char* detail = mln_thread_last_error_message();
+std::string StatusMessage(const char* what, mln_status status,
+                          const char* detail) {
   std::string message = std::string(what) + " failed with status " +
                         std::to_string(static_cast<int>(status));
   if (detail != nullptr && detail[0] != '\0') {
@@ -1072,13 +1423,41 @@ uint32_t MapTexture::OnLogRecord(void*, uint32_t severity, uint32_t event,
   return 0;
 }
 
-void MapTexture::ReportStatus(const char* what, mln_status status) {
-  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, StatusMessage(what, status).c_str());
+void MapTexture::ReportStatus(const char* what, mln_status status,
+                              const mln_diagnostic* diagnostic) {
+  Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+       StatusMessage(what, status,
+                     diagnostic != nullptr ? diagnostic->message : nullptr)
+           .c_str());
 }
 
-void MapTexture::ReportInitStatus(const char* what, mln_status status) {
-  init_error_ = StatusMessage(what, status);
+void MapTexture::ReportInitStatus(const char* what, mln_status status,
+                                  const mln_diagnostic* diagnostic) {
+  init_error_ = StatusMessage(
+      what, status, diagnostic != nullptr ? diagnostic->message : nullptr);
   Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
+}
+
+mln_completion MapTexture::ReportingCompletion(
+    const char* what,
+    std::function<void(const mln_completion_result&)> on_success) {
+  return FunctionCompletion(
+      [this, what, on_success = std::move(on_success)](
+          const mln_completion_result& result) {
+        if (result.status == MLN_STATUS_OK) {
+          if (on_success) on_success(result);
+          return;
+        }
+        std::string detail;
+        if (result.diagnostic.size > 0) {
+          detail.assign(static_cast<const char*>(result.diagnostic.data),
+                        result.diagnostic.size);
+        }
+        Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+             StatusMessage(what, static_cast<mln_status>(result.status),
+                           detail.c_str())
+                 .c_str());
+      });
 }
 
 }  // namespace map_texture

@@ -138,21 +138,40 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void Run();
   // One iteration of the map thread's loop; returns true to stop.
   bool RunOnce();
-  // Whether the map thread should render now rather than park.
+  // Whether the map thread should arm a frame demand now rather than park.
   bool RenderWanted();
+  // Parks the map thread until Signal() or `timeout_ms` passes.
+  void WaitForWake(int64_t timeout_ms);
+  // Services the session's driver work until `done` returns true, for the
+  // completions of attach, detach and target replacement.
+  void ServiceUntil(const std::function<bool()>& done);
   void ApplyReduceMemoryUse();
   void DestroySession();
   bool Init();
   void Teardown();
   void Signal();
+  // The wake callback of #760's driver-work and frame-result wakes.
+  static void OnWake(void* user_data);
 
   void ApplyCommands(bool* stop);
   void ApplyResize(const Viewport& viewport);
   void ApplyCamera();
-  void DrainEvents();
+  // The runtime's event handler, on the runtime's scheduler thread.
+  static void OnEvents(void* user_data, const mln_event_batch_view* events);
   void MaybeRender();
   void RenderIntoBuffer(BufferRenderTarget& target);
   void RenderIntoSurface(SurfaceRenderTarget& target);
+  // Map thread: requests a frame that renders into `slot` (design D167).
+  // Returns false and releases the slot if the session refuses the demand.
+  bool ArmDemand(int slot, bool render_ahead);
+  // Map thread: services the session's driver work, which renders the
+  // armed demand's frame, and handles the frame results.
+  void ServiceDriver();
+  void HandleFrameResult(const mln_render_frame_result& result,
+                         int64_t service_start, int64_t service_ns);
+  // Map thread: acquires and releases the newest rendered frame, so that its
+  // GPU writes have completed (findings Q1).
+  void AcquireAndReleaseFrame();
   // Map thread, for a buffer target: whether the next frame may render now,
   // because Dart has chosen the latest frame or the map renders ahead
   // (designs D19 and D124). Otherwise records the wait. Sets `render_ahead`.
@@ -165,11 +184,12 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   int AcquireSlot();
   // Map thread: records the stats of a render that is about to start.
   void RecordRenderStart(int64_t start, bool render_ahead);
-  // Map thread: runs render_update and records its stats. Returns whether it
-  // rendered a frame.
-  bool RenderUpdate(int64_t start, bool* needs_repaint);
-  // Map thread: the frame just rendered, with the camera it was rendered with.
-  FrameInfo RenderedFrameInfo();
+  // Map thread: records the time of a service call that rendered a frame.
+  void RecordRender(int64_t start, int64_t elapsed);
+  // Map thread: the frame of `result`, with the camera it was rendered with
+  // and the sequence number of the newest camera command it includes
+  // (design D169).
+  FrameInfo RenderedFrameInfo(const mln_render_frame_result& result);
   // Before a frame-ready event: counts the camera-to-frame latency of the
   // frame's camera if this is the first frame rendered with it.
   void RecordCameraLatency(const FrameInfo& info);
@@ -188,21 +208,25 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void Emit(int32_t type, const char* message = nullptr,
             const FrameInfo* frame = nullptr, int64_t display_time_us = 0,
             int slot = 0);
-  void ReportStatus(const char* what, mln_status status);
+  void ReportStatus(const char* what, mln_status status,
+                    const mln_diagnostic* diagnostic = nullptr);
   // ReportStatus() that also sets init_error_.
-  void ReportInitStatus(const char* what, mln_status status);
+  void ReportInitStatus(const char* what, mln_status status,
+                        const mln_diagnostic* diagnostic = nullptr);
+  // A completion that reports a failure of `what` as a render error, and
+  // otherwise runs `on_success` with the result, on the completing thread.
+  mln_completion ReportingCompletion(
+      const char* what,
+      std::function<void(const mln_completion_result&)> on_success = nullptr);
 
   const int64_t handle_;
   const int64_t engine_;
   const double initial_pixel_ratio_;
   const std::optional<uint64_t> maximum_cache_size_;
 
-  // Fixed after the constructor. They outlive the runtime, whose destruction
-  // waits for in-flight transform callbacks.
+  // Fixed after the constructor. The runtime copies them into its native
+  // header rules.
   const std::vector<HttpHeaderRule> header_rules_;
-  std::vector<mln_adapter_http_header> transform_headers_;
-  std::vector<mln_adapter_http_header_transform_rule> transform_rules_;
-  mln_adapter_http_header_transform_rules transform_table_{};
 
   std::unique_ptr<RenderTarget> target_;
   CommandQueue commands_;
@@ -217,9 +241,11 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Why Init() failed; map thread until init_done_.
   std::string init_error_;
 
-  // Guards wake_ against destruction while another thread signals it.
+  // Wakes the map thread: commands, Dart's frame choices, and #760's
+  // driver-work and frame-result wakes signal it (design D167).
   std::mutex wake_mutex_;
-  mln_wake_source wake_ = MLN_HANDLE_NULL;
+  std::condition_variable wake_cv_;
+  bool woken_ = false;
 
   // Guards target_tasks_stopped_, which the map thread sets when it stops, so
   // that no target task is queued after that.
@@ -238,10 +264,35 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   Viewport viewport_{};
   bool render_pending_ = false;
   uint64_t next_frame_id_ = 1;
-  // The sequence number of the camera applied last (design D125), and when
-  // Dart set it.
+  // The sequence number of the newest camera that a rendered frame includes
+  // (design D125), and when Dart set it.
   int64_t applied_seq_ = 0;
   int64_t applied_set_at_ns_ = 0;
+  // The frame demand the map thread armed and hasn't received a result for
+  // (design D167): its token, the display slot it renders into, whether it
+  // renders ahead, and whether a resize reset the slots since it was armed.
+  bool demand_outstanding_ = false;
+  uint64_t demand_token_ = 0;
+  int demand_slot_ = -1;
+  bool demand_render_ahead_ = false;
+  bool demand_stale_ = false;
+  // Whether the last frame asked for another without a map update, as during
+  // a paint transition, so the next demand renders unconditionally.
+  bool repaint_wanted_ = false;
+  // Whether the Metal ring's frames are acquired to wait for the producer's
+  // GPU writes (findings Q1); false after acquisition reported UNSUPPORTED.
+  bool acquire_frames_ = true;
+
+  // The map snapshot generation that each camera command published, with the
+  // camera's sequence number and when Dart set it (design D169). Written by
+  // the command's completion, on any thread.
+  struct CameraGeneration {
+    uint64_t generation = 0;
+    int64_t seq = 0;
+    int64_t set_at_ns = 0;
+  };
+  std::mutex camera_generations_mutex_;
+  std::vector<CameraGeneration> camera_generations_;
   // When to tell Flutter once more that a frame is available after the last
   // resize (steady clock, ns), or 0 for not pending.
   int64_t notify_after_resize_at_ns_ = 0;
@@ -275,6 +326,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   map_texture_stats stats_{};
   // Guarded by stats_mutex_: the newest camera whose latency was counted.
   int64_t latency_counted_seq_ = 0;
+  // Guarded by stats_mutex_: frames whose acquisition reported NOT_READY
+  // after a RENDERED result, and frames acquired (findings Q1).
+  int64_t acquire_not_ready_ = 0;
+  int64_t acquired_frames_ = 0;
 };
 
 // Pauses or resumes every live map, and maps created while paused start

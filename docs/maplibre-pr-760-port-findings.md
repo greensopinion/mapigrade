@@ -50,7 +50,15 @@ Open. From reading #760's source at `3b56ef916` (not yet tested):
 
 ## Q2. Latency from camera to frame
 
-Open.
+Open; measured in tasks 4.1 and 4.2. What the port does (D169), and what was harder than the design expected:
+
+- A frame result carries the camera that the frame drew (`mln_render_frame_result.view.camera`), so no projection is needed to read it. The center's longitude is unwrapped (it can fall outside -180 to 180); before #760 `mln_map_projection_get_camera` returned it wrapped. Near longitude 0, as in the benchmarks, this makes no difference; elsewhere Dart would compare a camera off by 360°.
+- To keep `FrameInfo.seq` (D125), the port must know which camera command a frame includes. The completion of `mln_map_update_camera` reports a map *snapshot* generation, while a frame result's `map_update_generation` counts *render updates*, a different counter. The design (D169) assumed they could be compared. The port reads `mln_map_get_snapshot` in the camera's completion and records the snapshot's `latest_render_update_generation`. If another command published an update between the camera command and that read, the recorded generation is later than the camera's, so the frame gets the camera's `seq` one frame late. A completion that also reported the render update generation of the command would remove this.
+- With a caller-graphics-thread driver, the map thread arms one demand with `MLN_FRAME_DEMAND_IF_NEEDED | MLN_FRAME_DEMAND_WAIT_FOR_UPDATE` as soon as a slot may be rendered. The camera command goes to the runtime's scheduler thread, which publishes an update, which wakes the map thread through `driver_work_wake`, whose service call then renders.
+
+### First run (task 3.2, 2026-10-21)
+
+A debug build of the test harness on macOS with continuous pan (`LOG_FRAMES`, `CONTINUOUS_PAN`, window 1200x800) showed the map and displayed about 121 map frames per second. Each displayed frame reported its camera and `seq`, and no render error was reported. The frames used display slots 0, 1 and 2 about equally (347, 346 and 346 of 1,039); slot 3 wasn't used in that run (task 3.3 checks it in a release build).
 
 ## Q3. Synchronous execution
 
@@ -82,14 +90,23 @@ Lines of the native code on `main` (commit `d71c9bc`), in `packages/flutter_mapi
 
 | Area | Files | Lines on `main` | Lines on the branch |
 |---|---|---|---|
-| Core | `src/core/*` | 2,677 | |
-| Apple target | `darwin/.../MapTextureMetal.mm` | 459 | |
+| Core | `src/core/*` | 2,677 | 3,155 after task 3.2 |
+| Apple target | `darwin/.../MapTextureMetal.mm` | 459 | 481 after task 3.3 |
 | Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | |
 | Native tests | `test/native/*` | 2,371 | not built (D172) |
+
+Where the core's 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp` growing from 1,085 to 1,463 lines:
+
+- About 100 lines of completion plumbing: a waiter for completions that the map thread blocks on (map creation, attach, detach, target replacement after a resize, map and runtime release), a completion that runs a function on the completing thread, and freeing a completion's user data when its call is rejected. Before #760 every call that mapigrade made was synchronous.
+- About 150 lines for the frame loop: arming one frame demand at a time, servicing the driver, draining frame results and matching them to the armed demand, and handling a result of a demand whose slot a resize reset. Before #760 this was one `render_update` call.
+- About 60 lines in `Init`: the event handler, the native header rules (which replace about 25 lines of adapter tables), and waiting for map creation.
+- About 40 lines of teardown: detach and wait while servicing, then release the map and the runtime and wait for each.
+- The rest: a condition variable in place of the runtime's wake source, the wake callback, and the event callback, which replaces draining events.
 
 ## Build
 
 - `macos-arm64-metal` (task 2.1): `scripts/build_maplibre_ffi.sh` built #760 at `3b56ef916` without changes; only `MAPLIBRE_FFI_COMMIT` in `maplibre_ffi.lock` changed. #760 still has the presets, the `[vars]` of `mise.toml` and the scripts `.mise/bin/sync-submodules` and `sync-rustls-platform-verifier` that the script uses. The build took 148 s on top of an earlier build directory.
+- `android-arm64-egl` (task 2.2): built without changes in 117 s on top of an earlier build directory, after deleting the install directory. The patched `rustls-platform-verifier-android` component built and installed as version `3b56ef916410`. NDK 30.0.16248370, which #760's `mise.toml` pins, was already installed.
 - A defect of mapigrade's script, not of #760: the script reuses the FFI's install directory, so headers that #760 removed (`callback_adapter.h`, `diagnostics.h`) stayed in the framework. Deleting `third_party/maplibre-native-ffi-src/build/<preset>/install` before the build removes them. The real port should make the script delete the install directory.
 
 ## What broke
