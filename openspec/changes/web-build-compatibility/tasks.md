@@ -27,9 +27,12 @@
 
 Another session is changing `scripts/consumer_build.sh` and `.github/workflows/consumer-build.yml` on the branch `consumer-build-ci`. Don't edit that branch or its worktree, `/Users/dgreen/git/mapigrade-consumer-build-ci`.
 
-- [ ] 4.1 Verify that the branch `consumer-build-ci` (PR #1) is merged into `main` before this group starts, and rebase this change's branch onto `main`; if it isn't merged, stop and tell the user
-- [ ] 4.2 Add the `web` target to `scripts/consumer_build.sh`, with the consumer app placing `MapigradeLayer` behind `isSupported` (D164); verify that `scripts/consumer_build.sh web` succeeds on the Mac, and that it fails when `native_library.dart` temporarily imports `native_library_ffi.dart` without the condition (then revert the change)
-- [ ] 4.3 Add the two steps of D164 to the existing macOS job of `.github/workflows/consumer-build.yml` (the `web` target, and `flutter test --platform chrome test/unsupported_platform_test.dart`), and add `packages/flutter_mapigrade/lib/**` to its triggers; verify that the job passes on a branch
+- [x] 4.1 Verify that the branch `consumer-build-ci` (PR #1) is merged into `main` before this group starts, and rebase this change's branch onto `main`; if it isn't merged, stop and tell the user
+  - Result (2026-10-20): PR #1 was merged at 23:30 UTC as 384c402. This change's commits 8e688cf and da9572c were already on `main` before it, so there was no branch to rebase; group 4 is on the branch `web-build-ci` from `main`.
+- [x] 4.2 Add the `web` target to `scripts/consumer_build.sh`, with the consumer app placing `MapigradeLayer` behind `isSupported` (D164); verify that `scripts/consumer_build.sh web` succeeds on the Mac, and that it fails when `native_library.dart` temporarily imports `native_library_ffi.dart` without the condition (then revert the change)
+  - Result (2026-10-20): the example's `main.dart` places `MapigradeLayer` without `isSupported`, so the `web` target creates a second app, `<work-dir>/consumer_web_app`, whose `main.dart` is the README's `isSupported` example; the native targets still build the example. `scripts/consumer_build.sh <dir> web` succeeded on the Mac with both builds. `flutter pub publish --dry-run` fails on a modified checked-in file, so the unconditional import was committed in a temporary detached worktree; there dart2js failed with "Dart library 'dart:ffi' is not available on this platform" and named the chain through `native_library_ffi.dart`. The worktree was removed.
+- [x] 4.3 Add the two steps of D164 to the existing macOS job of `.github/workflows/consumer-build.yml` (the `web` target, and `flutter test --platform chrome test/unsupported_platform_test.dart`), and add `packages/flutter_mapigrade/lib/**` to its triggers; verify that the job passes on a branch
+  - Result (2026-10-21): the job was renamed "Android, iOS, macOS and web builds"; the repository's ruleset requires no status checks. Run 39519671764 (`workflow_dispatch` on `web-build-ci`) passed: both web builds succeeded, the three tests passed in Chrome, and the x86_64 emulator job passed.
 
 ## 5. Documentation
 
