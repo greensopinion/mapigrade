@@ -10,6 +10,7 @@ on:
       - packages/flutter_mapigrade/darwin/**
       - packages/flutter_mapigrade/src/**
       - packages/flutter_mapigrade/hook/**
+      - packages/flutter_mapigrade/lib/**
       - packages/flutter_mapigrade/pubspec.yaml
       - packages/flutter_mapigrade/maplibre_ffi.lock
       - packages/flutter_mapigrade/.pubignore
@@ -24,7 +25,7 @@ permissions:
 
 jobs:
   macos:
-    name: Android, iOS and macOS builds
+    name: Android, iOS, macOS and web builds
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -53,6 +54,13 @@ jobs:
           exit 1
       - name: Build the consumer application
         run: scripts/consumer_build.sh "$RUNNER_TEMP/consumer" android ios macos
+      # The package has no native library on web (design D164 of the
+      # web-build-compatibility change).
+      - name: Build the consumer application for web
+        run: scripts/consumer_build.sh "$RUNNER_TEMP/consumer" web
+      - name: Test the layer without the native library in Chrome
+        working-directory: packages/flutter_mapigrade
+        run: flutter test --platform chrome test/unsupported_platform_test.dart
       - name: Fetch the FFI release
         run: scripts/fetch_ffi_release.sh
       - name: Compare the notices with the FFI release

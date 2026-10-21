@@ -5,7 +5,7 @@
 #
 #   scripts/consumer_build.sh <work-dir> <platform>...
 #
-# The platforms are android, ios and macos. The script:
+# The platforms are android, ios, macos and web. The script:
 #
 # 1. Runs `flutter pub publish --dry-run` in packages/flutter_mapigrade and
 #    copies the files it lists, with symlinks resolved, to
@@ -13,15 +13,20 @@
 # 2. Creates the application <work-dir>/consumer_app with `flutter create`, with
 #    a path dependency on that copy and the example's lib/main.dart, and sets
 #    the minimum Android SDK and iOS and macOS versions that the package needs.
+#    For web it creates a second application, <work-dir>/consumer_web_app,
+#    whose lib/main.dart places MapigradeLayer only when
+#    MapigradeLayer.isSupported is true, as the package's README shows.
 # 3. Builds, per platform: android, a release APK; ios, a simulator build and a
-#    device build without code signing; macos, a release build.
+#    device build without code signing; macos, a release build; web, a build
+#    compiled to JavaScript and a build compiled to WebAssembly.
 # 4. Checks that the APK's lib/ has libmaplibre-native-c.so and
 #    libflutter_mapigrade.so for arm64-v8a, armeabi-v7a and x86_64, and that
 #    the iOS and macOS applications contain MaplibreNativeC.framework.
 #
 # <work-dir> must be outside the checkout, so that a build that reads a file
 # through a path outside the package fails. The script deletes and recreates
-# <work-dir>/flutter_mapigrade and <work-dir>/consumer_app.
+# <work-dir>/flutter_mapigrade, <work-dir>/consumer_app and
+# <work-dir>/consumer_web_app.
 #
 # Requires: flutter, python3, unzip; for ios and macos, Xcode.
 set -euo pipefail
@@ -46,9 +51,9 @@ case "$work_dir/" in
 esac
 for platform in "${platforms[@]}"; do
   case $platform in
-    android | ios | macos) ;;
+    android | ios | macos | web) ;;
     *)
-      echo "Unknown platform $platform; use android, ios or macos" >&2
+      echo "Unknown platform $platform; use android, ios, macos or web" >&2
       exit 2
       ;;
   esac
@@ -56,7 +61,8 @@ done
 
 archive_dir="$work_dir/flutter_mapigrade"
 app_dir="$work_dir/consumer_app"
-rm -rf "$archive_dir" "$app_dir"
+web_app_dir="$work_dir/consumer_web_app"
+rm -rf "$archive_dir" "$app_dir" "$web_app_dir"
 
 # 1. The archive. The dry run prints the file list as a tree: each entry is
 # indented by four characters per level and ends with its size, and a
@@ -134,6 +140,42 @@ for entitlements in DebugProfile Release; do
 done
 find "$app_dir" -name '*.bak' -delete
 
+if [[ " ${platforms[*]} " == *" web "* ]]; then
+  echo "== Web application"
+  (cd "$work_dir" && flutter create --org com.example --platforms web consumer_web_app)
+  rm -f "$web_app_dir/test/widget_test.dart"
+  (
+    cd "$web_app_dir"
+    flutter pub add flutter_mapigrade --path ../flutter_mapigrade
+    flutter pub add flutter_map:8.3.2 latlong2:^0.10.1
+  )
+  cat > "$web_app_dir/lib/main.dart" <<'EOF'
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_mapigrade/flutter_mapigrade.dart';
+import 'package:latlong2/latlong.dart';
+
+void main() => runApp(
+  MaterialApp(
+    home: Scaffold(
+      body: FlutterMap(
+        options: const MapOptions(initialCenter: LatLng(49.25, -123.1)),
+        children: [
+          if (MapigradeLayer.isSupported)
+            MapigradeLayer(styleUrl: 'https://tiles.openfreemap.org/styles/liberty')
+          else
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.consumer_web_app',
+            ),
+        ],
+      ),
+    ),
+  ),
+);
+EOF
+fi
+
 # 3 and 4. The builds and their checks.
 failures=()
 fail() {
@@ -169,6 +211,11 @@ for platform in "${platforms[@]}"; do
       (cd "$app_dir" && flutter build macos --release)
       [[ -d "$app_dir/build/macos/Build/Products/Release/consumer_app.app/Contents/Frameworks/MaplibreNativeC.framework" ]] \
         || fail "the macOS app has no MaplibreNativeC.framework"
+      ;;
+    web)
+      echo "== Web"
+      (cd "$web_app_dir" && flutter build web)
+      (cd "$web_app_dir" && flutter build web --wasm)
       ;;
   esac
 done
