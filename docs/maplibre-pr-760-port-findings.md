@@ -48,6 +48,16 @@ Open. From reading #760's source at `3b56ef916` (not yet tested):
 - `mln_render_frame_result` with `MLN_RENDER_RESULT_RENDERED` "states nothing about GPU completion" (`render_session.h`). Completion is stated only for an acquired frame: with `MLN_GPU_SYNC_CPU_COMPLETE`, the default and the only producer synchronization on Metal, the GPU writes completed before the frame became acquirable. So that Flutter doesn't sample a texture that MapLibre is still writing, the map thread acquires each rendered frame and releases it before the next target replacement, which `set_metal_borrowed_texture_target` requires ("fails while a frame of the ring is acquired"). This adds an acquire and a release per frame to D168.
 - In practice the Metal backend waits for completion inside the render: `MetalTextureBackend`'s `swap()` (`metal_texture_backend.mm`, line 141) commits the command buffer and calls `waitUntilCompleted()`. With a caller-graphics-thread driver that wait runs on the map thread inside `service_driver_work`, so the GPU writes have completed when the frame result arrives. The C API doesn't promise this, so the port acquires and releases each frame anyway, and the findings record whether doing so costs measurable time.
 
+### Result: a replacement before each frame renders without end (task 3.4)
+
+D168 doesn't work. With a borrowed ring of one texture replaced before each render, an idle copy-free map never stops rendering: in `map_texture_test.dart`, "idle map renders no frames for 10 seconds" and "idle copy-free map renders no frames for 10 seconds" rendered 39 → 1,240 and 39 → 1,232 frames in 10 s, about 120 per second. The map with the copy (one ring texture, never replaced) stayed at 39 → 39. `map_layer_test.dart` fails "metrics stay the same while the map is at rest" (99 expected, 219 rendered) for the same reason.
+
+The cause is in #760's target replacement (`render_session_common.cpp` around line 1858): it sets `rendered_update_generation = 0` and `pending_changes = true`, and resumes the demands that wait for an update, because "the new target holds no frame of the latest update". So each replacement makes the next demand with `MLN_FRAME_DEMAND_IF_NEEDED | MLN_FRAME_DEMAND_WAIT_FOR_UPDATE` render, and that render's slot is replaced again before the next one. Before #760, mapigrade had the same problem with `mln_metal_borrowed_texture_set_target`, and maplibre-native-ffi#807 fixed it by keeping the record of the rendered update across a same-size replacement. #760 reintroduces it, by design.
+
+This is the strongest evidence for Q1: under #760 mapigrade can't rotate more display slots than the ring holds, neither by a larger ring (at most 3) nor by replacing the ring's texture (each replacement forces a render).
+
+The engines test acquired 83 frames after `MLN_RENDER_RESULT_RENDERED` results, and none reported `MLN_STATUS_NOT_READY`.
+
 ## Q2. Latency from camera to frame
 
 Open; measured in tasks 4.1 and 4.2. What the port does (D169), and what was harder than the design expected:
@@ -66,7 +76,9 @@ Open.
 
 ## Q4. Glyph load failures
 
-Open. #760's log records (`logging.h`) carry no map identity, and #760 has no glyph failure event. Error records are still delivered synchronously on the thread that emits them. On `main`, MapLibre's `RenderOrchestrator::onGlyphsError` emits the record on the thread that renders, which is the map thread. If the orchestrator still runs where the session renders, which with a caller-graphics-thread driver is mapigrade's map thread, the `thread_local` owner still identifies the map. If it runs on the runtime worker, it doesn't, and mapigrade has no way to set a thread-local value on that thread. Task 3.5 tests which.
+Answered: the attribution still works with a caller-graphics-thread driver. `resource_test.dart` "glyphs that fail to load report a load failure" passes on macOS (task 3.5). Neither the released FFI nor #760 has a glyph failure event; both forward `onGlyphsError` to the renderer observer (`map.cpp`, `render_session_common.hpp`), and with a caller-graphics-thread driver the renderer runs on mapigrade's map thread, where the `thread_local` owner identifies the map. With a core-worker driver the record would come from a thread that mapigrade doesn't own, and the attribution would break. A map event for glyph failures would remove the dependency on the log callback.
+
+Before that, from the headers alone: #760's log records (`logging.h`) carry no map identity, and #760 has no glyph failure event. Error records are still delivered synchronously on the thread that emits them. On `main`, MapLibre's `RenderOrchestrator::onGlyphsError` emits the record on the thread that renders, which is the map thread. If the orchestrator still runs where the session renders, which with a caller-graphics-thread driver is mapigrade's map thread, the `thread_local` owner still identifies the map. If it runs on the runtime worker, it doesn't, and mapigrade has no way to set a thread-local value on that thread. Task 3.5 tests which.
 
 ## Q5. Android hook before the swap
 
@@ -116,7 +128,12 @@ Where the core's 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp
 
 ## What broke
 
-Nothing yet.
+macOS integration tests on the branch at `a87c69b` (task 3.4):
+
+- `map_texture_test.dart`: 25 passed, 1 skipped, 2 failed. The failures are "idle map renders no frames for 10 seconds" and "idle copy-free map renders no frames for 10 seconds" (Q1, rendering without end). Pausing, resizing every frame, freeing replaced buffers, memory reduction, surface removal, the cache size, style failures and the selected-frame tests passed.
+- `map_layer_test.dart`: 14 passed, 1 failed: "metrics stay the same while the map is at rest" (same cause).
+- `engines_test.dart` (`flutter drive`): all passed.
+- `resource_test.dart`: all passed, including the glyph failure test (Q4).
 
 ## Feedback for #760
 
