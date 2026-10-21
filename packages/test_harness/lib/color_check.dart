@@ -32,7 +32,7 @@ final style = jsonEncode({
               [0, 80],
               [-179, 80],
               [-179, -80],
-            ]
+            ],
           ],
         },
       },
@@ -79,15 +79,16 @@ class _ColorCheckState extends State<ColorCheck> {
 
   Future<void> _create(double pixelRatio) async {
     final controller = await MapTextureController.create(
-        pixelRatio: pixelRatio, copyFree: widget.copyFree);
+      pixelRatio: pixelRatio,
+      copyFree: widget.copyFree,
+    );
     if (!mounted) {
       controller.dispose();
       return;
     }
     controller.events.listen((event) => debugPrint('map event: $event'));
     controller.loadStyleJson(style);
-    controller.setCamera(
-        const MapCamera(latitude: 0, longitude: 0, zoom: 2));
+    controller.setCamera(const MapCamera(latitude: 0, longitude: 0, zoom: 2));
     setState(() => _controller = controller);
   }
 
@@ -99,18 +100,30 @@ class _ColorCheckState extends State<ColorCheck> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: Column(children: [
-          Expanded(
-              child: _controller == null
-                  ? const SizedBox.expand()
-                  : MapTextureView(controller: _controller!)),
-          const SizedBox(
-            height: 100,
-            child: Row(children: [
-              Expanded(child: ColoredBox(color: fillColor, child: SizedBox.expand())),
-              Expanded(child: ColoredBox(color: backgroundColor, child: SizedBox.expand())),
-            ]),
+    body: Column(
+      children: [
+        Expanded(
+          child: _controller == null
+              ? const SizedBox.expand()
+              : MapTextureView(controller: _controller!),
+        ),
+        const SizedBox(
+          height: 100,
+          child: Row(
+            children: [
+              Expanded(
+                child: ColoredBox(color: fillColor, child: SizedBox.expand()),
+              ),
+              Expanded(
+                child: ColoredBox(
+                  color: backgroundColor,
+                  child: SizedBox.expand(),
+                ),
+              ),
+            ],
           ),
-        ]),
-      );
+        ),
+      ],
+    ),
+  );
 }
