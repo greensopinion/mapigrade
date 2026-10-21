@@ -3,7 +3,7 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 ## 1. Findings and baseline
 
 - [x] 1.1 Create `docs/maplibre-pr-760-port-findings.md` with a section for each of Q1 to Q7, a section for the pinned commit and its changes, a section for complexity (what moved where, with line counts per area against `main`), a section for what broke, and a section for feedback for #760; verify that the file exists and names commit `3b56ef916`
-- [ ] 1.2 Add camera-to-frame latency to `map_texture_stats` and the benchmarks' output (D171) as the branch's first commit, before any change for #760, so that the commit still uses the released FFI and is the baseline; verify that the native tests pass, then run the frame-rate benchmark (`benchmark.dart`) and the alignment benchmark with `ALIGNMENT_CHILDREN=1` and the phases `pan100,pan500,pan1000,stop,fling,reverse` on macOS, 3 runs each, and verify that the findings document has the baseline numbers and the commit they were measured at
+- [x] 1.2 Add camera-to-frame latency to `map_texture_stats` and the benchmarks' output (D171) as the branch's first commit, before any change for #760, so that the commit still uses the released FFI and is the baseline; verify that the native tests pass, then run the frame-rate benchmark (`benchmark.dart`) and the alignment benchmark with `ALIGNMENT_CHILDREN=1` and the phases `pan100,pan500,pan1000,stop,fling,reverse` on macOS, 3 runs each, and verify that the findings document has the baseline numbers and the commit they were measured at
 
 ## 2. Build against #760
 
