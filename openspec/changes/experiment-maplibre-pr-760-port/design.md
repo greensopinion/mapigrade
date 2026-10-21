@@ -72,7 +72,7 @@ The questions are ordered by how much an answer could change #760's API, which m
 
 ### D166. The branch builds #760 from source at a pinned commit
 
-`maplibre_ffi.lock` on the branch sets `MAPLIBRE_FFI_COMMIT` to `3b56ef916` and `MAPLIBRE_FFI_REPO` to the upstream repository, and `scripts/build_maplibre_ffi.sh` builds the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl`, which #760 still has. `Package.swift` uses the local xcframework. We move the pin only on purpose, and record each move and the reason in the findings document, because #760 changes daily.
+`maplibre_ffi.lock` on the branch sets `MAPLIBRE_FFI_COMMIT` to `3b56ef916` and `MAPLIBRE_FFI_REPO` to the upstream repository, the build applies `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` on top (D173), and `scripts/build_maplibre_ffi.sh` builds the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl`, which #760 still has. `Package.swift` uses the local xcframework. We move the pin only on purpose, and record each move and the reason in the findings document, because #760 changes daily.
 
 Alternatives:
 - Track the PR's head. Every rebuild could change the API under the port, and measurements would not be comparable.
@@ -91,6 +91,16 @@ The session attaches a borrowed Metal ring of one texture. Before each render, t
 Alternatives:
 - A borrowed ring of 3 textures, with 3 display slots. Each displayed frame is acquired and released when Flutter no longer displays it. Flutter samples the IOSurface without a fence that the release can wait on. It changes D122 from 4 slots to 3. We try it if D168 fails.
 - The copy path (D3b): a ring owned by the session and a GPU copy into 4 slots. It works within the limit, but costs the copy that copy-free maps removed (benchmarks.md, "Copy-free with the upstream FFI fix").
+
+### D173. A local patch keeps the rendered update across a same-size replacement
+
+Task 3.4 showed that D168 alone renders without end: #760's target replacement resets the session's record of the rendered update and resumes waiting demands, so each replacement makes the next demand render (findings Q1). maplibre-native-ffi#807 fixed the same behavior of the earlier `set_target`. The branch carries a patch to #760 (`scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch`) with the same semantic: a replacement of a borrowed texture ring with the same extent and physical size keeps `rendered_update_generation` and `pending_changes`, marks the new target as holding the rendered update, and doesn't resume waiting demands. The generation still increases, so frames published before the replacement still can't be acquired.
+
+Every measurement of the copy-free path on the branch is of #760 with this patch. The patch is the first change we propose for #760, as a stacked pull request (task 7.3).
+
+Alternatives:
+- A ring of 3 textures and 3 display slots, which #760 supports without a patch. It changes D122 and measures the ring limit instead; kept as the fallback if #760 rejects the patch.
+- Benchmarking D168 without the patch. Phases where the map should be idle would render continuously, so the numbers would describe a defect, not #760.
 
 ### D169. The frame's camera comes from the frame result
 

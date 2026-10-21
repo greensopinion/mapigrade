@@ -1,0 +1,62 @@
+diff --git a/src/render/render_session_common.cpp b/src/render/render_session_common.cpp
+index e37546f2d..eb3bea5d3 100644
+--- a/src/render/render_session_common.cpp
++++ b/src/render/render_session_common.cpp
+@@ -1821,6 +1821,19 @@ auto render_session_set_target(
+   if (status != MLN_STATUS_OK) {
+     return status;
+   }
++  // A host that rotates its own textures through a borrowed ring of the same
++  // size replaces the target before each frame. Such a replacement brings no
++  // new map state, so it keeps the record of the rendered update, and a
++  // render-if-needed demand renders only when the map has a newer update, as
++  // maplibre-native-ffi#807 did for the earlier set_target.
++  const auto same_size_borrowed = [&] {
++    const auto lock = std::scoped_lock{live->control_mutex};
++    return kind == RetargetTargetKind::BorrowedTexture &&
++           live->width == extent.width && live->height == extent.height &&
++           live->scale_factor == extent.scale_factor &&
++           live->physical_width == physical_width &&
++           live->physical_height == physical_height;
++  }();
+ 
+   const auto replace_status = [&]() -> mln_status {
+     try {
+@@ -1855,15 +1868,23 @@ auto render_session_set_target(
+     // across the sibling resize path.
+     auto wakes = DeferredWakes{};
+     const auto lock = std::scoped_lock{live->control_mutex};
+-    live->rendered_update_generation = 0;
++    const auto keeps_rendered_update =
++      same_size_borrowed &&
++      live->rendered_target_generation == live->generation;
++    if (!same_size_borrowed) {
++      live->rendered_update_generation = 0;
++      live->pending_changes = true;
++    }
+     live->rendered_target_generation = 0;
+-    live->pending_changes = true;
+     live->width = extent.width;
+     live->height = extent.height;
+     live->physical_width = physical_width;
+     live->physical_height = physical_height;
+     live->scale_factor = extent.scale_factor;
+     ++live->generation;
++    if (keeps_rendered_update) {
++      live->rendered_target_generation = live->generation;
++    }
+     // No frame is acquired, which the check above and the submission's hold
+     // on acquisition ensure. Each slot starts over with its new texture, which
+     // also lifts a quarantine: the texture that the host's GPU may still read
+@@ -1872,8 +1893,9 @@ auto render_session_set_target(
+       for (auto& slot : live->texture.slots) slot = RenderTextureSlot{};
+     }
+     // The new target holds no frame of the latest update, so a demand that
+-    // waits for an update has one to render now.
+-    resume_update_waiting_demands_locked(*live, wakes);
++    // waits for an update has one to render now. After a same-size borrowed
++    // replacement it waits for the map's next update instead.
++    if (!same_size_borrowed) resume_update_waiting_demands_locked(*live, wakes);
+   }
+ 
+   // The submission already sized the map to this extent.

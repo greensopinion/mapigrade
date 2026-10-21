@@ -17,6 +17,7 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 - [ ] 3.3 Port the Metal target in `MapTextureMetal.mm` to a borrowed ring of one texture replaced before each render (D168); verify that the map renders into all 4 display slots during a pan, or record why it doesn't and try the alternatives of D168 in order
 - [x] 3.4 Port pausing, resizing, memory reduction and engine detach (Q6); verify with `map_texture_test.dart`, `map_layer_test.dart` and `engines_test.dart` (with `flutter drive`) on macOS, and record each failure that `main` doesn't have
 - [x] 3.5 Find a way to report glyph load failures per map (Q4); verify with the glyph failure scenario of `map_layer_test.dart`, or record that #760 offers no way
+- [x] 3.6 Add `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` (D173) and rebuild `macos-arm64-metal` with it; verify that "idle map renders no frames for 10 seconds" and "idle copy-free map renders no frames for 10 seconds" in `map_texture_test.dart` and "metrics stay the same while the map is at rest" in `map_layer_test.dart` pass on macOS
 
 ## 4. Measure on macOS
 
@@ -39,3 +40,4 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 
 - [ ] 7.1 Write the conclusions for Q1 to Q7 in the findings document, each stating whether the result comes from #760 or from the port's shortcuts (D172), and what the real port would need; verify that every question has an answer or is listed as open
 - [ ] 7.2 Draft one upstream issue per request for #760 (at least slot count or per-frame target replacement, and synchronous execution with the latency numbers), each with the commit and measurements; verify that the drafts are in the findings document, ready for the user to review before anything is posted
+- [ ] 7.3 Prepare a stacked pull request against #760 (base branch `sargunv/binding-codegen`) from the patch of D173, with a C test that a same-size borrowed replacement leaves an idle render-if-needed demand waiting, and a description that links maplibre-native-ffi#807 and the findings' measurements; verify that the branch builds and the FFI's tests pass, and leave it for the user to review before anything is pushed or opened

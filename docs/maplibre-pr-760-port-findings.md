@@ -9,6 +9,7 @@ Each finding names the #760 commit it was made with, and states whether it comes
 | Date | Commit | Reason |
 |---|---|---|
 | 2026-10-21 | `3b56ef916` ("Merge origin/main into binding-codegen") | Initial pin (D166). |
+| 2026-10-21 | `3b56ef916` with `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` | D168 renders without end without it (Q1, D173). |
 
 ## Baseline
 
@@ -57,6 +58,12 @@ The cause is in #760's target replacement (`render_session_common.cpp` around li
 This is the strongest evidence for Q1: under #760 mapigrade can't rotate more display slots than the ring holds, neither by a larger ring (at most 3) nor by replacing the ring's texture (each replacement forces a render).
 
 The engines test acquired 83 frames after `MLN_RENDER_RESULT_RENDERED` results, and none reported `MLN_STATUS_NOT_READY`.
+
+### With the local patch (D173, task 3.6)
+
+`scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` (26 lines added, 4 removed, in `src/render/render_session_common.cpp`) gives #760's target replacement the semantic of maplibre-native-ffi#807: a replacement of a borrowed texture ring with the same extent and physical size keeps the record of the rendered update, marks the new target as holding it, and doesn't resume demands that wait for an update. With it, "idle map renders no frames for 10 seconds" (38 → 38 frames) and "idle copy-free map renders no frames for 10 seconds" (39 → 39) pass, and `map_layer_test.dart` passes completely (15 tests). "metrics stay the same while the map is at rest" fails when it runs alone ("Expected: not null"), on the branch as a whole; it depends on an earlier test of the file, which is a defect of mapigrade's tests, not of the port.
+
+From here on, every measurement of the copy-free path is of #760 at `3b56ef916` with this patch. The patch is the first change proposed for #760 (stacked pull request, task 7.3).
 
 ## Q2. Latency from camera to frame
 
@@ -137,4 +144,8 @@ macOS integration tests on the branch at `a87c69b` (task 3.4):
 
 ## Feedback for #760
 
-None yet. Issue drafts go here for review before anything is posted.
+Issue drafts and the stacked pull request go here for review before anything is posted.
+
+1. Same-size replacement of a borrowed texture ring (Q1, D173): keep the record of the rendered update, as maplibre-native-ffi#807 did for the earlier `set_target`. Proposed as a stacked pull request with the patch above.
+2. Report the render update generation of a map command in its completion, or in a way that can be compared with `mln_render_frame_result.map_update_generation` (Q2).
+3. Run CPU-only driver work, such as `mln_render_session_reduce_memory_use`, without the GPU work queued with it, so that a paused caller-driver session can release memory (Q6).
