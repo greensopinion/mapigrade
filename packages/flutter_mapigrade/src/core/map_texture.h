@@ -170,6 +170,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   bool RenderUpdate(int64_t start, bool* needs_repaint);
   // Map thread: the frame just rendered, with the camera it was rendered with.
   FrameInfo RenderedFrameInfo();
+  // Before a frame-ready event: counts the camera-to-frame latency of the
+  // frame's camera if this is the first frame rendered with it.
+  void RecordCameraLatency(const FrameInfo& info);
   // Map thread: whether to render without waiting until Dart has chosen the
   // latest frame (design D19).
   bool RenderAhead();
@@ -235,8 +238,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   Viewport viewport_{};
   bool render_pending_ = false;
   uint64_t next_frame_id_ = 1;
-  // The sequence number of the camera applied last (design D125).
+  // The sequence number of the camera applied last (design D125), and when
+  // Dart set it.
   int64_t applied_seq_ = 0;
+  int64_t applied_set_at_ns_ = 0;
   // When to tell Flutter once more that a frame is available after the last
   // resize (steady clock, ns), or 0 for not pending.
   int64_t notify_after_resize_at_ns_ = 0;
@@ -268,6 +273,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   std::mutex stats_mutex_;
   map_texture_stats stats_{};
+  // Guarded by stats_mutex_: the newest camera whose latency was counted.
+  int64_t latency_counted_seq_ = 0;
 };
 
 // Pauses or resumes every live map, and maps created while paused start

@@ -313,6 +313,12 @@ class Benchmark {
         after.presentToRenderCount - before.presentToRenderCount,
       ),
       'interval_waits': after.intervalWaits - before.intervalWaits,
+      // From setCamera until the first frame with that camera finished.
+      'camera_latency_avg_ms': _avgMs(
+        after.cameraLatencyTotal - before.cameraLatencyTotal,
+        after.cameraLatencyCount - before.cameraLatencyCount,
+      ),
+      'camera_latency_max_ms': ms(after.cameraLatencyMax),
     };
   }
 }

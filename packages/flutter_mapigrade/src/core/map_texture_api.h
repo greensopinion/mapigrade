@@ -130,6 +130,12 @@ typedef struct map_texture_stats {
   // The most display slots in use (rendering, queued, ready or held) at
   // once.
   int64_t max_slots_in_use;
+  // Time from map_texture_set_camera() until the frame-ready event of the
+  // first frame rendered with that camera, counted once per camera. A camera
+  // that a later one replaced before the map thread applied it isn't counted.
+  int64_t camera_latency_count;
+  int64_t camera_latency_total_ns;
+  int64_t camera_latency_max_ns;
 } map_texture_stats;
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread. The

@@ -212,7 +212,7 @@ void MapTexture::LoadStyleJson(std::string json) {
 }
 
 void MapTexture::SetCamera(const Camera& camera, int64_t seq) {
-  commands_.SetCamera(camera, seq);
+  commands_.SetCamera(camera, seq, NowNs());
   Signal();
 }
 
@@ -343,6 +343,7 @@ bool MapTexture::OnFrameImage(
   switch (buffers_.OnImage(frame_id, &slot, &info, &known, on_published)) {
     case BufferState::ImageResult::kPublished:
       published_at_ns_.store(NowNs());
+      RecordCameraLatency(info);
       Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, slot);
       // Publishing frees the slots of the replaced ready and queued frames.
       if (waiting_for_buffer_.exchange(false)) Signal();
@@ -386,6 +387,18 @@ void* MapTexture::Present(int slot) {
   }
   if (waiting_for_buffer_.exchange(false)) Signal();
   return buffer;
+}
+
+void MapTexture::RecordCameraLatency(const FrameInfo& info) {
+  if (info.camera_set_at_ns == 0) return;
+  int64_t latency = NowNs() - info.camera_set_at_ns;
+  std::lock_guard lock(stats_mutex_);
+  if (info.seq <= latency_counted_seq_) return;
+  latency_counted_seq_ = info.seq;
+  ++stats_.camera_latency_count;
+  stats_.camera_latency_total_ns += latency;
+  stats_.camera_latency_max_ns =
+      std::max(stats_.camera_latency_max_ns, latency);
 }
 
 map_texture_stats MapTexture::stats() {
@@ -697,6 +710,7 @@ void MapTexture::ApplyCamera() {
     return;
   }
   applied_seq_ = update->seq;
+  applied_set_at_ns_ = update->set_at_ns;
 }
 
 void MapTexture::DrainEvents() {
@@ -873,6 +887,7 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   // runs, so needs_repaint needs no action here (see
   // mln_render_session_render_update in render_session.h). Dart marks the
   // slot's texture available when it chooses the frame (design D123).
+  RecordCameraLatency(info);
   Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
 
@@ -914,6 +929,7 @@ void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
   // The listener may receive the image before render_update returns.
   if (published) {
     published_at_ns_.store(NowNs());
+    RecordCameraLatency(info);
     Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
   }
 }
@@ -958,6 +974,7 @@ FrameInfo MapTexture::RenderedFrameInfo() {
   FrameInfo info;
   info.frame_id = next_frame_id_++;
   info.seq = applied_seq_;
+  info.camera_set_at_ns = applied_set_at_ns_;
   info.physical_width = size_.physical_width;
   info.physical_height = size_.physical_height;
   info.scale_factor = size_.extent.scale_factor;

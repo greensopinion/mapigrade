@@ -150,6 +150,9 @@ class MapTextureStats {
     this.renderAheadFrames = 0,
     this.intervalWaits = 0,
     this.maxSlotsInUse = 0,
+    this.cameraLatencyCount = 0,
+    this.cameraLatencyTotal = Duration.zero,
+    this.cameraLatencyMax = Duration.zero,
   });
 
   /// Frames the map rendered.
@@ -231,6 +234,19 @@ class MapTextureStats {
   /// The most display slots in use (rendering, queued, ready or chosen) at
   /// once.
   final int maxSlotsInUse;
+
+  /// Cameras that a frame was rendered with, counted once each when the
+  /// first such frame finished. A camera that a later one replaced before
+  /// the map applied it isn't counted.
+  final int cameraLatencyCount;
+
+  /// The total, over the cameras counted by [cameraLatencyCount], of the time
+  /// from [MapTextureController.setCamera] until the first frame rendered
+  /// with the camera finished.
+  final Duration cameraLatencyTotal;
+
+  /// The longest of the times counted by [cameraLatencyCount].
+  final Duration cameraLatencyMax;
 
   @override
   String toString() =>
