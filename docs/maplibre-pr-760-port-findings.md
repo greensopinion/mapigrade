@@ -103,6 +103,21 @@ Alignment benchmark, ranges over 3 runs. The drawn error was 0 px at max in ever
 
 On the iPhone the port keeps the frame rate and the alignment of the layer's children (the error stays 0 px), but each camera reaches a finished frame about 3.5 ms later (about 30% more, or about 0.4 of a 120 Hz refresh interval). Where that pushes the frame past a refresh, the displayed map lags the live `flutter_map` camera by one more frame: in reverse in all 3 runs and in pan1000 in 2 of 3 runs, the median lag doubled from 8.3 px to 16.6 px (one frame at 1,000 px/s), and the p95 lag of stop and reverse rose from 16.7 px to 25 px. Camera prediction (`predict1`) doesn't hide the extra latency; task 4.2 tests whether a longer lead does. The extra time is the path from `mln_map_update_camera` through the runtime's scheduler thread, its render update and `driver_work_wake`, back to the map thread; the service call that renders costs the same as `render_update` did.
 
+### macOS (2026-10-21, task 4.1)
+
+Baseline `c1b51b1` against the branch at `c8a0321`, 3 runs each, alternating, in the Setup of the baseline above; every run's window was checked to be on screen. The thermal state was nominal throughout. The result lines are in `docs/maplibre-pr-760-port-results/cmp1-*`.
+
+| | Displayed map fps | Per-second p10 / p50 | Service or `render_update` (ms) | Camera latency avg (ms) |
+|---|---|---|---|---|
+| Baseline | 104.9–108.3 | 98–102 / 105–108 | 7.44–7.48 | 8.79–9.11 |
+| Port | 107.1–108.7 | 99–102 / 107–109 | 7.44–7.49 | 8.96–9.20 |
+
+Alignment benchmark: the drawn error was 0 px at max in every phase of every run, every phase used all 4 display slots (task 3.3), and the median lag was the same on both sides in every phase. The port's camera latency was 0.2–0.6 ms longer per phase (for example pan100 9.34–9.56 ms against 9.91–10.0 ms, reverse 9.75–10.17 ms against 10.29–10.34 ms). The port's p95 lag in fling was 18.1–19.6 px against 16.67 px, and its maximum lag at stop was 41.7–58.3 px against 33.3 px.
+
+### Mac and iPhone compared
+
+On the Mac the core executor's thread switch costs about 0.3 ms per camera, well inside the frame budget, so the lag doesn't change. On the iPhone it costs about 3.5 ms, enough to push frames past a 120 Hz refresh. The service call that renders costs the same on both. A plausible cause, not yet tested, is that the runtime's scheduler thread runs at a lower priority or on an efficiency core on the iPhone, where a thread switch and a wake take longer, especially under thermal pressure (serious from the second run on). A trace of the thread switch on the iPhone (Instruments, System Trace) would show where the 3.5 ms go, and whether a higher priority for the scheduler thread would remove them.
+
 ## Q3. Synchronous execution
 
 Open.

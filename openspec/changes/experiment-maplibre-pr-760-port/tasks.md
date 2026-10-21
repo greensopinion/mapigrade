@@ -14,14 +14,14 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 
 - [x] 3.1 Port runtime and map creation, teardown, style loading, HTTP header rules, the cache size and events in `src/core/map_texture.cpp` to #760, and replace `mln_runtime_pump` with a loop that waits on the command queue, signaled by `driver_work_wake` and `frame_wake` (D167); verify that the plugin builds for macOS with `flutter build macos` in `packages/test_harness`
 - [x] 3.2 Port rendering to `request_frame`, `service_driver_work` and `drain_frame_results`, with the frame's camera from `result.view` and `seq` from the generation of each `update_camera` completion (D169); verify that the test harness on macOS shows the map and reports frames with cameras
-- [ ] 3.3 Port the Metal target in `MapTextureMetal.mm` to a borrowed ring of one texture replaced before each render (D168); verify that the map renders into all 4 display slots during a pan, or record why it doesn't and try the alternatives of D168 in order
+- [x] 3.3 Port the Metal target in `MapTextureMetal.mm` to a borrowed ring of one texture replaced before each render (D168); verify that the map renders into all 4 display slots during a pan, or record why it doesn't and try the alternatives of D168 in order
 - [x] 3.4 Port pausing, resizing, memory reduction and engine detach (Q6); verify with `map_texture_test.dart`, `map_layer_test.dart` and `engines_test.dart` (with `flutter drive`) on macOS, and record each failure that `main` doesn't have
 - [x] 3.5 Find a way to report glyph load failures per map (Q4); verify with the glyph failure scenario of `map_layer_test.dart`, or record that #760 offers no way
 - [x] 3.6 Add `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` (D173) and rebuild `macos-arm64-metal` with it; verify that "idle map renders no frames for 10 seconds" and "idle copy-free map renders no frames for 10 seconds" in `map_texture_test.dart` and "metrics stay the same while the map is at rest" in `map_layer_test.dart` pass on macOS
 
 ## 4. Measure on macOS
 
-- [ ] 4.1 Run the benchmarks of task 1.2 on the branch, 3 runs each, alternating with the baseline commit of task 1.2; verify that the findings document compares frame rate, frame cycle, alignment error, lag and camera-to-frame latency for both
+- [x] 4.1 Run the benchmarks of task 1.2 on the branch, 3 runs each, alternating with the baseline commit of task 1.2; verify that the findings document compares frame rate, frame cycle, alignment error, lag and camera-to-frame latency for both
 - [ ] 4.2 Run the alignment benchmark with camera prediction turned off and on, at the baseline commit and on the branch; verify that the findings document states whether prediction still reduces the lag under #760 (Q2)
 
 ## 5. Android
