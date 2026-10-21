@@ -77,6 +77,32 @@ Open; measured in tasks 4.1 and 4.2. What the port does (D169), and what was har
 
 A debug build of the test harness on macOS with continuous pan (`LOG_FRAMES`, `CONTINUOUS_PAN`, window 1200x800) showed the map and displayed about 121 map frames per second. Each displayed frame reported its camera and `seq`, and no render error was reported. The frames used display slots 0, 1 and 2 about equally (347, 346 and 346 of 1,039); slot 3 wasn't used in that run (task 3.3 checks it in a release build).
 
+### iPhone (2026-10-21, task 6.2)
+
+Baseline `c1b51b1` (released FFI) against the branch at `c8a0321` (#760 at `3b56ef916` with the patch of D173), 3 runs each of the frame-rate benchmark and of the alignment benchmark (`ALIGNMENT_CHILDREN=1`, mode `predict1`, 20 s per phase), alternating, release builds, copy-free. iPhone 15 Pro Max on cable power, launched with `MLT_KEEP_AWAKE=1`, 430x932 logical pixels at pixel ratio 3. The thermal state was fair at the end of the first alignment run of each side and serious at the end of every later one, on both sides; the frame-rate benchmark doesn't report it. The result lines are in `docs/maplibre-pr-760-port-results/ios1-*`.
+
+Frame-rate benchmark (30 s pan), mean of 3 runs:
+
+| | Displayed map fps | Frame cycle (ms) | Service or `render_update` (ms) | Camera latency avg (ms) |
+|---|---|---|---|---|
+| Baseline | 109.6 (109.1–110.1) | 8.33–8.42 | 7.95 | 11.4 (11.35–11.5) |
+| Port | 109.6 (108.7–110.2) | 8.31–8.37 | 7.92 | 15.0 (14.74–15.42) |
+
+The port's lowest second was lower in two runs (94 and 78 frames against 101–102 for the baseline); p10 and p50 were the same.
+
+Alignment benchmark, ranges over 3 runs. The drawn error was 0 px at max in every phase of every run on both sides, and every phase used all 4 display slots.
+
+| Phase | Camera latency (ms), baseline | port | Lag p50 (px), baseline | port |
+|---|---|---|---|---|
+| pan100 | 10.9–12.4 | 15.1–16.1 | 0.83 | 0.84–1.66 |
+| pan500 | 11.5–11.8 | 13.6–15.1 | 4.17 | 4.18–4.2 |
+| pan1000 | 11.6–11.9 | 14.1–15.7 | 8.33–8.34 | 8.35–16.64 |
+| stop | 12.8–13.1 | 16.6–17.6 | 0.01–0.03 | 0.05–1.52 |
+| fling | 11.9–12.3 | 15.8–16.5 | 1.46–2.12 | 2.78–3.42 |
+| reverse | 12.5–12.9 | 16.5–18.0 | 8.34 | 16.65–16.67 |
+
+On the iPhone the port keeps the frame rate and the alignment of the layer's children (the error stays 0 px), but each camera reaches a finished frame about 3.5 ms later (about 30% more, or about 0.4 of a 120 Hz refresh interval). Where that pushes the frame past a refresh, the displayed map lags the live `flutter_map` camera by one more frame: in reverse in all 3 runs and in pan1000 in 2 of 3 runs, the median lag doubled from 8.3 px to 16.6 px (one frame at 1,000 px/s), and the p95 lag of stop and reverse rose from 16.7 px to 25 px. Camera prediction (`predict1`) doesn't hide the extra latency; task 4.2 tests whether a longer lead does. The extra time is the path from `mln_map_update_camera` through the runtime's scheduler thread, its render update and `driver_work_wake`, back to the map thread; the service call that renders costs the same as `render_update` did.
+
 ## Q3. Synchronous execution
 
 Open.
