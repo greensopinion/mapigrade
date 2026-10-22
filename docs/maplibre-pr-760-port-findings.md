@@ -288,6 +288,10 @@ iOS simulator (iPhone 17, iOS 26.5) at `3e5b263` (task 6.3): `map_layer_test.dar
 
 The cause was a defect of the port, not of #760. A state dump of the stalled map thread showed the session had rendered every map update (`rendered_update_generation` equal to `map_update_generation`, nothing pending), while the map thread held an armed demand with `MLN_FRAME_DEMAND_WAIT_FOR_UPDATE`. A demand armed before the last resize had rendered the final size's update into a frame that the port discarded, because the resize had reset the slots; the next demand then waited for an update that an idle map doesn't publish. Before #760 a resize set `render_pending_`, which forced a render. The port now makes the demand after a discarded result render unconditionally, and the test passes on the simulator (601 resizes, 576 frames rendered, final size displayed). The macOS run passed only by timing. A demand flag such as "render even if this update was rendered before into a target that was replaced" would make this explicit, but the host-side fix is simple, so it isn't an ask.
 
+At `2c124a5`, with the fixes above, `map_texture_test.dart` passes on the Pixel (28 passed, 2 skipped), the iOS simulator (29 passed, 1 skipped) and macOS (29 passed, 1 skipped); macOS needed no lost-target recovery.
+
+The benchmarks on the Mac and the iPhone ran at `c8a0321` and the Pixel's at `4173c68`, before these fixes. The fixes change only what happens after a resize, a window replacement or a failed render, not a steady pan, so the measurements weren't repeated.
+
 ## Feedback for #760
 
 Issue drafts and the stacked pull request go here for review before anything is posted.
