@@ -156,7 +156,14 @@ Before that, from the headers alone: #760's log records (`logging.h`) carry no m
 
 ## Q5. Android hook before the swap
 
-Open. On `main`, Android switches the session's surface only when the window is replaced or the map parks on a pbuffer, not per frame. In discussion #877 we wrote that Android switches the OpenGL surface per frame; that was wrong.
+On `main`, Android switches the session's surface only when the window is replaced or the map parks on a pbuffer, not per frame. In discussion #877 we wrote that Android switches the OpenGL surface per frame; that was wrong.
+
+Port (task 5.1, `8af69ee`):
+
+- `WillRender` (the frame id as the presentation time, and the scissor workaround) runs on the map thread before each `service_driver_work` call while a demand is armed (D170). This is correct only if one service call renders at most one frame. In a 13 s continuous pan on the Pixel 4a (5G) (debug build, `LOG_FRAMES`, `CONTINUOUS_PAN`), 603 frames were displayed, every image arrived with the id of a frame that a slot had queued, and no unknown frame was reported (D131), so no service call rendered more than one frame. The C API doesn't promise this; a per-frame hook that the driver calls right before it swaps, or a frame token that the session attaches to the presented buffer, would make it explicit.
+- Before #760 the attachment made the dedicated context current at once, and the target set the swap interval right after it. Under #760 the context becomes current in driver work after the attach call returns, so the target sets the swap interval in `WillRender` once the session's context is current on the window surface.
+- A window replacement or a park is an ordered operation under #760, while the target destroys the previous EGL surface right after it. The target services the session until the replacement's completion before it destroys the surface (Q6).
+- The map rendered at about 55 map frames per second in that debug build, and all 6 display slots were used (130, 132, 128, 127, 84 and 2 frames).
 
 ## Q6. Lifecycle
 
@@ -183,7 +190,7 @@ Lines of the native code on `main` (commit `d71c9bc`), in `packages/flutter_mapi
 |---|---|---|---|
 | Core | `src/core/*` | 2,677 | 3,155 after task 3.2 |
 | Apple target | `darwin/.../MapTextureMetal.mm` | 459 | 481 after task 3.3 |
-| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | |
+| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | 830 after task 5.1 |
 | Native tests | `test/native/*` | 2,371 | not built (D172) |
 
 Where the core's 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp` growing from 1,085 to 1,463 lines:
