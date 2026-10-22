@@ -6,13 +6,13 @@ Each finding names the #760 commit it was made with, and states whether it comes
 
 ## Summary
 
-Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac and the iPhone 15 Pro Max; the Pixel 4a (5G) comparison is running. One integration test that passes on the baseline fails on the port on the Pixel and isn't investigated yet; a second one, on the iOS simulator, was a defect of the port and is fixed ("What broke").
+Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac, the iPhone 15 Pro Max and the Pixel 4a (5G). One integration test that passes on the baseline fails on the port on the Pixel and isn't investigated yet; a second one, on the iOS simulator, was a defect of the port and is fixed ("What broke").
 
 Findings:
 
-- **Frame rate and overlay alignment don't change.** On the Mac and the iPhone, the displayed map frame rate, the time to render a frame, and the alignment of the layer's children (0 px error in every phase) are the same as with the released FFI ("Mac and iPhone compared").
+- **Frame rate and overlay alignment don't change.** On the Mac and the iPhone, the displayed map frame rate, the time to render a frame, and the alignment of the layer's children (0 px error in every phase) are the same as with the released FFI ("Mac and iPhone compared"). On the Pixel the time to render a frame is the same and the frame rate is 1.3% lower; the alignment benchmark doesn't run on Android ("Pixel 4a (5G)").
 - **mapigrade's 4 display slots on Apple platforms don't fit #760 as it is.** A borrowed texture ring holds at most 3 textures, and replacing the ring's texture before each frame, which the port does instead, makes an idle map render about 120 frames per second without end: #760's replacement resets the session's record of the rendered update. maplibre-native-ffi#807 fixed the same behavior in the earlier API. A 26-line patch with the semantic of #807 fixes it, and all measurements use it (Q1).
-- **On the iPhone the asynchronous camera command adds about 3.5 ms of camera-to-frame latency (11.4 → 15.0 ms)**, which in fast pans is one more display frame of lag. The cause isn't #760's runtime thread, which applies a camera and publishes its update in 60 µs, nor thread priority. It is ordering: the map thread services the driver right after submitting the camera, before the update is published, so the camera misses that render. Waiting for the camera command's completion before servicing restores the baseline's 11.0–11.3 ms at no cost in frame rate. On the Mac the difference is about 0.3 ms and doesn't affect the lag (Q2).
+- **On the iPhone the asynchronous camera command adds about 3.5 ms of camera-to-frame latency (11.4 → 15.0 ms)**, which in fast pans is one more display frame of lag. The cause isn't #760's runtime thread, which applies a camera and publishes its update in 60 µs, nor thread priority. It is ordering: the map thread services the driver right after submitting the camera, before the update is published, so the camera misses that render. Waiting for the camera command's completion before servicing restores the baseline's 11.0–11.3 ms at no cost in frame rate. On the Mac and the Pixel the difference is about 0.3 ms; on the Pixel, renders paced to the 60 Hz refresh absorb the ordering effect (Q2).
 - **Android works with the caller-graphics-thread driver.** Setting each frame's presentation time before the service call that renders it works in practice, because no service call rendered more than one frame, but the C API doesn't promise it (Q5).
 - **Ordered target replacement and driver-work operations make lifecycle code wait.** After a resize, a window replacement or a park, the map thread services the session until the replacement's completion before it releases the previous textures or surface. Memory reduction while paused no longer runs, because it is driver work and a paused session isn't serviced (Q6).
 - **Glyph load failures are still attributed to their map**, because with a caller-graphics-thread driver the renderer reports them on mapigrade's map thread. With a core-worker driver they wouldn't be (Q4).
@@ -92,7 +92,7 @@ The reset is intended in #760: `tests/native/abi/backend/retarget.c` has the tes
 
 ## Q2. Latency from camera to frame
 
-Answered for the Mac and the iPhone (tasks 4.1, 4.2, 6.2 and 6.4); the Pixel is running. What the port does (D169), and what was harder than the design expected:
+Answered for the Mac, the iPhone and the Pixel (tasks 4.1, 4.2, 5.3, 6.2 and 6.4). What the port does (D169), and what was harder than the design expected:
 
 - A frame result carries the camera that the frame drew (`mln_render_frame_result.view.camera`), so no projection is needed to read it. The center's longitude is unwrapped (it can fall outside -180 to 180); before #760 `mln_map_projection_get_camera` returned it wrapped. Near longitude 0, as in the benchmarks, this makes no difference; elsewhere Dart would compare a camera off by 360°.
 - To keep `FrameInfo.seq` (D125), the port must know which camera command a frame includes. The completion of `mln_map_update_camera` reports a map *snapshot* generation, while a frame result's `map_update_generation` counts *render updates*, a different counter. The design (D169) assumed they could be compared. The port reads `mln_map_get_snapshot` in the camera's completion and records the snapshot's `latest_render_update_generation`. If another command published an update between the camera command and that read, the recorded generation is later than the camera's, so the frame gets the camera's `seq` one frame late. A completion that also reported the render update generation of the command would remove this.
@@ -195,9 +195,20 @@ Waiting for the camera brings the port's latency back to the baseline's, at no c
 
 Not yet measured with the wait: the alignment benchmark's lag on the iPhone. Since the latency matches the baseline's, the extra frame of lag in pan1000 and reverse (task 6.2) is expected to disappear.
 
+### Pixel 4a (5G) (2026-10-21, task 5.3)
+
+Baseline `c1b51b1` (the released FFI's runtime AAR) against the branch at `4173c68` (#760 at `3b56ef916` with the patch of D173), 3 runs each of the frame-rate benchmark, alternating, release builds for arm64, on USB power with the screen kept on. The alignment benchmark doesn't run on Android, which reports no display times (design D58); the frame-rate benchmark counts the frames that Dart chose. Logcat truncates the full result line, so both builds also print the timing fields in a short `BENCHMARK_KEY` line (`docs/maplibre-pr-760-port-results/px2-*`).
+
+| | Map fps | Per-second min / p10 / p50 / p90 | Frame cycle | Service or `render_update` | Camera latency avg |
+|---|---|---|---|---|---|
+| Baseline | 53.1–53.7 | 42–47 / 50 / 53–54 / 57–58 | 17.17–17.22 ms | 7.73–7.85 ms | 29.9–30.5 ms |
+| Port | 52.5–52.9 | 44–47 / 48–50 / 53–54 / 56–57 | 17.26–17.29 ms | 7.75–7.85 ms | 30.4–30.8 ms |
+
+On the Pixel the port's camera latency is about 0.3 ms longer and its frame rate about 0.7 frames per second (1.3%) lower; the time to render a frame is the same. The ordering effect that costs 3.5 ms on the iPhone hardly shows here, because a surface target paces its renders to one per 16.7 ms refresh interval (designs D53 and D134): a camera that misses one service call is rendered by the next paced render, which waits for the interval in both builds (`interval_waits` about 1,700 in both).
+
 ## Q3. Synchronous execution
 
-Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. Still to check: the Pixel measurements, and the failing cache-size test on the Pixel.
+Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. Still to check: the failing cache-size test on the Pixel.
 
 ## Q4. Glyph load failures
 

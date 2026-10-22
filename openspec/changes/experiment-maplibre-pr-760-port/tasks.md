@@ -28,7 +28,7 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 
 - [x] 5.1 Port the surface target in `map_texture_android.cpp` (D170), with `WillRender` before `service_driver_work`; verify that the test harness on the Pixel 4a (5G) shows the map and that each frame's image arrives with its frame id, and record in Q5 whether one service call ever renders more than one frame
 - [x] 5.2 Verify that parking on the pbuffer and window replacement work by stopping and resuming the activity during a pan, and run `map_texture_test.dart` and `map_layer_test.dart` on the Pixel; record each failure that `main` doesn't have
-- [ ] 5.3 Run the frame-rate benchmark and the alignment benchmark on the Pixel, 3 runs each, at the baseline commit and on the branch; verify that the findings document compares them
+- [x] 5.3 Run the frame-rate benchmark and the alignment benchmark on the Pixel, 3 runs each, at the baseline commit and on the branch; verify that the findings document compares them
   - The alignment benchmark doesn't run on Android, which reports no display times (design D58), so only the frame-rate benchmark applies; its result line is repeated as a short `BENCHMARK_KEY` line because logcat truncates the full one.
 
 ## 6. iOS
