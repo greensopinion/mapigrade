@@ -118,6 +118,21 @@ Alignment benchmark: the drawn error was 0 px at max in every phase of every run
 
 On the Mac the core executor's thread switch costs about 0.3 ms per camera, well inside the frame budget, so the lag doesn't change. On the iPhone it costs about 3.5 ms, enough to push frames past a 120 Hz refresh. The service call that renders costs the same on both. A plausible cause, not yet tested, is that the runtime's scheduler thread runs at a lower priority or on an efficiency core on the iPhone, where a thread switch and a wake take longer, especially under thermal pressure (serious from the second run on). A trace of the thread switch on the iPhone (Instruments, System Trace) would show where the 3.5 ms go, and whether a higher priority for the scheduler thread would remove them.
 
+### Camera prediction on macOS (2026-10-21, task 4.2)
+
+The alignment benchmark with `ALIGNMENT_MODE=none` (no prediction), 3 runs each, alternating baseline and port, compared with the `predict1` runs of task 4.1. Median and p95 lag in px, ranges over 3 runs; the drawn error was 0 px everywhere.
+
+| Phase | none, baseline | none, port | predict1, baseline | predict1, port |
+|---|---|---|---|---|
+| pan100 | 1.67 / 2.5 | 1.67 / 2.5 | 0.83 / 1.67 | 0.83 / 1.67 |
+| pan500 | 8.33 / 12.5 | 8.33 / 12.5 | 4.17 / 8.33 | 4.17 / 8.33 |
+| pan1000 | 16.67 / 25.0 | 16.67 / 25.0 | 8.33 / 16.67 | 8.33 / 16.67 |
+| stop | 0–0.03 / 25.0 | 0–0.01 / 25.0 | 0 / 16.67 | 0 / 16.67 |
+| fling | 8.33 / 27.1–32.7 | 8.26–8.33 / 33.3–34.5 | 0.65–0.74 / 16.67 | 0.86–0.92 / 18.1–19.6 |
+| reverse | 16.67 / 25.0 | 16.67 / 25.0 | 8.33 / 16.67 | 8.33 / 16.67 |
+
+On the Mac, prediction halves the median lag under #760 as it does with the released FFI, and without prediction the two are the same. The port's slightly higher p95 in fling appears with and without prediction. On the Mac, #760's extra 0.3 ms per camera doesn't cost a frame, so prediction keeps its full effect. On the iPhone, the extra 3.5 ms cost one frame in pan1000 and reverse even with `predict1` (task 6.2); whether a longer lead (`predict2`) recovers it on the iPhone is still open.
+
 ## Q3. Synchronous execution
 
 Open.

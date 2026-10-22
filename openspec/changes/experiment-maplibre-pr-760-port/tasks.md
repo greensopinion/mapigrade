@@ -22,7 +22,7 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 ## 4. Measure on macOS
 
 - [x] 4.1 Run the benchmarks of task 1.2 on the branch, 3 runs each, alternating with the baseline commit of task 1.2; verify that the findings document compares frame rate, frame cycle, alignment error, lag and camera-to-frame latency for both
-- [ ] 4.2 Run the alignment benchmark with camera prediction turned off and on, at the baseline commit and on the branch; verify that the findings document states whether prediction still reduces the lag under #760 (Q2)
+- [x] 4.2 Run the alignment benchmark with camera prediction turned off and on, at the baseline commit and on the branch; verify that the findings document states whether prediction still reduces the lag under #760 (Q2)
 
 ## 5. Android
 
