@@ -339,3 +339,40 @@ Issue drafts and the stacked pull request go here for review before anything is 
 4. Let a caller-driver host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation (Q2, task 6.4). On the iPhone this is the whole difference between the port's camera latency (15 ms) and the baseline's (11 ms).
 5. Make the per-frame hook before the swap explicit for surface targets, for example a frame token that the session attaches to the presented buffer (Q5).
 6. Let a replacement recover a session whose target was lost, or document the recovery (Q6).
+
+### Draft issues (task 7.2, not posted)
+
+Ask 1 is the question of task 7.3 above. Asks 2 and 3 share one issue, which is also the issue on synchronous execution and frame latency promised in discussion #877.
+
+#### Draft A: render the update that includes a command the host just submitted (asks 2 and 3)
+
+> **Caller-graphics-thread driver: render the update that includes a just-submitted camera command**
+>
+> Following up on discussion #877: we ported mapigrade's render loop to #760 at `3b56ef916` with a caller-graphics-thread driver, to check whether it needs a synchronous executor. It mostly doesn't. One ordering question remains.
+>
+> mapigrade's map thread applies a predicted camera and renders the next frame right after. On #760 it submits `mln_map_update_camera` and then services the driver. On an iPhone 15 Pro Max the runtime thread applies the camera and publishes its render update in about 60 µs, but the service call that follows usually starts before that, renders the previous update, and the camera waits for the next render. The camera-to-frame latency rises from 11.4 ms (released FFI) to 15.0 ms, which in fast pans is one more 120 Hz frame of lag. On a Mac and a Pixel 4a (5G) the difference is about 0.3 ms.
+>
+> Waiting for the camera command's completion before servicing the driver brings the iPhone back to 11.0–11.3 ms, with no change in frame rate. That works, but it spins on a completion that runs on another thread. Would you consider one of these?
+>
+> 1. A frame demand that names a minimum render update generation, so that the demand waits until the update that includes the command is published.
+> 2. A way to know that generation: the completion of a map command reports the map *snapshot* generation, while `mln_render_frame_result.map_update_generation` counts *render updates*, so a host can't compare them. Today we read `mln_map_get_snapshot` in the completion and take `latest_render_update_generation`, which can be later than the command's own update.
+>
+> With either, a caller-graphics-thread host gets the ordering that `jump_to` followed by `render_update` gave, without a separate synchronous executor. Measurements and the port are on mapigrade's branch `experiment-maplibre-pr-760-port`.
+
+#### Draft B: release memory while a caller-driver session isn't serviced (ask 4)
+
+> **`mln_render_session_reduce_memory_use` doesn't run while a caller-driver session is paused**
+>
+> mapigrade pauses rendering while an iOS app is in the background and releases the renderer's caches on a memory warning, which arrives at that time. With the released FFI, `mln_render_session_reduce_memory_use` ran at once. On #760 it is driver work, so with a caller-graphics-thread driver it runs only when the host services the driver. A paused host doesn't, because servicing would also run queued GPU work. Could CPU-only driver work, such as cache release, run without the GPU work queued with it, for example in a service call that skips frame demands?
+
+#### Draft C: identify the frame a surface target presents (ask 5)
+
+> **EGL surface target: tie a presented buffer to its frame**
+>
+> On Android, mapigrade renders through an EGL window surface on an ImageReader and needs to know which frame each image holds. It sets the frame id as `eglPresentationTimeANDROID` before the render. On #760 any service call can render an armed demand's frame, including one that services a target replacement, which resumes waiting demands. mapigrade now sets the id before every service call, and in practice no service call rendered more than one frame, but the C API doesn't promise either. A frame token that the session attaches to the presented buffer, or a host callback right before the swap, would make this explicit.
+
+#### Draft D: recover a lost surface target (ask 6)
+
+> **A surface session whose target is lost can't be recovered by a replacement**
+>
+> With the released FFI, a failed render on Android was reported, and the next `set_target` recovered. On #760 a failed render puts the session into `MLN_RENDER_SESSION_STATE_TARGET_LOST`; frame requests then return `MLN_STATUS_INVALID_STATE` because they require the attached state, and `mln_render_session_set_opengl_surface_target` doesn't restore it. On a Pixel 4a (5G) this happened several times while mapigrade replaced its ImageReader during fast resizes. mapigrade now detaches the session and attaches a new one, which rebuilds the renderer and its caches. Should a replacement of the surface bring a lost session back to attached, or is detaching and attaching again the intended recovery? Either way, documenting it in `render_session.h` would help.
