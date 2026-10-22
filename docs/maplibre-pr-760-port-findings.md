@@ -11,14 +11,16 @@ Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3
 Findings:
 
 - **Frame rate and overlay alignment don't change.** On the Mac and the iPhone, the displayed map frame rate, the time to render a frame, and the alignment of the layer's children (0 px error in every phase) are the same as with the released FFI ("Mac and iPhone compared"). On the Pixel the time to render a frame is the same and the frame rate is 1.3% lower; the alignment benchmark doesn't run on Android ("Pixel 4a (5G)").
-- **mapigrade's 4 display slots on Apple platforms don't fit #760 as it is.** A borrowed texture ring holds at most 3 textures, and replacing the ring's texture before each frame, which the port does instead, makes an idle map render about 120 frames per second without end: #760's replacement resets the session's record of the rendered update. maplibre-native-ffi#807 fixed the same behavior in the earlier API. A 26-line patch with the semantic of #807 fixes it, and all measurements use it (Q1).
+- **mapigrade's 4 display slots on Apple platforms don't fit #760 as it is.** A borrowed texture ring holds at most 3 textures, and replacing the ring's texture before each frame, which the port does instead, makes an idle map render about 120 frames per second without end: #760's replacement resets the session's record of the rendered update. maplibre-native-ffi#807 fixed the same behavior in the earlier API. A 26-line patch with the semantic of #807 fixes it, and all measurements use it. #760's reset is intended and tested, so we ask the maintainers whether they prefer an opt-in or a changed default before proposing a change (Q1).
 - **On the iPhone the asynchronous camera command adds about 3.5 ms of camera-to-frame latency (11.4 → 15.0 ms)**, which in fast pans is one more display frame of lag. The cause isn't #760's runtime thread, which applies a camera and publishes its update in 60 µs, nor thread priority. It is ordering: the map thread services the driver right after submitting the camera, before the update is published, so the camera misses that render. Waiting for the camera command's completion before servicing restores the baseline's 11.0–11.3 ms at no cost in frame rate. On the Mac and the Pixel the difference is about 0.3 ms; on the Pixel, renders paced to the 60 Hz refresh absorb the ordering effect (Q2).
-- **Android works with the caller-graphics-thread driver.** Setting each frame's presentation time before the service call that renders it works in practice, because no service call rendered more than one frame, but the C API doesn't promise it (Q5).
+- **Android works with the caller-graphics-thread driver.** Any service call can present the armed frame, including one made while waiting for a target replacement, so the port sets the next frame's presentation time before every service call. In practice no service call presented more than one frame, but the C API promises neither (Q5).
 - **A lost target is terminal on Android.** During fast window replacements the session lost its target several times. Before #760 the next replacement recovered; under #760 the port must detach the session and attach a new one, which also rebuilds the renderer (Q6).
 - **Ordered target replacement and driver-work operations make lifecycle code wait.** After a resize, a window replacement or a park, the map thread services the session until the replacement's completion before it releases the previous textures or surface. Memory reduction while paused no longer runs, because it is driver work and a paused session isn't serviced (Q6).
 - **Glyph load failures are still attributed to their map**, because with a caller-graphics-thread driver the renderer reports them on mapigrade's map thread. With a core-worker driver they wouldn't be (Q4).
-- **The native core grew by about 480 lines (18%)**, mostly completion plumbing, where every call was synchronous before, and the frame-demand loop, which replaces one `render_update` call ("Complexity").
-- **Q3 (synchronous execution), tentatively:** with asks 1 and 2 below, #760's core executor with a caller-graphics-thread driver serves mapigrade's requirements on the platforms measured so far, and a separate synchronous executor isn't needed.
+- **The native core grew by about 570 lines (21%)**, not counting about 125 lines of temporary diagnostics: mostly completion plumbing, where every call was synchronous before, the frame-demand loop, which replaces one `render_update` call, and the waits and re-attachment of Q6 ("Complexity").
+- **Q3 (synchronous execution):** with asks 1 and 2 below, #760's core executor with a caller-graphics-thread driver serves mapigrade's requirements on the Mac, the iPhone and the Pixel, and a separate synchronous executor isn't needed.
+
+Open: the iPhone alignment benchmark with the camera wait, which should show the extra frame of lag gone, hasn't run. The benchmarks ran before the last fixes to resizing and target loss, which don't affect a steady pan ("What broke").
 
 Asks for #760, most important first (details in "Feedback for #760"):
 
@@ -254,12 +256,12 @@ Lines of the native code on `main` (commit `d71c9bc`), in `packages/flutter_mapi
 
 | Area | Files | Lines on `main` | Lines on the branch |
 |---|---|---|---|
-| Core | `src/core/*` | 2,677 | 3,155 after task 3.2 |
+| Core | `src/core/*` | 2,677 | 3,373 at `84b6244`, of which about 125 are temporary diagnostics |
 | Apple target | `darwin/.../MapTextureMetal.mm` | 459 | 481 after task 3.3 |
-| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | 822 after task 5.1 |
+| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | 829 at `84b6244` |
 | Native tests | `test/native/*` | 2,371 | not built (D172) |
 
-Where the core's 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp` growing from 1,085 to 1,463 lines:
+Where the core's first 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp` growing from 1,085 to 1,463 lines. Later tasks added about 95 lines for the waits and the re-attachment of Q6 and the stale-frame fix, and about 125 lines of temporary diagnostics:
 
 - About 100 lines of completion plumbing: a waiter for completions that the map thread blocks on (map creation, attach, detach, target replacement after a resize, map and runtime release), a completion that runs a function on the completing thread, and freeing a completion's user data when its call is rejected. Before #760 every call that mapigrade made was synchronous.
 - About 150 lines for the frame loop: arming one frame demand at a time, servicing the driver, draining frame results and matching them to the armed demand, and handling a result of a demand whose slot a resize reset. Before #760 this was one `render_update` call.
