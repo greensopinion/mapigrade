@@ -30,12 +30,14 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -253,6 +255,15 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     // would be clipped to the previous size. Disabling it makes the GL state
     // match the assumption.
     glDisable(GL_SCISSOR_TEST);
+    // Under #760 the dedicated context becomes current in driver work, after
+    // the attachment call returns, so the swap interval is set here, once the
+    // session's context is current on the window (findings Q5).
+    if (swap_interval_pending_ && window_surface_ != EGL_NO_SURFACE &&
+        eglGetCurrentContext() != EGL_NO_CONTEXT &&
+        eglGetCurrentSurface(EGL_DRAW) == window_surface_) {
+      swap_interval_pending_ = false;
+      SetNonBlockingSwap();
+    }
     if (window_surface_ == EGL_NO_SURFACE || presentation_time_ == nullptr) {
       return;
     }
@@ -263,25 +274,29 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   }
 
   mln_status Attach(mln_map map, const TargetSize& size,
-                    mln_render_session* out_session) override {
+                    const mln_render_session_attach_options& options,
+                    mln_render_session* out_session,
+                    const AsyncCall& call) override {
     if (!EnsureDisplay()) return MLN_STATUS_NATIVE_ERROR;
     EGLSurface surface = CurrentSurface();
     if (surface == EGL_NO_SURFACE) return MLN_STATUS_NATIVE_ERROR;
     mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
-    mln_status status = mln_opengl_surface_attach(map, &descriptor, out_session);
-    // The dedicated session has made its context current on `surface`.
+    mln_status status = mln_map_attach_opengl_surface(
+        map, &descriptor, &options, out_session, call.completion,
+        call.diagnostic);
     if (status == MLN_STATUS_OK && surface == window_surface_) {
-      SetNonBlockingSwap();
+      swap_interval_pending_ = true;
     }
     return status;
   }
 
-  mln_status SetTarget(mln_render_session session,
-                       const TargetSize& size) override {
+  mln_status SetTarget(mln_render_session session, const TargetSize& size,
+                       const AsyncCall& call) override {
     EGLSurface surface = CurrentSurface();
     if (surface == EGL_NO_SURFACE) return MLN_STATUS_NATIVE_ERROR;
     mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
-    return mln_opengl_surface_set_target(session, &descriptor);
+    return mln_render_session_set_opengl_surface_target(
+        session, &descriptor, call.completion, call.diagnostic);
   }
 
   bool CanPresent() const override { return window_surface_ != EGL_NO_SURFACE; }
@@ -390,13 +405,46 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // Map thread. Makes the session present through `surface`, and makes it
   // current at once: set_target makes it current only on the next render
   // (surface.h), and until then EGL would keep using the previous surface.
+  // Under #760 the replacement is an ordered operation, and the caller
+  // destroys the previous surface after this returns, so this services the
+  // session until the replacement has run (findings Q6).
   void SwitchSession(mln_render_session session, const TargetSize& size,
                      EGLSurface surface) {
     mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
-    mln_status status = mln_opengl_surface_set_target(session, &descriptor);
+    auto done = std::make_shared<std::atomic<int32_t>>(1);
+    auto* holder = new std::shared_ptr<std::atomic<int32_t>>(done);
+    mln_completion completion{};
+    completion.size = sizeof(completion);
+    completion.callback = [](void* user_data,
+                             const mln_completion_result* result) {
+      (*static_cast<std::shared_ptr<std::atomic<int32_t>>*>(user_data))
+          ->store(result->status <= 0 ? result->status - 1000 : result->status);
+    };
+    completion.user_data = holder;
+    completion.release_user_data = [](void* user_data) {
+      delete static_cast<std::shared_ptr<std::atomic<int32_t>>*>(user_data);
+    };
+    mln_diagnostic diagnostic{};
+    diagnostic.size = sizeof(diagnostic);
+    mln_status status = mln_render_session_set_opengl_surface_target(
+        session, &descriptor, &completion, &diagnostic);
     if (status != MLN_STATUS_OK) {
-      Report("mln_opengl_surface_set_target failed with status " +
-             std::to_string(static_cast<int>(status)));
+      delete holder;
+      Report("mln_render_session_set_opengl_surface_target failed with status " +
+             std::to_string(static_cast<int>(status)) + ": " +
+             diagnostic.message);
+      return;
+    }
+    // 1 while pending; the completion stores its status minus 1000.
+    for (int i = 0; i < 2000 && done->load() == 1; ++i) {
+      mln_status service =
+          mln_render_session_service_driver_work(session, nullptr);
+      if (service != MLN_STATUS_OK && service != MLN_STATUS_BUSY) break;
+      if (done->load() != 1) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (done->load() != MLN_STATUS_OK - 1000) {
+      Report("the surface replacement didn't complete");
       return;
     }
     EGLContext context = eglGetCurrentContext();
@@ -504,10 +552,8 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     mln_opengl_surface_descriptor descriptor =
         mln_opengl_surface_descriptor_default();
     descriptor.extent = size.extent;
-    descriptor.context.size = sizeof(descriptor.context);
     descriptor.context.platform = MLN_OPENGL_CONTEXT_PLATFORM_EGL;
     descriptor.context.ownership = MLN_OPENGL_CONTEXT_OWNERSHIP_DEDICATED;
-    descriptor.context.data.egl.size = sizeof(descriptor.context.data.egl);
     descriptor.context.data.egl.display = display_;
     descriptor.context.data.egl.config = config_;
     descriptor.context.data.egl.share_context = nullptr;
@@ -544,6 +590,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   EGLSurface window_surface_ = EGL_NO_SURFACE;
   EGLSurface pbuffer_ = EGL_NO_SURFACE;
   PresentationTimeFn presentation_time_ = nullptr;
+  // Whether the swap interval waits for the session's context to become
+  // current on the window surface.
+  bool swap_interval_pending_ = false;
 };
 
 // Main thread. Releases or restores the reader of every map (design D137).
@@ -647,11 +696,12 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
   }
   // Once per process; later calls return MLN_STATUS_OK at once. The
   // application context outlives every activity.
-  mln_status status = mln_android_init(env, nullptr, context);
+  mln_diagnostic diagnostic{};
+  diagnostic.size = sizeof(diagnostic);
+  mln_status status = mln_android_init(env, context, &diagnostic);
   if (status != MLN_STATUS_OK) {
-    const char* detail = mln_thread_last_error_message();
     LOGE("mln_android_init failed with status %d: %s", static_cast<int>(status),
-         detail != nullptr ? detail : "");
+         diagnostic.message);
   }
   std::lock_guard lock(registries_mutex);
   int64_t token = next_token++;
