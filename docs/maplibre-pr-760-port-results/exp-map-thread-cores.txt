@@ -63,3 +63,7 @@ CPU 3 (E Core)                 394
 CPU 4 (P Core)                 680
 CPU 5 (P Core)                 23
 [('Running', 2125)]
+== A with the time-constraint policy of D178 (MLN760_RT=1), all-process trace, map thread by id: 426 samples
+CPU 0 (E Core) 340, CPU 1 (E Core) 29, CPU 2 (E Core) 13, CPU 3 (E Core) 13, CPU 4 (P Core) 31
+== same, computation 8.333 ms: 395 samples
+CPU 0 (E Core) 335, CPU 1 (E Core) 23, CPU 2 (E Core) 7, CPU 3 (E Core) 5, CPU 4 (P Core) 25

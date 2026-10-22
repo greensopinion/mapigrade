@@ -20,7 +20,7 @@ Findings:
 - **The native core grew by about 570 lines (21%)**, not counting about 125 lines of temporary diagnostics: mostly code that handles completions, where every call was synchronous before, the frame-demand loop, which replaces one `render_update` call, and the waits and re-attachment of Q6 ("Complexity").
 - **Q3 (synchronous execution):** #760's core executor with a caller-graphics-thread driver serves mapigrade's requirements on the Mac, the iPhone and the Pixel, and a separate synchronous executor isn't needed. #905 and #906 resolved asks 1 and 3 below, and a host-side wait replaced ask 2. The iPhone's lower frame rate on `main` comes from where iOS runs the map thread, not from #760.
 
-Open: whether a merged port may use an audio work interval, which keeps the map thread on the iPhone's performance cores (task 8.11), and how the pacing of D19 and D124 should change for a render that costs between 3/4 of and one refresh interval.
+Open: a signal other than an audio work interval that keeps the map thread on the iPhone's performance cores; a time-constraint policy doesn't (tasks 8.11 and 8.12); and how the pacing of D19 and D124 should change for a render that costs between 3/4 of and one refresh interval.
 
 Asks for #760 at `3b56ef916`, most important first (details in "Feedback for #760"). #905 resolved ask 1 (a ring of 4 textures with acquire and release serves mapigrade), #906 resolved ask 3, and the host-side camera wait replaced ask 2. Asks 4 to 6 are still open:
 
@@ -324,7 +324,20 @@ In a Time Profiler trace with the work interval, 33% of the map thread's samples
 
 The work interval makes a render about 1 ms cheaper and a camera reach a frame about 1.2 ms sooner. With the default pacing the displayed frame rate drops nonetheless: a render now costs less than the refresh interval, so the hysteresis of `RenderAhead()` (render ahead above one interval, pace below 3/4 of one) keeps the map pacing, and the map waits for Dart's choice before each render (designs D19 and D124) about 1,900 times per pan instead of about 200. A paced cycle is then Dart's choice plus a 7.2 ms render, more than the 8.3 ms interval. Rendering ahead with the work interval gives the highest frame rate of any build on the iPhone, above the released FFI's 107 to 110 fps, at the cost of about 1,000 to 1,400 undisplayed renders per 30 s pan against about 400.
 
-So a work interval is enough to place the map thread on the performance cores, and the pacing of D19 and D124 needs revisiting for renders that cost between 3/4 of and one refresh interval. The only public way to create the interval is an AudioToolbox API that Apple describes for real-time audio threads, so whether a merged port may use it is open; the time-constraint policy of D177 wasn't tried.
+So a work interval is enough to place the map thread on the performance cores, and the pacing of D19 and D124 needs revisiting for renders that cost between 3/4 of and one refresh interval. The only public way to create the interval is an AudioToolbox API that Apple describes for real-time audio threads, so whether a merged port may use it is open; a time-constraint policy doesn't place the thread on the performance cores (task 8.12).
+
+### A time-constraint policy for the map thread (D178, task 8.12, 2026-10-22)
+
+With `MLN760_RT=1` the map thread sets `THREAD_TIME_CONSTRAINT_POLICY` with a period and a constraint of one refresh interval, a computation of 5 ms, and preemptible. iPhone 15 Pro Max over Wi-Fi on battery, the same apps alternating without and with the switch, 3 runs each (`docs/maplibre-pr-760-port-results/ios9-*`).
+
+| Render ahead | Policy | Displayed fps | Service call (ms) | Camera latency (ms) |
+|---|---|---|---|---|
+| auto (default) | default | 105.6–107.2 | 8.20–8.29 | 10.74–11.19 |
+| auto (default) | time-constraint | 107.6–108.8 | 8.22–8.28 | 10.76–11.15 |
+| always | default | 107.2–108.1 | 8.07–8.09 | 10.83–10.97 |
+| always | time-constraint | 107.3–110.1 | 7.97–8.29 | 10.76–11.10 |
+
+The policy stayed in effect for the whole pan: `thread_policy_get` on the map thread, every 300 frames, reported it 21 times without a demotion (`ios9-rt-policy-state.txt`). Yet in a Time Profiler trace 93% of the map thread's samples were on the efficiency cores, as without the policy, and a computation equal to the period (8.33 ms) didn't change that (`exp-map-thread-cores.txt`). The service time didn't change; with the default pacing the displayed frame rate rose by about 1.5 frames per second. On this iPhone a time-constraint policy doesn't place the map thread on the performance cores, and the work interval of D177 remains the only signal found that does.
 
 ## Q3. Synchronous execution
 
@@ -428,7 +441,7 @@ Shortcuts of the branch (D172) that a merged port must undo:
 
 - The native tests in `test/native/` fake the released C API and don't build. They need a fake of #760's asynchronous API (completions, frame demands, frame results, wakes), which is at least as large as the current 475 lines of `fake_mln.*`.
 - The specs of `map-texture` describe the synchronous model in places (camera applied before render, `render_update`), and need updates; the design decisions D1, D2, D20, D122, D125 and D131 need revising.
-- The branch carries temporary diagnostics: the `MLN760_STAGES` latency stages (with the frames held per slot), the `MLN760_STALL` dump, the `MLN760_ACQUIRE` count, and the experiment switches `MLN760_QOS_UI`, `MLN760_NO_CAMERA_WAIT` and `MLN760_WORKGROUP`. A merged port keeps none of them. The `MLN760_WAIT_CAMERA` switch is gone; the camera wait is unconditional (D176).
+- The branch carries temporary diagnostics: the `MLN760_STAGES` latency stages (with the frames held per slot), the `MLN760_STALL` dump, the `MLN760_ACQUIRE` count, and the experiment switches `MLN760_QOS_UI`, `MLN760_NO_CAMERA_WAIT`, `MLN760_WORKGROUP`, `MLN760_RT` and `MLN760_RT_COMPUTATION_US`. A merged port keeps none of them. The `MLN760_WAIT_CAMERA` switch is gone; the camera wait is unconditional (D176).
 - `scripts/build_maplibre_ffi.sh` must delete the FFI's install directory before a build, and reverse a patch that was deleted (Build).
 - `max_slots_in_use` no longer counts the slot that the session renders into (Q1); a merged port needs another way to report slot use.
 

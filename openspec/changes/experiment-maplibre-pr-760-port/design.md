@@ -168,6 +168,14 @@ Alternatives:
 - A time-constraint (real-time) thread policy (`THREAD_TIME_CONSTRAINT_POLICY`). It is likely to place the thread on the performance cores, but the system demotes a real-time thread that exceeds its computation budget, and a render can take longer than a refresh interval. Tried only if the work interval doesn't change the placement.
 - An allocation per frame, as the released FFI's `set_target` did. It keeps the thread on the performance cores by a side effect.
 
+### D178. Experiment: a time-constraint thread policy for the map thread
+
+The work interval of D177 places the map thread on the performance cores, but the only public way to create one is an AudioToolbox API, and the map isn't audio. A time-constraint policy (`thread_policy_set` with `THREAD_TIME_CONSTRAINT_POLICY`) is the Mach interface for any thread with periodic deadlines. With `MLN760_RT=1`, the map thread sets a period and a constraint of one display refresh interval, a computation of 5 ms (the map thread uses about 3.5 ms of CPU per frame and waits for the GPU for the rest), and preemptible, and sets them again when the refresh interval changes. The experiment measures the share of map-thread samples on the performance cores, the frame rate and the service time, against the default and the work interval of D177, with the default pacing and with rendering ahead.
+
+Alternatives:
+- A work interval (D177): it works, but uses an audio API.
+- A lower computation: the kernel demotes a time-constraint thread that runs longer than its computation without blocking, so a value below a render's CPU time risks demotion during slow frames.
+
 ## Risks / Trade-offs
 
 - [A demand renders into a released slot of the old set before the replacement of D174 runs] → The barrier of D174 ends an outstanding demand before the release, and the map thread requests no frame between the release and the replacement; task 8.3 checks that no frame of the old set is rendered after a resize starts. Without the barrier, the first run of task 8.2 crashed in MapLibre's render pass, in a texture of the freed set.

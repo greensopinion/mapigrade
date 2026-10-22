@@ -17,9 +17,22 @@
 
 #if defined(__APPLE__)
 #include <AudioToolbox/AudioWorkInterval.h>
+#include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 #include <os/workgroup.h>
 #include <pthread/qos.h>
+#endif
+
+#if defined(__APPLE__)
+namespace map_texture {
+namespace {
+// Experiment (design D178, task 8.12): with MLN760_RT=1, the interval that the
+// map thread's time-constraint policy was set for, or 0 for none yet.
+thread_local int64_t realtime_interval_ns = 0;
+
+}  // namespace
+}  // namespace map_texture
 #endif
 
 namespace map_texture {
@@ -507,6 +520,23 @@ void MapTexture::RecordCameraLatency(const FrameInfo& info) {
     stage_render_ns_ += now - info.service_start_ns;
     if (info.service_start_ns < info.camera_complete_ns) ++stage_early_service_;
     if (stage_count_ % 300 == 0) {
+#if defined(__APPLE__)
+      if (realtime_interval_ns != 0) {
+        // Whether the map thread still has its time-constraint policy, or
+        // the kernel demoted it (design D178).
+        thread_time_constraint_policy_data_t policy{};
+        mach_msg_type_number_t count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+        boolean_t get_default = FALSE;
+        mach_port_t thread = mach_thread_self();
+        kern_return_t result = thread_policy_get(
+            thread, THREAD_TIME_CONSTRAINT_POLICY,
+            reinterpret_cast<thread_policy_t>(&policy), &count, &get_default);
+        mach_port_deallocate(mach_task_self(), thread);
+        std::printf("MLN760_RT_STATE result=%d default=%d period=%u "
+                    "computation=%u\n",
+                    result, get_default, policy.period, policy.computation);
+      }
+#endif
       double n = static_cast<double>(stage_count_);
       std::printf(
           "MLN760_STAGES n=%lld set_to_submit_ms=%.3f submit_to_complete_ms=%.3f "
@@ -553,6 +583,36 @@ uint64_t NsToMachTicks(int64_t ns) {
     return info;
   }();
   return static_cast<uint64_t>(ns) * timebase.denom / timebase.numer;
+}
+
+void MaybeApplyRealtimePolicy(int64_t interval_ns) {
+  static const bool enabled = [] {
+    const char* value = std::getenv("MLN760_RT");
+    return value != nullptr && value[0] == '1';
+  }();
+  if (!enabled || interval_ns <= 0 || interval_ns == realtime_interval_ns) {
+    return;
+  }
+  realtime_interval_ns = interval_ns;
+  thread_time_constraint_policy_data_t policy{};
+  policy.period = static_cast<uint32_t>(NsToMachTicks(interval_ns));
+  int64_t computation_ns = 5'000'000;
+  if (const char* us = std::getenv("MLN760_RT_COMPUTATION_US")) {
+    computation_ns = std::min<int64_t>(std::atoll(us) * 1000, interval_ns);
+  }
+  policy.computation = static_cast<uint32_t>(NsToMachTicks(computation_ns));
+  policy.constraint = policy.period;
+  policy.preemptible = TRUE;
+  mach_port_t thread = mach_thread_self();
+  kern_return_t result = thread_policy_set(
+      thread, THREAD_TIME_CONSTRAINT_POLICY,
+      reinterpret_cast<thread_policy_t>(&policy),
+      THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+  mach_port_deallocate(mach_task_self(), thread);
+  std::printf("MLN760_RT interval_ns=%lld computation_ns=%lld result=%d\n",
+              static_cast<long long>(interval_ns),
+              static_cast<long long>(computation_ns), result);
+  std::fflush(stdout);
 }
 
 }  // namespace
@@ -649,6 +709,12 @@ FILE* DiagnosticLog() {
 }  // namespace
 
 bool MapTexture::RunOnce() {
+#if defined(__APPLE__)
+  {
+    int64_t interval = display_interval_ns_.load();
+    MaybeApplyRealtimePolicy(interval > 0 ? interval : kDefaultIntervalNs);
+  }
+#endif
   bool render_now = RenderWanted();
   int64_t timeout_ms = render_now ? 0 : kIdleWaitMs;
   if (render_now && target_->AsSurfaceTarget() != nullptr) {
