@@ -232,7 +232,7 @@ Port (task 5.1, `8af69ee`):
 
 ## Q6. Lifecycle
 
-Open; task 3.4 tests it. What the port showed so far:
+Answered (tasks 3.4, 5.2 and 6.3). What the port showed:
 
 - Pausing (D13): the port keeps "no GPU work while paused" by not servicing the driver while paused; demands and target replacements wait in the session. This needs no #760 change.
 - Memory reduction while paused regresses. Before #760, `mln_render_session_reduce_memory_use` released cached tiles and images at once, also while paused, which is when iOS sends memory warnings. Under #760 it is driver work, so with a caller-graphics-thread driver it runs only when the map thread services the driver, which it doesn't do while paused. Servicing it anyway would also run any queued render. A way to run CPU-only driver work, such as cache release, without running GPU work would fix this; a core-worker session wouldn't have the problem.
@@ -242,7 +242,7 @@ Open; task 3.4 tests it. What the port showed so far:
 
 ## Q7. Other API
 
-Open. From the headers at `3b56ef916`:
+Answered: nothing here blocked the port. From the headers at `3b56ef916`, confirmed by the port:
 
 - HTTP headers: `mln_http_header_transform` takes `mln_http_header_rule`s (resource kinds, a URL glob, headers) that native code applies without a callback. mapigrade's rules (D81) map onto them directly, which removes mapigrade's use of `mln_adapter_http_header_*`.
 - `MLN_RUNTIME_EVENT_MAP_RENDER_UPDATE_AVAILABLE` no longer exists (event values 9, 11, 12 and 22 are retired). mapigrade counts it in `render_update_available_events` and renders when it arrives; under #760 a frame demand with `MLN_FRAME_DEMAND_WAIT_FOR_UPDATE` takes its place.
@@ -291,6 +291,25 @@ The cause was a defect of the port, not of #760. A state dump of the stalled map
 At `2c124a5`, with the fixes above, `map_texture_test.dart` passes on the Pixel (28 passed, 2 skipped), the iOS simulator (29 passed, 1 skipped) and macOS (29 passed, 1 skipped); macOS needed no lost-target recovery.
 
 The benchmarks on the Mac and the iPhone ran at `c8a0321` and the Pixel's at `4173c68`, before these fixes. The fixes change only what happens after a resize, a window replacement or a failed render, not a steady pan, so the measurements weren't repeated.
+
+## Conclusions
+
+For each question of the design, the answer, whether it comes from #760 or from the port, and what a port that we would merge needs.
+
+- **Q1. Display slots on Apple platforms.** From #760: a borrowed ring holds at most 3 textures, and a replacement resets the rendered update on purpose, so mapigrade's 4 slots render an idle map without end. With the local patch of D173 the slots work and the measurements match the released FFI. A merged port needs #760 to take ask 1 in some form (task 7.3); otherwise it falls back to a ring of 3 textures and 3 display slots, which changes D122 and wasn't measured.
+- **Q2. Latency from camera to frame.** From #760's asynchronous camera command, made visible by how the port orders its calls: 3.5 ms more on the iPhone, 0.3 ms on the Mac and the Pixel. Waiting for the camera command's completion before servicing removes it. A merged port needs that wait, or better asks 2 and 3, and the iPhone alignment benchmark with the wait (not yet run) to confirm that the extra frame of lag goes away.
+- **Q3. Synchronous execution.** Not needed, if #760 takes asks 1 and 2. Everything else the port needed was host-side work, though more than before (Complexity).
+- **Q4. Glyph load failures.** Works unchanged with a caller-graphics-thread driver. A merged port that kept this driver needs nothing; a core-worker driver would need a map event for glyph failures.
+- **Q5. Android hook before the swap.** Works, because the port sets the frame id before every service call, including those in its wait loops. Not promised by #760 (ask 5). A merged port needs that rule documented in its design.
+- **Q6. Lifecycle.** From #760: ordered replacements, operations with completions, a lost target that only a new session leaves, and memory reduction that doesn't run while paused. From the port: discarding a stale frame left an idle map waiting (fixed). A merged port needs the waits and the re-attachment that the branch has, a decision about memory reduction while paused (ask 4), and tests for target loss and recovery.
+- **Q7. Other API.** Native header rules, events through a handler, and operations with completions fit mapigrade without problems; the header rules are simpler than the adapter they replace.
+
+Shortcuts of the branch (D172) that a merged port must undo:
+
+- The native tests in `test/native/` fake the released C API and don't build. They need a fake of #760's asynchronous API (completions, frame demands, frame results, wakes), which is at least as large as the current 475 lines of `fake_mln.*`.
+- The specs of `map-texture` describe the synchronous model in places (camera applied before render, `render_update`), and need updates; the design decisions D1, D2, D20, D122, D125 and D131 need revising.
+- The branch carries temporary diagnostics: the `MLN760_STAGES` latency stages, the `MLN760_STALL` dump, the `MLN760_ACQUIRE` count and the `MLN760_WAIT_CAMERA` switch. A merged port keeps none of them; the camera wait becomes unconditional or is replaced by ask 2.
+- `scripts/build_maplibre_ffi.sh` must delete the FFI's install directory before a build (Build).
 
 ## Feedback for #760
 
