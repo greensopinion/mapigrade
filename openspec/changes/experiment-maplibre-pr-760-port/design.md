@@ -96,7 +96,7 @@ Alternatives:
 
 Task 3.4 showed that D168 alone renders without end: #760's target replacement resets the session's record of the rendered update and resumes waiting demands, so each replacement makes the next demand render (findings Q1). maplibre-native-ffi#807 fixed the same behavior of the earlier `set_target`. The branch carries a patch to #760 (`scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch`) with the same semantic: a replacement of a borrowed texture ring with the same extent and physical size keeps `rendered_update_generation` and `pending_changes`, marks the new target as holding the rendered update, and doesn't resume waiting demands. The generation still increases, so frames published before the replacement still can't be acquired.
 
-Every measurement of the copy-free path on the branch is of #760 with this patch. The patch is the first change we propose for #760, as a stacked pull request (task 7.3).
+Every measurement of the copy-free path on the branch is of #760 with this patch. The patch is the first change we propose for #760. Because #760 resets the rendered update on purpose (findings Q1), we first ask its maintainers whether they prefer an opt-in or a changed default (task 7.3), and then prepare a stacked pull request (task 7.4).
 
 Alternatives:
 - A ring of 3 textures and 3 display slots, which #760 supports without a patch. It changes D122 and measures the ring limit instead; kept as the fallback if #760 rejects the patch.

@@ -21,7 +21,7 @@ Findings:
 
 Asks for #760, most important first (details in "Feedback for #760"):
 
-1. Let a host rotate more display slots than a borrowed ring holds without rendering an idle map without end: either an opt-in that keeps the record of the rendered update across a same-size replacement (the semantic of #807; #760's default, which renders into the new texture at once, is intended and tested), or a frame demand that names the slot of a ring of more than 3 textures. Proposed as a stacked pull request.
+1. Let a host rotate more display slots than a borrowed ring holds without rendering an idle map without end: either an opt-in that keeps the record of the rendered update across a same-size replacement (the semantic of #807; #760's default, which renders into the new texture at once, is intended and tested), or a frame demand that names the slot of a ring of more than 3 textures. We ask the maintainers which they prefer, then propose a stacked pull request.
 2. Let a caller-graphics-thread host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation. On the iPhone this is the whole difference between 15 ms and 11 ms of camera latency.
 3. Report the render update generation that a map command published in its completion, so that a host can tell which frame includes the command. Today the completion reports a snapshot generation, which is a different counter.
 4. Run CPU-only driver work, such as memory reduction, without the GPU work queued with it, so that a paused caller-driver session can release memory.
@@ -86,7 +86,7 @@ The engines test acquired 83 frames after `MLN_RENDER_RESULT_RENDERED` results, 
 
 `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` (26 lines added, 4 removed, in `src/render/render_session_common.cpp`) gives #760's target replacement the semantic of maplibre-native-ffi#807: a replacement of a borrowed texture ring with the same extent and physical size keeps the record of the rendered update, marks the new target as holding it, and doesn't resume demands that wait for an update. With it, "idle map renders no frames for 10 seconds" (38 → 38 frames) and "idle copy-free map renders no frames for 10 seconds" (39 → 39) pass, and `map_layer_test.dart` passes completely (15 tests). "metrics stay the same while the map is at rest" fails when it runs alone ("Expected: not null"), on the branch as a whole; it depends on an earlier test of the file, which is a defect of mapigrade's tests, not of the port.
 
-From here on, every measurement of the copy-free path is of #760 at `3b56ef916` with this patch. The patch is the first change proposed for #760 (stacked pull request, task 7.3).
+From here on, every measurement of the copy-free path is of #760 at `3b56ef916` with this patch. The patch is the first change proposed for #760. We ask the maintainers first whether they prefer an opt-in or a changed default (task 7.3, draft in "Feedback for #760"), and prepare a stacked pull request after their answer (task 7.4).
 
 The reset is intended in #760: `tests/native/abi/backend/retarget.c` has the test `a_borrowed_retarget_renders_a_waiting_demand`, whose comment says "A replacement holds no frame of the map's latest update, so a demand that waits for an update renders into it with no update to wait for." A host that reallocates its textures expects the new texture to get the latest frame without waiting. mapigrade needs the opposite, because it fills each texture only with its next frame. The patch changes the default and would break that test, so the stacked pull request shouldn't propose it as it is. An opt-in on the replacement (for example a descriptor field that keeps the rendered update across a same-size replacement), or a frame demand that names the ring slot to render into with a ring of more than 3 textures, would serve mapigrade without changing #760's default.
 
@@ -276,6 +276,24 @@ The cause was a defect of the port, not of #760. A state dump of the stalled map
 ## Feedback for #760
 
 Issue drafts and the stacked pull request go here for review before anything is posted.
+
+### Draft question for the maintainers (task 7.3, not posted)
+
+> **Same-size borrowed texture replacement: opt-in to keep the rendered update?**
+>
+> mapigrade shows a map in Flutter through 4 display slots on macOS and iOS: Flutter displays the newest finished frame while the map renders the next one into a free slot. The slots are caller-owned Metal textures. On #760 at `3b56ef916` a borrowed ring holds at most 3 textures, so mapigrade attaches a ring of one texture and replaces it with the free slot's texture before each frame, with `mln_render_session_set_metal_borrowed_texture_target` and a caller-graphics-thread driver.
+>
+> Each replacement resets the session's record of the rendered update (`render_session_common.cpp`, `rendered_update_generation = 0`, `pending_changes = true`) and resumes demands that wait for an update. So a demand with `MLN_FRAME_DEMAND_IF_NEEDED | MLN_FRAME_DEMAND_WAIT_FOR_UPDATE` renders after every replacement, and an idle map renders about 120 frames per second without end. maplibre-native-ffi#807 fixed the same behavior of the earlier `set_target`.
+>
+> We see that the reset is intended: `a_borrowed_retarget_renders_a_waiting_demand` tests it, for a host that reallocates its textures and wants the latest frame in the new texture at once. mapigrade needs the opposite, because it fills each texture only with its next frame. With a local patch that keeps the rendered update across a same-size borrowed replacement, the idle map stays idle and the frame rate, render time and overlay alignment on the Mac and an iPhone 15 Pro Max match the released FFI.
+>
+> Which would you prefer?
+>
+> 1. An opt-in on the replacement, for example a field of the borrowed texture descriptor, that keeps the rendered update when the extent and physical size don't change. The default and its test stay as they are.
+> 2. Keeping the rendered update by default for a same-size replacement, with the current behavior as the opt-in.
+> 3. A frame demand that names the ring slot to render into, with a ring of more than 3 textures, so that a host rotates slots without replacing textures.
+>
+> We're happy to open a stacked pull request against #760 for the one you prefer, with a C test next to the existing one.
 
 1. Same-size replacement of a borrowed texture ring (Q1, D173): keep the record of the rendered update, as maplibre-native-ffi#807 did for the earlier `set_target`. Proposed as a stacked pull request with the patch above.
 2. Report the render update generation of a map command in its completion, or in a way that can be compared with `mln_render_frame_result.map_update_generation` (Q2).
