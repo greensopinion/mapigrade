@@ -9,7 +9,7 @@ maplibre-native-ffi PR #760 merged on 2026-10-21 and replaced the synchronous C 
 - On Android, the surface target uses #760's surface session and attaches a new session when its target is lost.
 - Teardown, pausing, resizing, surface replacement and memory reduction use #760's operations and their completions.
 - The native tests move from the fake of the synchronous API to a headless FFI target if one serves them, or to a fake of the asynchronous API.
-- **BREAKING** (for releases from `main`): until an FFI release that includes #760 exists, `main` builds against FFI's daily snapshot without checksums, and can't be released. A follow-up change pins the FFI release and restores releases. Version 0.0.1 is already published.
+- **BREAKING** (for releases from `main`): until an FFI release that includes #760 exists, `main` builds against FFI's daily snapshot without checksums, and its pubspec refuses publishing. A follow-up change pins the FFI release and restores releases. Version 0.0.1 is already published.
 - A memory warning while rendering is paused releases the renderer's cached resources when rendering resumes, not at once, because #760 runs memory reduction as driver work.
 - Out of scope: the pacing of rendering ahead (a separate change), and placing the map thread on the performance cores on iOS. On the iPhone 15 Pro Max the displayed map frame rate is 2% to 3% lower than with the released FFI, and on the iPhone 13 at most 2% lower, with faster renders.
 
@@ -22,7 +22,8 @@ None.
 ### Modified Capabilities
 
 - `map-texture`: the requirement "Memory warnings release cached renderer resources" allows the release to wait until rendering resumes while the application is in the background.
-- `package-distribution`: the requirements "Native libraries from the pinned release", "Application build from the published archive" and "Local FFI build for repository development" allow a build against the FFI snapshot without a checksum, during which the package isn't released.
+- `package-distribution`: the requirements "Published archive contents", "Native libraries from the pinned release", "Application build from the published archive" and "Local FFI build for repository development" allow a build against the FFI snapshot without a checksum, during which the package's pubspec refuses publishing.
+- `third-party-notices`: the requirement "Notices equal to the FFI build" keeps the notices of the last stated release while the package states the snapshot.
 
 ## Impact
 
@@ -30,7 +31,7 @@ None.
 - Platform targets: `darwin/.../MapTextureMetal.mm` and `android/src/main/cpp/map_texture_android.cpp`.
 - FFI pin and build: `maplibre_ffi.lock`, `darwin/flutter_mapigrade/Package.swift`, `android/build.gradle.kts`, a script that downloads the snapshot, `scripts/build_maplibre_ffi.sh`, and the CI consumer build.
 - Native tests in `packages/flutter_mapigrade/test/native/`.
-- Docs: `docs/benchmarks.md`, `CONTRIBUTING.md`, `docs/limitations.md`.
+- Docs: `docs/benchmarks.md`, `CONTRIBUTING.md`, `docs/limitations.md`, and the experiment's findings document, which moves to `main`.
 - Dart code and the public API of `flutter_mapigrade` don't change.
 - `support-ios-15-0` depends on the follow-up change that pins the FFI release.
 - The branch `experiment-maplibre-pr-760-port` and its draft PR are the reference for the code; this change starts from `main`.
