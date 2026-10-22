@@ -21,7 +21,7 @@ Findings:
 
 Asks for #760, most important first (details in "Feedback for #760"):
 
-1. Keep the record of the rendered update across a same-size replacement of a borrowed texture ring, as #807 did. Without it, a host can't rotate more display slots than the ring holds. Proposed as a stacked pull request with the local patch.
+1. Let a host rotate more display slots than a borrowed ring holds without rendering an idle map without end: either an opt-in that keeps the record of the rendered update across a same-size replacement (the semantic of #807; #760's default, which renders into the new texture at once, is intended and tested), or a frame demand that names the slot of a ring of more than 3 textures. Proposed as a stacked pull request.
 2. Let a caller-graphics-thread host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation. On the iPhone this is the whole difference between 15 ms and 11 ms of camera latency.
 3. Report the render update generation that a map command published in its completion, so that a host can tell which frame includes the command. Today the completion reports a snapshot generation, which is a different counter.
 4. Run CPU-only driver work, such as memory reduction, without the GPU work queued with it, so that a paused caller-driver session can release memory.
@@ -87,6 +87,8 @@ The engines test acquired 83 frames after `MLN_RENDER_RESULT_RENDERED` results, 
 `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` (26 lines added, 4 removed, in `src/render/render_session_common.cpp`) gives #760's target replacement the semantic of maplibre-native-ffi#807: a replacement of a borrowed texture ring with the same extent and physical size keeps the record of the rendered update, marks the new target as holding it, and doesn't resume demands that wait for an update. With it, "idle map renders no frames for 10 seconds" (38 → 38 frames) and "idle copy-free map renders no frames for 10 seconds" (39 → 39) pass, and `map_layer_test.dart` passes completely (15 tests). "metrics stay the same while the map is at rest" fails when it runs alone ("Expected: not null"), on the branch as a whole; it depends on an earlier test of the file, which is a defect of mapigrade's tests, not of the port.
 
 From here on, every measurement of the copy-free path is of #760 at `3b56ef916` with this patch. The patch is the first change proposed for #760 (stacked pull request, task 7.3).
+
+The reset is intended in #760: `tests/native/abi/backend/retarget.c` has the test `a_borrowed_retarget_renders_a_waiting_demand`, whose comment says "A replacement holds no frame of the map's latest update, so a demand that waits for an update renders into it with no update to wait for." A host that reallocates its textures expects the new texture to get the latest frame without waiting. mapigrade needs the opposite, because it fills each texture only with its next frame. The patch changes the default and would break that test, so the stacked pull request shouldn't propose it as it is. An opt-in on the replacement (for example a descriptor field that keeps the rendered update across a same-size replacement), or a frame demand that names the ring slot to render into with a ring of more than 3 textures, would serve mapigrade without changing #760's default.
 
 ## Q2. Latency from camera to frame
 
