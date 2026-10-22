@@ -190,7 +190,7 @@ Lines of the native code on `main` (commit `d71c9bc`), in `packages/flutter_mapi
 |---|---|---|---|
 | Core | `src/core/*` | 2,677 | 3,155 after task 3.2 |
 | Apple target | `darwin/.../MapTextureMetal.mm` | 459 | 481 after task 3.3 |
-| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | 830 after task 5.1 |
+| Android target | `android/src/main/cpp/map_texture_android.cpp` | 772 | 822 after task 5.1 |
 | Native tests | `test/native/*` | 2,371 | not built (D172) |
 
 Where the core's 478 added lines went (tasks 3.1 and 3.2), with `map_texture.cpp` growing from 1,085 to 1,463 lines:
