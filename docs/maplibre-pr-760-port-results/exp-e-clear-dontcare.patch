@@ -1,0 +1,91 @@
+diff --git a/src/render/metal/metal_texture_backend.inc b/src/render/metal/metal_texture_backend.inc
+index 0d6055a54..eb10b69f0 100644
+--- a/src/render/metal/metal_texture_backend.inc
++++ b/src/render/metal/metal_texture_backend.inc
+@@ -10,6 +10,10 @@
+ 
+ #include "render/render_session_common.hpp"
+ 
++namespace mln::gfx {
++class Texture2D;
++}  // namespace mln::gfx
++
+ namespace mln::core {
+ 
+ class MetalTextureBackend final : public mln::mtl::RendererBackend,
+@@ -56,6 +60,10 @@ class MetalTextureBackend final : public mln::mtl::RendererBackend,
+   // retain and the host may already have released.
+   MTL::PixelFormat borrowed_pixel_format_ = MTL::PixelFormatInvalid;
+   RenderableSlotRing ring_;
++  // Experiment: one depth and one stencil texture shared by every slot.
++  std::shared_ptr<mln::gfx::Texture2D> shared_depth_;
++  std::shared_ptr<mln::gfx::Texture2D> shared_stencil_;
++  mln::Size shared_size_;
+ };
+ 
+ }  // namespace mln::core
+diff --git a/src/render/metal/metal_texture_backend.mm b/src/render/metal/metal_texture_backend.mm
+index b34c93e4b..b87fc55d1 100644
+--- a/src/render/metal/metal_texture_backend.mm
++++ b/src/render/metal/metal_texture_backend.mm
+@@ -35,6 +35,10 @@ class MetalTextureBackend::MetalTextureRenderableResource final
+       );
+       return;
+     }
++    if (backend.shared_depth_ != nullptr && backend.shared_size_ == size) {
++      depthTexture = backend.shared_depth_;
++      stencilTexture = backend.shared_stencil_;
++    } else {
+     depthTexture = context.createTexture2D();
+     depthTexture->setSize(size);
+     depthTexture->setFormat(
+@@ -74,6 +78,10 @@ class MetalTextureBackend::MetalTextureRenderableResource final
+       );
+ #endif
+ 
++      backend.shared_depth_ = depthTexture;
++      backend.shared_stencil_ = stencilTexture;
++      backend.shared_size_ = size;
++    }
+     context.renderingStats().numFrameBuffers++;
+   }
+   MetalTextureRenderableResource(const MetalTextureRenderableResource&) =
+@@ -109,6 +117,10 @@ class MetalTextureBackend::MetalTextureRenderableResource final
+     if (depthTexture != nullptr) {
+       depthTexture->create();
+       if (auto* depthTarget = renderPassDescriptor->depthAttachment()) {
++        // Experiment E: don't load or store depth across frames.
++        depthTarget->setLoadAction(MTL::LoadActionClear);
++        depthTarget->setStoreAction(MTL::StoreActionDontCare);
++        depthTarget->setClearDepth(1.0);
+         depthTarget->setTexture(
+           // The texture was created by mln::mtl::Context above.
+           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+@@ -120,6 +132,9 @@ class MetalTextureBackend::MetalTextureRenderableResource final
+     if (stencilTexture != nullptr) {
+       stencilTexture->create();
+       if (auto* stencilTarget = renderPassDescriptor->stencilAttachment()) {
++        stencilTarget->setLoadAction(MTL::LoadActionClear);
++        stencilTarget->setStoreAction(MTL::StoreActionDontCare);
++        stencilTarget->setClearStencil(0);
+         stencilTarget->setTexture(
+           // The texture was created by mln::mtl::Context above.
+           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+@@ -233,6 +248,8 @@ MetalTextureBackend::~MetalTextureBackend() {
+   auto guard = mln::gfx::BackendScope{*this};
+   resource.reset();
+   ring_.clear();
++  shared_depth_.reset();
++  shared_stencil_.reset();
+   context.reset();
+ }
+ 
+@@ -309,6 +326,8 @@ void MetalTextureBackend::set_borrowed_textures(
+     auto guard = mln::gfx::BackendScope{*this};
+     resource.reset();
+     ring_.reset(borrowed_textures_.size());
++    shared_depth_.reset();
++    shared_stencil_.reset();
+   }
+ }
+ 

@@ -12,7 +12,7 @@ MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=76c36bc70e83a78ee77f6d92970283714bcf860f8845c1
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
 # The commit of the release's tag, which artifact.json in the release's
 # tarballs states as gitSha. scripts/build_maplibre_ffi.sh builds it locally.
-MAPLIBRE_FFI_COMMIT=3b56ef91641085ad555def7a4b408c87f131fd8d
+MAPLIBRE_FFI_COMMIT=6d9058bf6e1a332100b1b1ab6c5a748a08074996
 # The presets that make up MaplibreNativeC.xcframework, one slice each.
 MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"
 # The Android presets. Each is installed on its own and is not part of the

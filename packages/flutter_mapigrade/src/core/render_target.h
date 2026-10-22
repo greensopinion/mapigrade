@@ -115,7 +115,7 @@ class BufferRenderTarget : public RenderTarget {
   virtual void ReleaseFallbackLocked() = 0;
 
   // Attach() and SetTarget() make the session render into the render
-  // texture, or the current set's first buffer.
+  // texture, or the current set's buffers.
 
   // Map thread. Copies the render texture into buffer `index` on the GPU and
   // returns when the copy has completed (design D3b). Not called when the
@@ -123,14 +123,19 @@ class BufferRenderTarget : public RenderTarget {
   virtual bool CopyToBuffer(int index) = 0;
 
   // Whether the session renders directly into the display buffers (a
-  // copy-free map, design D20). Then SelectBuffer() makes buffer `index` the
-  // session's target before each render, and no copy is needed. Under #760
-  // this is an ordered replacement of a borrowed ring of one texture (design
-  // D168 of the experiment-maplibre-pr-760-port change).
+  // copy-free map, design D20), and no copy is needed. Under #760 the
+  // session's target is a borrowed ring of the current set's buffers in slot
+  // order, and the session chooses the slot of each frame among the slots
+  // whose frames the map thread doesn't hold acquired (design D174 of the
+  // experiment-maplibre-pr-760-port change).
   virtual bool RendersIntoBuffers() const { return false; }
-  virtual mln_status SelectBuffer(mln_render_session session, int index,
-                                  const AsyncCall& call) {
-    return MLN_STATUS_OK;
+
+  // Map thread, when the target renders into the buffers. Returns the display
+  // slot of the acquired `frame`, or -1 if it can't be read, and sets
+  // `out_current` to whether the frame is in the current set's buffer of that
+  // slot.
+  virtual int FrameSlot(mln_acquired_frame frame, bool* out_current) {
+    return -1;
   }
 
   // The platform thread, from MapTexture::SelectNewest. Tells Flutter that the

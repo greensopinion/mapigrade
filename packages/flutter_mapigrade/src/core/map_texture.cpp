@@ -15,6 +15,13 @@
 #include <string_view>
 #include <thread>
 
+#if defined(__APPLE__)
+#include <AudioToolbox/AudioWorkInterval.h>
+#include <mach/mach_time.h>
+#include <os/workgroup.h>
+#include <pthread/qos.h>
+#endif
+
 namespace map_texture {
 
 namespace {
@@ -504,11 +511,15 @@ void MapTexture::RecordCameraLatency(const FrameInfo& info) {
       std::printf(
           "MLN760_STAGES n=%lld set_to_submit_ms=%.3f submit_to_complete_ms=%.3f "
           "complete_to_service_ms=%.3f service_to_ready_ms=%.3f "
-          "service_before_complete=%lld\n",
+          "service_before_complete=%lld held_per_slot=%lld/%lld/%lld/%lld\n",
           static_cast<long long>(stage_count_), stage_submit_ns_ / n / 1e6,
           stage_complete_ns_ / n / 1e6, stage_service_ns_ / n / 1e6,
           stage_render_ns_ / n / 1e6,
-          static_cast<long long>(stage_early_service_));
+          static_cast<long long>(stage_early_service_),
+          static_cast<long long>(held_per_slot_[0]),
+          static_cast<long long>(held_per_slot_[1]),
+          static_cast<long long>(held_per_slot_[2]),
+          static_cast<long long>(held_per_slot_[3]));
       std::fflush(stdout);
     }
   }
@@ -528,7 +539,49 @@ map_texture_stats MapTexture::stats() {
 
 // Map thread.
 
+#if defined(__APPLE__)
+namespace {
+
+// Experiment (design D177, task 8.11): the map thread's work interval, or
+// null without MLN760_WORKGROUP=1.
+thread_local os_workgroup_interval_t map_work_interval = nullptr;
+
+uint64_t NsToMachTicks(int64_t ns) {
+  static const mach_timebase_info_data_t timebase = [] {
+    mach_timebase_info_data_t info{};
+    mach_timebase_info(&info);
+    return info;
+  }();
+  return static_cast<uint64_t>(ns) * timebase.denom / timebase.numer;
+}
+
+}  // namespace
+#endif
+
 void MapTexture::Run() {
+#if defined(__APPLE__)
+  os_workgroup_join_token_s work_interval_token{};
+  if (const char* wg = std::getenv("MLN760_WORKGROUP"); wg && wg[0] == '1') {
+    map_work_interval = AudioWorkIntervalCreate(
+        "flutter_mapigrade.map", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
+    if (map_work_interval != nullptr &&
+        os_workgroup_join(map_work_interval, &work_interval_token) != 0) {
+      std::fprintf(stderr, "MLN760_WORKGROUP join failed: %d\n", errno);
+      os_release(map_work_interval);
+      map_work_interval = nullptr;
+    }
+    std::printf("MLN760_WORKGROUP %s\n",
+                map_work_interval != nullptr ? "joined" : "unavailable");
+    std::fflush(stdout);
+  }
+#endif
+#if defined(__APPLE__)
+  // Experiment (task 8.10): with MLN760_QOS_UI=1 the map thread runs at the
+  // user-interactive QoS class instead of the default.
+  if (const char* qos = std::getenv("MLN760_QOS_UI"); qos && qos[0] == '1') {
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+  }
+#endif
   MapThreadOwnerScope owner(this);
   bool ok = false;
   RunInPlatformScope([&] { ok = Init(); });
@@ -540,6 +593,13 @@ void MapTexture::Run() {
   init_cv_.notify_all();
   if (!ok) {
     RunInPlatformScope([&] { Teardown(); });
+#if defined(__APPLE__)
+    if (map_work_interval != nullptr) {
+      os_workgroup_leave(map_work_interval, &work_interval_token);
+      os_release(map_work_interval);
+      map_work_interval = nullptr;
+    }
+#endif
     return;
   }
 
@@ -548,6 +608,13 @@ void MapTexture::Run() {
     RunInPlatformScope([&] { stop = RunOnce(); });
   }
   RunInPlatformScope([&] { Teardown(); });
+#if defined(__APPLE__)
+  if (map_work_interval != nullptr) {
+    os_workgroup_leave(map_work_interval, &work_interval_token);
+    os_release(map_work_interval);
+    map_work_interval = nullptr;
+  }
+#endif
 }
 
 // Under #760 the map thread arms one frame demand at a time. The demand waits
@@ -562,6 +629,24 @@ bool MapTexture::RenderWanted() {
   }
   return !waiting_for_buffer_.load();
 }
+
+namespace {
+
+// The file of the temporary diagnostics (findings, task 6.3), or null.
+FILE* DiagnosticLog() {
+  static FILE* log = [] {
+    FILE* file = std::fopen("/private/tmp/mln760_stall.log", "a");
+    if (file == nullptr) {
+      std::string path = PlatformCachePath();
+      path = path.substr(0, path.rfind('/')) + "/mln760_stall.log";
+      file = std::fopen(path.c_str(), "a");
+    }
+    return file;
+  }();
+  return log;
+}
+
+}  // namespace
 
 bool MapTexture::RunOnce() {
   bool render_now = RenderWanted();
@@ -602,15 +687,7 @@ bool MapTexture::RunOnce() {
       if (session_ != MLN_HANDLE_NULL) {
         mln_render_session_get_snapshot(session_, &snapshot, nullptr);
       }
-      static FILE* stall_log = [] {
-        FILE* file = std::fopen("/private/tmp/mln760_stall.log", "a");
-        if (file == nullptr) {
-          std::string path = PlatformCachePath();
-          path = path.substr(0, path.rfind('/')) + "/mln760_stall.log";
-          file = std::fopen(path.c_str(), "a");
-        }
-        return file;
-      }();
+      FILE* stall_log = DiagnosticLog();
       std::fprintf(
           stall_log != nullptr ? stall_log : stdout,
           "MLN760_STALL rendered=%lld demand=%d slot=%d stale=%d repaint=%d "
@@ -642,6 +719,7 @@ bool MapTexture::RunOnce() {
   ApplyCommands(&stop);
   if (stop) return true;
   ApplyCamera();
+  WaitForCamera();
   ServiceDriver();
   MaybeRender();
   // A newly armed demand renders at once if the map has an update.
@@ -815,6 +893,8 @@ void MapTexture::ServiceUntil(const std::function<bool()>& done) {
 
 void MapTexture::DestroySession() {
   if (session_ != MLN_HANDLE_NULL) {
+    // A detach is refused while a frame is acquired.
+    ReleaseHeldFrames(true);
     mln_diagnostic diagnostic = NewDiagnostic();
     auto detached = std::make_shared<Waiter>();
     mln_completion detach_done = Waiter::For(detached);
@@ -854,10 +934,18 @@ void MapTexture::Teardown() {
   {
     // For the findings of the experiment-maplibre-pr-760-port change (Q1).
     std::lock_guard lock(stats_mutex_);
-    std::printf("MLN760_ACQUIRE acquired=%lld not_ready=%lld\n",
+    std::printf("MLN760_ACQUIRE acquired=%lld not_ready=%lld old_set=%lld\n",
                 static_cast<long long>(acquired_frames_),
-                static_cast<long long>(acquire_not_ready_));
+                static_cast<long long>(acquire_not_ready_),
+                static_cast<long long>(old_set_frames_));
     std::fflush(stdout);
+    if (FILE* log = DiagnosticLog()) {
+      std::fprintf(log, "MLN760_ACQUIRE acquired=%lld not_ready=%lld old_set=%lld\n",
+                   static_cast<long long>(acquired_frames_),
+                   static_cast<long long>(acquire_not_ready_),
+                   static_cast<long long>(old_set_frames_));
+      std::fflush(log);
+    }
   }
   DestroySession();
   // Waiting for each release completion ensures that no completion or event
@@ -962,6 +1050,14 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
       Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, "failed to allocate texture buffers");
       return;
     }
+    // A demand armed before the resize could render into the replaced set
+    // after its buffers are freed, so the barrier ends it first. A
+    // replacement is refused while a frame is acquired, and the frames are
+    // released while their textures exist. The map thread requests no frame
+    // before the replacement, so the session renders no frame into the
+    // replaced set (design D174).
+    if (session_ != MLN_HANDLE_NULL && demand_outstanding_) EndDemands();
+    ReleaseHeldFrames(true);
     buffers_.WithLock([buffer_target, this](int chosen) {
       buffer_target->SwapBuffersLocked(chosen);
       buffers_.ResetLocked();
@@ -994,6 +1090,20 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     }
   }
   render_pending_ = true;
+}
+
+void MapTexture::EndDemands() {
+  auto ended = std::make_shared<Waiter>();
+  mln_completion barrier_done = Waiter::For(ended);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_render_session_barrier(session_, &barrier_done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    Waiter::Discard(barrier_done);
+    ReportStatus("mln_render_session_barrier", status, &diagnostic);
+    return;
+  }
+  ServiceUntil([&] { return ended->Done(); });
 }
 
 bool MapTexture::AttachSession() {
@@ -1036,6 +1146,7 @@ bool MapTexture::RecoverLostTarget() {
       snapshot.state != MLN_RENDER_SESSION_STATE_TARGET_LOST) {
     return false;
   }
+  ReleaseHeldFrames(true);
   auto detached = std::make_shared<Waiter>();
   mln_completion detach_done = Waiter::For(detached);
   if (mln_render_session_detach(session_, &detach_done, nullptr) ==
@@ -1081,35 +1192,23 @@ void MapTexture::ApplyCamera() {
   camera_update.camera.center = {camera.latitude, camera.longitude};
   camera_update.camera.zoom = camera.zoom;
   camera_update.camera.bearing = camera.bearing;
-  // The completion's generation counts map snapshots, while a frame result
-  // counts render updates. A snapshot read after the completion gives the
-  // render update that includes the camera, or a later one if another
-  // command has run since (design D169, findings Q2).
+  // The completion reports the render update that includes the camera, which
+  // a frame result's map_update_generation counts (maplibre-native-ffi#906,
+  // design D175).
   int64_t seq = update->seq;
   int64_t set_at_ns = update->set_at_ns;
   int64_t submit_ns = NowNs();
   mln_completion done = FunctionCompletion(
       [this, seq, set_at_ns, submit_ns](const mln_completion_result& result) {
-        if (result.status != MLN_STATUS_OK) {
-          cameras_completed_.fetch_add(1);
-          return;
-        }
-        int64_t complete_ns = NowNs();
-        mln_map_snapshot snapshot{};
-        snapshot.size = sizeof(snapshot);
-        if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
-          cameras_completed_.fetch_add(1);
-          return;
-        }
-        {
+        if (result.status == MLN_STATUS_OK) {
           std::lock_guard lock(camera_generations_mutex_);
-          camera_generations_.push_back(
-              {snapshot.latest_render_update_generation, seq, set_at_ns,
-               submit_ns, complete_ns});
+          camera_generations_.push_back({result.render_update_generation, seq,
+                                         set_at_ns, submit_ns, NowNs()});
         }
         // After the generation is recorded, so that a frame that the waiting
-        // map thread renders next is matched to this camera.
+        // map thread renders next is matched to this camera (design D176).
         cameras_completed_.fetch_add(1);
+        Signal();
       });
   mln_diagnostic diagnostic = NewDiagnostic();
   mln_status status =
@@ -1120,20 +1219,28 @@ void MapTexture::ApplyCamera() {
     return;
   }
   ++cameras_submitted_;
-  // Experiment (task 6.4): with MLN760_WAIT_CAMERA=1, wait up to 2 ms for the
-  // camera's render update to be published, so that the next service call
-  // renders it, as jump_to before render_update did before #760.
-  static const bool wait_for_camera = [] {
-    const char* value = std::getenv("MLN760_WAIT_CAMERA");
+}
+
+// Rendering before the camera's update is published would render the previous
+// camera, which cost the iPhone one more display frame of lag (findings Q2).
+// The completion signals the wake, so the map thread waits without spinning.
+// Every command completes, and a dispose also signals the wake (design D176).
+void MapTexture::WaitForCamera() {
+  // Experiment (task 8.10): MLN760_NO_CAMERA_WAIT=1 skips the wait.
+  static const bool skip = [] {
+    const char* value = std::getenv("MLN760_NO_CAMERA_WAIT");
     return value != nullptr && value[0] == '1';
   }();
-  if (wait_for_camera) {
-    int64_t deadline = NowNs() + 2'000'000;
-    while (cameras_completed_.load() < cameras_submitted_ &&
-           NowNs() < deadline) {
-      std::this_thread::yield();
-    }
+  if (skip) return;
+  bool waited = false;
+  while (cameras_completed_.load() < cameras_submitted_ &&
+         !commands_.DisposeQueued()) {
+    WaitForWake(kIdleWaitMs);
+    waited = true;
   }
+  // The wait may have consumed a wake for other work, which the next
+  // iteration of the loop then handles without waiting.
+  if (waited) Signal();
 }
 
 void MapTexture::OnEvents(void* user_data, const mln_event_batch_view* events) {
@@ -1181,6 +1288,8 @@ void MapTexture::MaybeRender() {
 
   if (auto* surface = target_->AsSurfaceTarget()) {
     RenderIntoSurface(*surface);
+  } else if (target_->AsBufferTarget()->RendersIntoBuffers()) {
+    RenderIntoRing(*target_->AsBufferTarget());
   } else {
     RenderIntoBuffer(*target_->AsBufferTarget());
   }
@@ -1244,22 +1353,39 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   int index = AcquireSlot();
   if (index < 0) return;
 
-  if (target.RendersIntoBuffers()) {
-    // An ordered replacement of the borrowed ring's one texture; it runs in
-    // the service call before the demand's render (design D168).
-    mln_completion done =
-        ReportingCompletion("mln_render_session_set_metal_borrowed_texture_target");
-    mln_diagnostic diagnostic = NewDiagnostic();
-    mln_status status =
-        target.SelectBuffer(session_, index, {&done, &diagnostic});
-    if (status != MLN_STATUS_OK) {
-      DiscardFunctionCompletion(done);
-      buffers_.Release(index);
-      ReportStatus("select buffer", status, &diagnostic);
-      return;
+  ArmDemand(index, render_ahead);
+}
+
+// The session chooses the slot among those whose frames the map thread
+// doesn't hold, so the slot is known when the frame is acquired
+// (HandleFrameResult, design D174).
+void MapTexture::RenderIntoRing(BufferRenderTarget& target) {
+  bool render_ahead = false;
+  if (!MayRender(&render_ahead)) return;
+  ReleaseHeldFrames(false);
+  if (!FreeSlotAvailable()) return;
+  ArmDemand(-1, render_ahead);
+}
+
+bool MapTexture::FreeSlotAvailable() {
+  for (int i = 0; i < target_->slot_count(); ++i) {
+    if (buffers_.slot(i) == BufferState::Slot::kFree) return true;
+  }
+  {
+    std::lock_guard lock(stats_mutex_);
+    ++stats_.skipped_renders;
+  }
+  waiting_for_buffer_.store(true);
+  // Present() or SelectNewest() may have freed a slot between the check and
+  // the store, and found no wait to end.
+  for (int i = 0; i < target_->slot_count(); ++i) {
+    if (buffers_.slot(i) == BufferState::Slot::kFree &&
+        waiting_for_buffer_.exchange(false)) {
+      Signal();
+      break;
     }
   }
-  ArmDemand(index, render_ahead);
+  return false;
 }
 
 // A surface target's session queues each frame on the surface, and the frame
@@ -1300,7 +1426,7 @@ bool MapTexture::ArmDemand(int slot, bool render_ahead) {
   mln_status status =
       mln_render_session_request_frame(session_, &demand, &diagnostic);
   if (status != MLN_STATUS_OK) {
-    buffers_.Release(slot);
+    if (slot >= 0) buffers_.Release(slot);
     if (!RecoverLostTarget()) {
       ReportStatus("mln_render_session_request_frame", status, &diagnostic);
     }
@@ -1328,8 +1454,24 @@ void MapTexture::ServiceDriver() {
   }
   mln_diagnostic diagnostic = NewDiagnostic();
   int64_t start = NowNs();
+#if defined(__APPLE__)
+  // The render of an armed demand is one cycle of the work interval, due by
+  // the end of the display refresh interval (design D177).
+  bool in_interval = false;
+  if (map_work_interval != nullptr && demand_outstanding_) {
+    int64_t interval = display_interval_ns_.load();
+    if (interval <= 0) interval = kDefaultIntervalNs;
+    uint64_t now = mach_absolute_time();
+    in_interval = os_workgroup_interval_start(map_work_interval, now,
+                                              now + NsToMachTicks(interval),
+                                              nullptr) == 0;
+  }
+#endif
   mln_status status =
       mln_render_session_service_driver_work(session_, &diagnostic);
+#if defined(__APPLE__)
+  if (in_interval) os_workgroup_interval_finish(map_work_interval, nullptr);
+#endif
   int64_t elapsed = NowNs() - start;
   if (status != MLN_STATUS_OK && status != MLN_STATUS_BUSY) {
     ReportStatus("mln_render_session_service_driver_work", status, &diagnostic);
@@ -1378,7 +1520,7 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
     return;
   }
   if (result.disposition != MLN_RENDER_RESULT_RENDERED) {
-    buffers_.Release(index);
+    if (index >= 0) buffers_.Release(index);
     repaint_wanted_ = false;
     if (result.disposition == MLN_RENDER_RESULT_TARGET_NOT_READY) {
       RecoverLostTarget();
@@ -1386,7 +1528,15 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
     return;
   }
   repaint_wanted_ = result.needs_repaint;
-  if (target_->AsBufferTarget() != nullptr && acquire_frames_) {
+  if (auto* buffer_target = target_->AsBufferTarget();
+      buffer_target != nullptr && buffer_target->RendersIntoBuffers()) {
+    index = HoldRenderedFrame(*buffer_target);
+    if (index < 0) {
+      // The frame isn't published, so the next demand renders again.
+      repaint_wanted_ = true;
+      return;
+    }
+  } else if (buffer_target != nullptr && acquire_frames_) {
     AcquireAndReleaseFrame();
   }
 
@@ -1443,34 +1593,104 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
 
-void MapTexture::AcquireAndReleaseFrame() {
-  mln_acquired_frame frame = MLN_HANDLE_NULL;
+namespace {
+
+// Flutter reads a buffer target's textures without a fence that a release can
+// wait on, so a frame is released without consumer synchronization.
+void ReleaseFrame(mln_acquired_frame frame) {
   mln_diagnostic diagnostic = NewDiagnostic();
-  mln_status status =
-      mln_render_session_acquire_frame(session_, &frame, &diagnostic);
-  if (status == MLN_STATUS_UNSUPPORTED) {
-    acquire_frames_ = false;
-    return;
+  mln_gpu_sync sync = mln_gpu_sync_default();
+  mln_status status = mln_acquired_frame_release(frame, &sync, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    std::fprintf(stderr, "flutter_mapigrade: mln_acquired_frame_release: %d\n",
+                 status);
   }
-  if (status == MLN_STATUS_NOT_READY) {
+}
+
+}  // namespace
+
+void MapTexture::AcquireAndReleaseFrame() {
+  while (true) {
+    mln_acquired_frame frame = MLN_HANDLE_NULL;
+    mln_diagnostic diagnostic = NewDiagnostic();
+    mln_status status =
+        mln_render_session_acquire_frame(session_, &frame, &diagnostic);
+    if (status == MLN_STATUS_UNSUPPORTED) {
+      acquire_frames_ = false;
+      return;
+    }
+    if (status == MLN_STATUS_NOT_READY) return;
+    if (status != MLN_STATUS_OK) {
+      ReportStatus("mln_render_session_acquire_frame", status, &diagnostic);
+      return;
+    }
+    {
+      std::lock_guard lock(stats_mutex_);
+      ++acquired_frames_;
+    }
+    // Flutter reads the texture after a copy, or a stale frame isn't
+    // published at all.
+    ReleaseFrame(frame);
+  }
+}
+
+int MapTexture::HoldRenderedFrame(BufferRenderTarget& target) {
+  // The session acquires the oldest rendered frame first, so the last one is
+  // the frame of this result; any older one wasn't published.
+  mln_acquired_frame newest = MLN_HANDLE_NULL;
+  while (true) {
+    mln_acquired_frame frame = MLN_HANDLE_NULL;
+    mln_diagnostic diagnostic = NewDiagnostic();
+    mln_status status =
+        mln_render_session_acquire_frame(session_, &frame, &diagnostic);
+    if (status == MLN_STATUS_NOT_READY) break;
+    if (status != MLN_STATUS_OK) {
+      ReportStatus("mln_render_session_acquire_frame", status, &diagnostic);
+      break;
+    }
+    {
+      std::lock_guard lock(stats_mutex_);
+      ++acquired_frames_;
+    }
+    if (newest != MLN_HANDLE_NULL) ReleaseFrame(newest);
+    newest = frame;
+  }
+  if (newest == MLN_HANDLE_NULL) {
     std::lock_guard lock(stats_mutex_);
     ++acquire_not_ready_;
-    return;
+    return -1;
   }
-  if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_render_session_acquire_frame", status, &diagnostic);
-    return;
+  bool current = false;
+  int slot = target.FrameSlot(newest, &current);
+  if (slot >= 0 && !current) {
+    std::lock_guard lock(stats_mutex_);
+    ++old_set_frames_;
   }
+  // The session renders only into a slot whose frame the map thread doesn't
+  // hold, and the map thread holds the frame of every slot that isn't free,
+  // so the slot is free. Only the map thread takes a free slot.
+  if (slot < 0 || !current || held_frames_[slot] != MLN_HANDLE_NULL ||
+      buffers_.slot(slot) != BufferState::Slot::kFree ||
+      buffers_.AcquireFree(slot) != slot) {
+    ReleaseFrame(newest);
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+         "the session rendered into a slot that isn't free");
+    return -1;
+  }
+  held_frames_[slot] = newest;
   {
     std::lock_guard lock(stats_mutex_);
-    ++acquired_frames_;
+    ++held_per_slot_[slot];
   }
-  // Flutter reads the texture later; the next replacement of the ring's
-  // texture, not the ring, decides when MapLibre writes to it again.
-  mln_gpu_sync sync = mln_gpu_sync_default();
-  status = mln_acquired_frame_release(frame, &sync, &diagnostic);
-  if (status != MLN_STATUS_OK) {
-    ReportStatus("mln_acquired_frame_release", status, &diagnostic);
+  return slot;
+}
+
+void MapTexture::ReleaseHeldFrames(bool all) {
+  for (int i = 0; i < kMaxBufferCount; ++i) {
+    if (held_frames_[i] == MLN_HANDLE_NULL) continue;
+    if (!all && buffers_.slot(i) != BufferState::Slot::kFree) continue;
+    ReleaseFrame(held_frames_[i]);
+    held_frames_[i] = MLN_HANDLE_NULL;
   }
 }
 

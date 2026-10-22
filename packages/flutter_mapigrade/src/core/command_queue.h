@@ -101,6 +101,15 @@ class CommandQueue {
     return std::exchange(commands_, {});
   }
 
+  // Whether a dispose is queued.
+  bool DisposeQueued() {
+    std::lock_guard lock(mutex_);
+    for (const Command& command : commands_) {
+      if (command.kind == Command::Kind::kDispose) return true;
+    }
+    return false;
+  }
+
   void SetCamera(const Camera& camera, int64_t seq, int64_t set_at_ns = 0) {
     std::lock_guard lock(mutex_);
     camera_ = CameraUpdate{camera, seq, set_at_ns};

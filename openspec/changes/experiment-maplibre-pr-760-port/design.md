@@ -37,7 +37,7 @@ Today each map has a map thread that mapigrade owns (design D1 and D2). On that 
 | `mln_runtime_drain_events` | `mln_runtime_set_event_handler` (callback or delivery queue) |
 | `mln_adapter_http_header_*` | `mln_http_header_rule` in `runtime.h` |
 | `mln_runtime_set_maximum_ambient_cache_size_start` | `mln_runtime_set_maximum_ambient_cache_size` |
-| `mln_metal_borrowed_texture_set_target` | `mln_render_session_set_metal_borrowed_texture_target`: an ordered operation with a completion; it fails while a frame is acquired, and frames published before it can't be acquired. A borrowed ring has 1 to 3 textures, and a replacement keeps the count. |
+| `mln_metal_borrowed_texture_set_target` | `mln_render_session_set_metal_borrowed_texture_target`: an ordered operation with a completion; it fails while a frame is acquired, and frames published before it can't be acquired. A borrowed ring has 1 to 3 textures, and a replacement keeps the count. #905 raised the maximum to 8 (`MLN_TEXTURE_RING_MAX_DEPTH`). |
 | `mln_opengl_surface_set_target` | `mln_render_session_set_opengl_surface_target`, an ordered operation with a completion |
 | `mln_render_session_reduce_memory_use` | the same name, an operation with a completion |
 | `mln_render_session_destroy` | `detach`, `abandon`, `release` and `dispose` |
@@ -74,6 +74,8 @@ The questions are ordered by how much an answer could change #760's API, which m
 
 `maplibre_ffi.lock` on the branch sets `MAPLIBRE_FFI_COMMIT` to `3b56ef916` and `MAPLIBRE_FFI_REPO` to the upstream repository, the build applies `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` on top (D173), and `scripts/build_maplibre_ffi.sh` builds the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl`, which #760 still has. `Package.swift` uses the local xcframework. We move the pin only on purpose, and record each move and the reason in the findings document, because #760 changes daily.
 
+After #760 merged, the pin moves to FFI `main` at `6d9058bf6` (#760, #905 and #906), and the branch carries no local patch.
+
 Alternatives:
 - Track the PR's head. Every rebuild could change the API under the port, and measurements would not be comparable.
 
@@ -86,6 +88,8 @@ Alternatives:
 
 ### D168. Apple slots: a borrowed ring of one texture, replaced before each render
 
+D174 replaces this decision on FFI `main`. The measurements at `3b56ef916` used it.
+
 The session attaches a borrowed Metal ring of one texture. Before each render, the map thread replaces it with the free display slot's texture with `mln_render_session_set_metal_borrowed_texture_target`, then requests a frame and services the driver, which runs the replacement and the render in that order. The display slots, their Flutter textures and Dart's choice of a frame don't change (D122, D139). The experiment measures the cost of a replacement per frame and finds out whether a frame that the host never acquires keeps its slot from being reused.
 
 Alternatives:
@@ -93,6 +97,8 @@ Alternatives:
 - The copy path (D3b): a ring owned by the session and a GPU copy into 4 slots. It works within the limit, but costs the copy that copy-free maps removed (benchmarks.md, "Copy-free with the upstream FFI fix").
 
 ### D173. A local patch keeps the rendered update across a same-size replacement
+
+D174 replaces this decision on FFI `main`. In discussion #877, the maintainer of #760 considered a replacement before every frame "a hack, not the intended use", and didn't consider the reset a regression, so we dropped the patch.
 
 Task 3.4 showed that D168 alone renders without end: #760's target replacement resets the session's record of the rendered update and resumes waiting demands, so each replacement makes the next demand render (findings Q1). maplibre-native-ffi#807 fixed the same behavior of the earlier `set_target`. The branch carries a patch to #760 (`scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch`) with the same semantic: a replacement of a borrowed texture ring with the same extent and physical size keeps `rendered_update_generation` and `pending_changes`, marks the new target as holding the rendered update, and doesn't resume waiting demands. The generation still increases, so frames published before the replacement still can't be acquired.
 
@@ -104,10 +110,35 @@ Alternatives:
 
 ### D169. The frame's camera comes from the frame result
 
+D175 replaces the snapshot read of this decision on FFI `main`.
+
 After `drain_frame_results`, each result with `MLN_RENDER_RESULT_RENDERED` gives the frame's camera through `mln_map_projection_create(result.view)` and `mln_map_projection_get_camera`. To keep `FrameInfo.seq` (D125), the map thread records the generation that each `update_camera` completion reports together with the camera's `seq`, and a frame's `seq` is that of the newest camera whose generation is at most the frame's `map_update_generation`. The demand uses `MLN_FRAME_DEMAND_IF_NEEDED | MLN_FRAME_DEMAND_WAIT_FOR_UPDATE`, so that a camera that reaches the core worker after the request is still rendered without another round trip.
 
 Alternatives:
 - Drop `seq` and match frames by camera. That would change the Dart code, which this experiment leaves alone.
+
+### D174. Apple slots: a borrowed ring of 4 textures with acquire and release
+
+The session attaches a borrowed Metal ring of the current set's 4 buffers, in slot order, so ring slot n is display slot n. After each result with `MLN_RENDER_RESULT_RENDERED`, the map thread acquires the frame with `mln_render_session_acquire_frame`, and the frame's `slot` is the display slot it publishes into. The map thread holds the acquired frame while the display slot holds the frame, and releases it with `mln_acquired_frame_release` when the slot is freed. It releases a rendered frame that it doesn't publish at once. Because the session renders only into a slot that no acquired frame holds, the session chooses the slot, not mapigrade. The map thread still requests a frame only when a display slot is free. The release passes no consumer synchronization, as the copy-free path does today, because Flutter samples the IOSurface without a fence.
+
+On a resize (D126), #760 refuses a replacement while any frame is acquired. A demand armed before the resize could render into the old set after mapigrade frees its buffers, so when a demand is outstanding the map thread first ends it with `mln_render_session_barrier` and services the session until the barrier completes. It then releases every acquired frame, frees the old set except the fallback buffer, and replaces the ring with the new set with `mln_render_session_set_metal_borrowed_texture_target`. It requests no frame from the barrier to the replacement. After the replacement the session never renders into the old set, so the fallback buffer that Flutter still displays stays valid; mapigrade keeps it allocated as before.
+
+Alternatives:
+- A borrowed ring of 3 textures and 3 display slots. It changes D122.
+- The copy path (D3b). It costs the copy that copy-free maps removed.
+
+### D175. A frame's `seq` comes from #906's render update generation
+
+The camera completion records `mln_completion_result.render_update_generation` with the camera's `seq`, and no longer reads `mln_map_get_snapshot`. A snapshot read after the completion could return a later command's update, so the recorded generation could be too new; #906 reports the update that includes the command. A frame's `seq` is still that of the newest camera whose generation is at most the frame's `map_update_generation` (D169).
+
+### D176. The map thread waits for the camera's completion before it requests a frame
+
+After `mln_map_update_camera`, the map thread requests no frame until the camera's completion has run. It waits on its command queue as it does for other work, and the completion signals the queue. The wait has no deadline: every command completes with a terminal status, and stop and dispose also signal the queue. The switch `MLN760_WAIT_CAMERA` and its yield loop are removed.
+
+Task 6.4 found that the iPhone's extra camera latency (15.0 ms against 11.4 ms) came from the port's ordering: it rendered before the camera command's update was published. Waiting for the completion with `MLN760_WAIT_CAMERA=1` gave 11.0 to 11.3 ms.
+
+Alternatives:
+- A deadline, for example one display interval. A late camera would then render a frame at the previous camera, which the frame's `seq` reports correctly, but which adds a frame of lag.
 
 ### D170. Android keeps one window surface and switches it only on replacement and park
 
@@ -122,14 +153,24 @@ The map thread records, for each `seq`, when `SetCamera` queued it and when the 
 The branch:
 - doesn't build or update the native tests in `test/native/`;
 - leaves the specs, the README and `docs/` other than the findings document unchanged;
-- doesn't keep the copy path (D3b) unless D168 fails.
+- doesn't keep the copy path (D3b) unless D168 fails;
+- keeps the diagnostics `MLN760_STAGES`, `MLN760_STALL`, `MLN760_ACQUIRE` and `MLN760_RECOVERED` on FFI `main`.
 
 iOS isn't a shortcut. It shares the Metal target with macOS, so it needs no port of its own, but phones are mapigrade's main platforms, and the iPhone's thermal limits and 120 Hz frame budget (a `render_update` of about 8.2 ms against an 8.3 ms refresh interval) show per-frame overhead that the Mac's headroom hides. The branch measures it on the iPhone as well as on the Pixel.
 
 For each shortcut, the findings document states what the real port would need.
 
+### D177. Experiment: the map thread joins a work interval on Apple platforms
+
+Task 8.10 found that iOS keeps the port's map thread on the efficiency cores once no per-frame allocation happens, and that `QOS_CLASS_USER_INTERACTIVE` doesn't change that. A work interval tells the system the deadline of each cycle of a thread's work. The only public way for an app to create an interval workgroup is `AudioWorkIntervalCreate` (AudioToolbox, iOS 14); `<os/workgroup_interval.h>` says that interval workgroups are only for audio workloads so far, and AudioToolbox describes them for threads with real-time priority. With `MLN760_WORKGROUP=1`, the map thread creates a work interval with `AudioWorkIntervalCreate` on `OS_CLOCK_MACH_ABSOLUTE_TIME`, joins it, and brackets each service call that renders with `os_workgroup_interval_start` and `os_workgroup_interval_finish`, with the end of the display refresh interval as the deadline. The experiment measures whether the map thread then runs on the performance cores, and the frame rate; it doesn't decide whether a merged port may use an audio API for rendering.
+
+Alternatives:
+- A time-constraint (real-time) thread policy (`THREAD_TIME_CONSTRAINT_POLICY`). It is likely to place the thread on the performance cores, but the system demotes a real-time thread that exceeds its computation budget, and a render can take longer than a refresh interval. Tried only if the work interval doesn't change the placement.
+- An allocation per frame, as the released FFI's `set_target` did. It keeps the thread on the performance cores by a side effect.
+
 ## Risks / Trade-offs
 
+- [A demand renders into a released slot of the old set before the replacement of D174 runs] → The barrier of D174 ends an outstanding demand before the release, and the map thread requests no frame between the release and the replacement; task 8.3 checks that no frame of the old set is rendered after a resize starts. Without the barrier, the first run of task 8.2 crashed in MapLibre's render pass, in a texture of the freed set.
 - [#760 doesn't build for mapigrade's presets at the pinned commit] → Record the failure as a finding, and move the pin or patch locally under `scripts/patches/`, recording which.
 - [A replacement per frame (D168) is refused or slow] → Try the ring of 3 textures, then the copy path, and record the numbers of each.
 - [Results on the branch reflect the experiment's shortcuts, not #760] → For each finding, state whether it comes from #760 or from the port.

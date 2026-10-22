@@ -5,10 +5,11 @@ maplibre-native-ffi PR #760 ("Move execution into the native core and generate l
 ## What Changes
 
 - An experimental port of mapigrade's native core and platform render targets to the C API of #760, on the branch `experiment-maplibre-pr-760-port`. We expect to discard the branch; if #760 merges, it is a reference for the real port.
-- The FFI that the branch builds against is #760 at a pinned commit, built from source. The package's released FFI pin on `main` doesn't change.
+- The FFI that the branch builds against is #760 at a pinned commit, and later FFI `main`, built from source. The package's released FFI pin on `main` doesn't change.
 - A findings document, `docs/maplibre-pr-760-port-findings.md`, that records how well #760 supports mapigrade, where the complexity is, what breaks, which questions remain open, and the feedback for #760.
 - Measurements with the existing frame-rate and alignment benchmarks, comparing the branch with `main`.
 - Drafts of upstream issues for #760, each backed by findings and measurements.
+- After #760 merged on 2026-10-21, the branch moves to FFI `main` at `6d9058bf6`, which includes the follow-ups #905 (a borrowed ring of up to 8 textures) and #906 (a command's completion reports its render update generation). On Metal, the port then stops replacing the target before each frame, and we rerun the iPhone benchmarks.
 
 ## Capabilities
 

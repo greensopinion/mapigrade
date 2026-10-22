@@ -1,0 +1,65 @@
+# Map thread samples per CPU core, Time Profiler, 10 s of the measured pan, iPhone 15 Pro Max on cable (2026-10-22, task 8.10)
+== A, port on FFI main (ring of 4, camera wait)
+CPU 0 (E Core)                 902
+CPU 1 (E Core)                 837
+CPU 2 (E Core)                 848
+CPU 3 (E Core)                 936
+CPU 4 (P Core)                 225
+CPU 5 (P Core)                 41
+[('Running', 3789)]
+== B, ae917a5 on FFI main (one-texture ring replaced per frame), MLN760_WAIT_CAMERA=1
+CPU 0 (E Core)                 299
+CPU 1 (E Core)                 287
+CPU 2 (E Core)                 374
+CPU 3 (E Core)                 345
+CPU 4 (P Core)                 863
+CPU 5 (P Core)                 293
+[('Running', 2461)]
+== B without the camera wait
+CPU 0 (E Core)                 507
+CPU 1 (E Core)                 431
+CPU 2 (E Core)                 293
+CPU 3 (E Core)                 278
+CPU 4 (P Core)                 576
+CPU 5 (P Core)                 379
+[('Running', 2464)]
+== baseline c1b51b1, released FFI
+CPU 0 (E Core)                 457
+CPU 1 (E Core)                 388
+CPU 2 (E Core)                 288
+CPU 3 (E Core)                 320
+CPU 4 (P Core)                 572
+CPU 5 (P Core)                 422
+[('Running', 2447)]
+== A with QOS_CLASS_USER_INTERACTIVE (MLN760_QOS_UI=1)
+CPU 0 (E Core)                 795
+CPU 1 (E Core)                 900
+CPU 2 (E Core)                 852
+CPU 3 (E Core)                 887
+CPU 4 (P Core)                 225
+CPU 5 (P Core)                 43
+[('Running', 3702)]
+== A without the camera wait (MLN760_NO_CAMERA_WAIT=1)
+CPU 0 (E Core)                 869
+CPU 1 (E Core)                 857
+CPU 2 (E Core)                 831
+CPU 3 (E Core)                 879
+CPU 4 (P Core)                 195
+CPU 5 (P Core)                 40
+[('Running', 3671)]
+== F, A with exp-f-rebuild-per-frame.patch
+CPU 0 (E Core)                 284
+CPU 1 (E Core)                 287
+CPU 2 (E Core)                 266
+CPU 3 (E Core)                 232
+CPU 4 (P Core)                 776
+CPU 5 (P Core)                 478
+[('Running', 2323)]
+== A with the work interval of D177 (MLN760_WORKGROUP=1)
+CPU 0 (E Core)                 373
+CPU 1 (E Core)                 323
+CPU 2 (E Core)                 332
+CPU 3 (E Core)                 394
+CPU 4 (P Core)                 680
+CPU 5 (P Core)                 23
+[('Running', 2125)]

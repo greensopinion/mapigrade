@@ -1,28 +1,28 @@
 # Findings: porting mapigrade to maplibre-native-ffi PR #760
 
-This document records what we learned by porting mapigrade to the C API of [maplibre-native-ffi PR #760](https://github.com/maplibre/maplibre-native-ffi/pull/760) ("Move execution into the native core and generate language bindings") on the branch `experiment-maplibre-pr-760-port`. The plan is the OpenSpec change `experiment-maplibre-pr-760-port` (proposal, design and tasks in `openspec/changes/experiment-maplibre-pr-760-port/`); the questions Q1 to Q7 and the decisions D166 to D172 are those of its design. The background is [discussion #877](https://github.com/maplibre/maplibre-native-ffi/discussions/877).
+This document records what we learned by porting mapigrade to the C API of [maplibre-native-ffi PR #760](https://github.com/maplibre/maplibre-native-ffi/pull/760) ("Move execution into the native core and generate language bindings") on the branch `experiment-maplibre-pr-760-port`. The plan is the OpenSpec change `experiment-maplibre-pr-760-port` (proposal, design and tasks in `openspec/changes/experiment-maplibre-pr-760-port/`); the questions Q1 to Q7 and the decisions D166 to D176 are those of its design. The background is [discussion #877](https://github.com/maplibre/maplibre-native-ffi/discussions/877).
 
 Each finding names the #760 commit it was made with, and states whether it comes from #760 or from the port's shortcuts (D172).
 
 ## Summary
 
-Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac, the iPhone 15 Pro Max and the Pixel 4a (5G). The integration tests that failed on the port on the Pixel and the iOS simulator now pass; the causes were two defects of the port and two behaviors of #760 that the port had to handle (frames rendered in any service call, and a lost target, from which only a new session recovers) ("What broke").
+Status on 2026-10-22: #760 merged on 2026-10-21, and the port now runs on macOS, iOS and Android against FFI `main` at `6d9058bf6` (#760, #905 and #906) without a local patch. Before that, it ran against #760 at `3b56ef916` with one local patch (D173); the findings below say which commit they come from. The port is measured against the released FFI on the Mac, the iPhone 15 Pro Max and the Pixel 4a (5G). The integration tests pass on all three platforms.
 
 Findings:
 
-- **Frame rate and overlay alignment don't change.** On the Mac and the iPhone, the displayed map frame rate, the time to render a frame, and the alignment of the layer's children (0 px error in every phase) are the same as with the released FFI ("Mac and iPhone compared"). On the Pixel the time to render a frame is the same and the frame rate is 1.3% lower; the alignment benchmark doesn't run on Android ("Pixel 4a (5G)").
-- **mapigrade can't use its 4 display slots on Apple platforms with #760 as it is.** A borrowed texture ring holds at most 3 textures, and replacing the ring's texture before each frame, which the port does instead, makes an idle map render about 120 frames per second without end: #760's replacement resets the session's record of the rendered update. maplibre-native-ffi#807 fixed the same behavior in the earlier API. A 26-line patch with the semantic of #807 fixes it, and all measurements use it. #760's reset is intended and tested, so we will ask the maintainers whether they prefer an opt-in or a changed default before proposing a change (Q1).
-- **On the iPhone, a camera change reaches a finished frame 3.5 ms later unless the host waits for the camera command (11.4 → 15.0 ms; 11.0–11.3 ms with the wait).** Without the wait this is one more display frame of lag in fast pans. The cause isn't #760's runtime thread, which applies a camera and publishes its update in 60 µs, nor thread priority. It is ordering: the map thread services the driver right after submitting the camera, before the update is published, so that render doesn't include the camera. The port has the wait only as a switch (`MLN760_WAIT_CAMERA=1`, off by default), and all benchmarks ran without it; ask 2 would replace the wait, which busy-waits for a completion that runs on another thread. On the Mac and the Pixel the difference is about 0.3 ms; on the Pixel, renders wait for the next 60 Hz refresh interval in both builds, so the ordering adds little (Q2).
+- **Overlay alignment doesn't change; the frame rate differs on the iPhone.** On FFI `main`, the alignment of the layer's children is 0 px error in every phase on the Mac and the iPhone. On the Mac the port renders faster than the released FFI and a camera reaches a frame sooner. On the iPhone a frame takes about 0.3 ms longer to render and the displayed map frame rate is 2% to 6% lower, because iOS keeps the port's map thread on the efficiency cores once the per-frame allocation of the earlier targets is gone (Q2, "The iPhone's longer service call on FFI main"). At `3b56ef916` the frame rate was the same as with the released FFI. On the Pixel the frame rate is 1% to 2% lower than with the released FFI, at `3b56ef916` and on `main`.
+- **mapigrade uses its 4 display slots on Apple platforms with FFI `main`.** #905 raised the borrowed ring limit from 3 to 8 textures, so the port attaches the 4 display buffers as one ring and acquires each frame instead of replacing the target before each frame, which at `3b56ef916` made an idle map render without end and needed a local patch. A resize must end outstanding demands with a barrier before mapigrade frees the old buffers; without it a demand rendered into freed textures (Q1).
+- **Waiting for the camera command restores the camera latency.** At `3b56ef916`, a camera change reached a finished frame 3.5 ms later on the iPhone (11.4 → 15.0 ms), because the map thread serviced the driver before the camera command's update was published. On FFI `main` the map thread waits for the command's completion, without spinning, and records #906's render update generation; the iPhone's camera latency is the released FFI's (11.0–11.4 ms against 11.2–11.4 ms) and the extra frame of lag is gone. On the Mac it is lower than the released FFI's in every phase (Q2).
 - **Android works with the caller-graphics-thread driver.** Any service call can present the armed frame, including one made while waiting for a target replacement, so the port sets the next frame's presentation time before every service call. In practice no service call presented more than one frame, but the C API promises neither (Q5).
 - **A lost target is terminal on Android.** During fast window replacements the session lost its target several times. Before #760 the next replacement recovered; under #760 the port must detach the session and attach a new one, which also rebuilds the renderer (Q6).
 - **Ordered target replacement and driver-work operations make lifecycle code wait.** After a resize, a window replacement or a park, the map thread services the session until the replacement's completion before it releases the previous textures or surface. Memory reduction while paused no longer runs, because it is driver work and a paused session isn't serviced (Q6).
 - **Glyph load failures are still attributed to their map**, because with a caller-graphics-thread driver the renderer reports them on mapigrade's map thread. With a core-worker driver they wouldn't be (Q4).
 - **The native core grew by about 570 lines (21%)**, not counting about 125 lines of temporary diagnostics: mostly code that handles completions, where every call was synchronous before, the frame-demand loop, which replaces one `render_update` call, and the waits and re-attachment of Q6 ("Complexity").
-- **Q3 (synchronous execution):** with asks 1 and 2 below, #760's core executor with a caller-graphics-thread driver serves mapigrade's requirements on the Mac, the iPhone and the Pixel, and a separate synchronous executor isn't needed.
+- **Q3 (synchronous execution):** #760's core executor with a caller-graphics-thread driver serves mapigrade's requirements on the Mac, the iPhone and the Pixel, and a separate synchronous executor isn't needed. #905 and #906 resolved asks 1 and 3 below, and a host-side wait replaced ask 2. The iPhone's lower frame rate on `main` comes from where iOS runs the map thread, not from #760.
 
-Open: the iPhone alignment benchmark with the camera wait, which should show the extra frame of lag gone, hasn't run. The benchmarks ran before the last fixes to resizing and target loss, which don't affect a steady pan ("What broke").
+Open: whether a merged port may use an audio work interval, which keeps the map thread on the iPhone's performance cores (task 8.11), and how the pacing of D19 and D124 should change for a render that costs between 3/4 of and one refresh interval.
 
-Asks for #760, most important first (details in "Feedback for #760"):
+Asks for #760 at `3b56ef916`, most important first (details in "Feedback for #760"). #905 resolved ask 1 (a ring of 4 textures with acquire and release serves mapigrade), #906 resolved ask 3, and the host-side camera wait replaced ask 2. Asks 4 to 6 are still open:
 
 1. Let a host use more display slots in turn than a borrowed ring holds, without an idle map rendering without end: either an opt-in that keeps the record of the rendered update across a same-size replacement (the semantic of #807; #760's default, which renders into the new texture at once, is intended and tested), or a frame demand that names the slot of a ring of more than 3 textures. We will ask the maintainers which they prefer, then propose a stacked pull request.
 2. Let a caller-graphics-thread host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation. On the iPhone this is the whole difference between 15 ms and 11 ms of camera latency.
@@ -37,6 +37,7 @@ Asks for #760, most important first (details in "Feedback for #760"):
 |---|---|---|
 | 2026-10-21 | `3b56ef916` ("Merge origin/main into binding-codegen") | Initial pin (D166). |
 | 2026-10-21 | `3b56ef916` with `scripts/patches/maplibre-native-ffi-760-same-size-retarget.patch` | D168 renders without end without it (Q1, D173). |
+| 2026-10-21 | `6d9058bf6` (FFI `main`: #760, #905 and #906), no local patch | #760 merged; #905 allows a borrowed ring of 4 textures (D174), and #906 reports a command's render update generation (D175). The patch is dropped because the maintainer considers a replacement before every frame not the intended use (D173). |
 
 ## Baseline
 
@@ -93,6 +94,14 @@ The engines test acquired 83 frames after `MLN_RENDER_RESULT_RENDERED` results, 
 From here on, every measurement of the copy-free path is of #760 at `3b56ef916` with this patch. The patch is the first change proposed for #760. We will ask the maintainers first whether they prefer an opt-in or a changed default (task 7.3, draft in "Feedback for #760"), and prepare a stacked pull request after their answer (task 7.4).
 
 The reset is intended in #760: `tests/native/abi/backend/retarget.c` has the test `a_borrowed_retarget_renders_a_waiting_demand`, whose comment says "A replacement holds no frame of the map's latest update, so a demand that waits for an update renders into it with no update to wait for." A host that reallocates its textures expects the latest frame in the new texture without waiting. mapigrade needs the opposite, because it fills each texture only with its next frame. The patch changes the default and would break that test, so the stacked pull request shouldn't propose it as it is. An opt-in on the replacement (for example a descriptor field that keeps the rendered update across a same-size replacement), or a frame demand that names the ring slot to render into with a ring of more than 3 textures, would serve mapigrade without changing #760's default.
+
+### On FFI main: a borrowed ring of 4 textures (D174, tasks 8.2 and 8.3)
+
+At `6d9058bf6`, #905 allows a borrowed ring of up to 8 textures. The port attaches the 4 display buffers as the ring, in slot order, and no longer replaces the target before each frame, so it carries no patch. After each rendered result the map thread acquires the frame, reads its ring slot with `mln_acquired_frame_get_metal_texture`, and publishes the frame into that display slot. It holds the acquired frame until mapigrade frees the slot, and releases the frames of freed slots before it arms the next demand. The session chooses the slot of each frame among the slots that no acquired frame holds, so mapigrade no longer chooses it.
+
+On macOS (2026-10-21, debug build), `map_texture_test.dart` passes (29 tests, 1 skipped), including "idle map renders no frames for 10 seconds" (39 → 39 frames) and "idle copy-free map renders no frames for 10 seconds" (39 → 39), and `map_layer_test.dart` passes (15 tests), including "metrics stay the same while the map is at rest". Both files also pass on the iOS simulator, and `engines_test.dart` passes on macOS with `flutter drive`. On the Pixel 4a (5G) (2026-10-22), `map_texture_test.dart` passes (28 tests, 2 skipped), as at `3b56ef916`, and `map_layer_test.dart` passes (15 tests) with #906's generation and the camera wait (task 8.6). A pan uses all 4 display slots, but mostly 3. In an alignment run on macOS (2026-10-22, release build, the phases of task 1.2, `docs/maplibre-pr-760-port-results/main1-port-slots-1.txt`) the map thread held 5,707, 5,666, 5,639 and 70 frames in slots 0 to 3, with 0 px drawn error in every phase. The session renders into a slot that no acquired frame holds, and while Flutter displays one frame and Dart has chosen another, the third slot is enough; the fourth takes a frame only when three are held. `max_slots_in_use` is 3 in every phase, against 4 at `3b56ef916`: the map thread now marks a slot only when it acquires the slot's frame, after the render, so the statistic no longer counts the slot that is being rendered.
+
+A resize needs a barrier. The first test run crashed in "resizing on every frame for 10 seconds" with `EXC_BAD_ACCESS` in `MetalTextureRenderableResource::bind()`, called from `ServiceUntil` in `ApplyResize`. A demand armed before the resize had rendered into a texture of the buffer set that mapigrade had just freed, while the map thread serviced the session for the replacement. The port now ends an outstanding demand with `mln_render_session_barrier` and services the session until the barrier completes. It then releases every acquired frame (#760 refuses a replacement while a frame is acquired), frees the old set except the fallback buffer, and replaces the ring. With the barrier, the three resize tests pass, and of the 834 frames that the map thread acquired during them, none was in a buffer of a replaced set. The port at `3b56ef916` freed the old set before the replacement in the same way, and no run there crashed.
 
 ## Q2. Latency from camera to frame
 
@@ -210,6 +219,113 @@ Baseline `c1b51b1` (the released FFI's runtime AAR) against the branch at `4173c
 
 On the Pixel the port's camera latency is about 0.3 ms longer and its frame rate about 0.7 frames per second (1.3%) lower; the time to render a frame is the same. The ordering that costs 3.5 ms on the iPhone adds little here, because a surface target paces its renders to one per 16.7 ms refresh interval (designs D53 and D134): a camera that isn't included in one service call is rendered by the next paced render, which waits for the interval in both builds (`interval_waits` about 1,700 in both).
 
+### On FFI main: #906's generation and the camera wait (D175 and D176, tasks 8.4, 8.5 and 8.7)
+
+At `6d9058bf6` the camera completion records `mln_completion_result.render_update_generation` (#906) with the camera's `seq` and no longer reads `mln_map_get_snapshot`. The map thread waits for the completion of every camera command it submitted before it services the driver: it waits on its wake, which the completion signals, so it doesn't spin, and the switch `MLN760_WAIT_CAMERA` is gone. `MLN760_STAGES` reported no service call that started before the camera's completion on either device, and 0.02 to 0.03 ms from the completion to the service call.
+
+macOS (2026-10-22): baseline `c1b51b1` against the port on FFI `main` (the D174 ring, D175 and D176), 3 alignment runs each (`ALIGNMENT_CHILDREN=1`, mode `predict1`, the phases of task 1.2, 20 s per phase), alternating, release builds, copy-free, in the Setup of the baseline above. The thermal state was nominal throughout. The result lines are in `docs/maplibre-pr-760-port-results/main2-*`; `main1-port-*` are 4 earlier runs of the port alone on the same day, with the same results.
+
+| Phase | Camera latency (ms), baseline | port | Service or `render_update` (ms), baseline | port | Lag p50 (px), baseline | port |
+|---|---|---|---|---|---|---|
+| pan100 | 9.26–9.56 | 7.79–8.37 | 7.52–7.61 | 7.11–7.26 | 0.83 | 0 |
+| pan500 | 8.80–9.13 | 7.28–7.57 | 7.39–7.50 | 6.86–7.04 | 0–4.17 | 0 |
+| pan1000 | 8.78–9.57 | 7.68–8.42 | 7.47–7.56 | 6.95–7.24 | 0–8.33 | 0 |
+| stop | 10.44–10.92 | 8.09–10.25 | 7.85–7.92 | 7.09–7.50 | 0 | 0 |
+| fling | 9.96–10.25 | 8.33–9.02 | 7.67–7.74 | 7.34–7.40 | 0.61–0.88 | 0.04–0.13 |
+| reverse | 9.89–10.25 | 9.21–9.63 | 7.72–7.82 | 7.41–7.53 | 8.33 | 8.33 |
+
+On the Mac the port is now faster than the baseline in every phase: the port's ranges of camera latency and of service time are below the baseline's ranges of latency and of `render_update` time in every phase, and the median lag is the same or lower. The drawn error was 0 px at max in every phase of every run on both sides. At `3b56ef916` without the wait the port's latency was 0.2 to 0.6 ms longer than the baseline's (task 4.1).
+
+iPhone (2026-10-22, task 8.7): baseline `c1b51b1` against the port on FFI `main`, 3 runs each of the frame-rate benchmark and of the alignment benchmark, alternating, release builds, as in task 6.2, except that the iPhone was connected over Wi-Fi and ran on battery, not on cable power. The thermal state was nominal at the end of every alignment run except the third of each side, where it was fair. The result lines are in `docs/maplibre-pr-760-port-results/ios2-*`.
+
+Frame-rate benchmark (30 s pan):
+
+| | Displayed map fps | Per-second p10 / p50 | Service or `render_update` (ms) | Camera latency avg (ms) | Rendered / displayed frames |
+|---|---|---|---|---|---|
+| Baseline | 109.1–110.0 | 102–104 / 108–109 | 7.89–7.91 | 11.17–11.35 | 3,570–3,603 / 3,272–3,300 |
+| Port | 102.7–104.2 | 95–97 / 102–105 | 8.19–8.24 | 11.02–11.43 | 3,546–3,580 / 3,080–3,125 |
+
+Alignment benchmark, ranges over 3 runs. The drawn error was 0 px at max in every phase of every run on both sides, and every phase used all 4 display slots.
+
+| Phase | Camera latency (ms), baseline | port | Lag p50 (px), baseline | port |
+|---|---|---|---|---|
+| pan100 | 11.0–12.1 | 11.8–13.5 | 0.83 | 0.83 |
+| pan500 | 11.1–11.5 | 11.8–12.2 | 4.17 | 4.17 |
+| pan1000 | 11.5–12.1 | 12.0–12.4 | 8.33 | 8.34 |
+| stop | 12.3–12.7 | 12.4–12.9 | 0.01–0.02 | 0.02–0.04 |
+| fling | 11.9–12.1 | 11.0–11.1 | 1.61–1.87 | 1.77–1.94 |
+| reverse | 12.1–12.2 | 11.3–11.8 | 8.34 | 8.34 |
+
+The camera wait removes the iPhone's extra latency: the port's camera latency in the frame-rate benchmark is the baseline's (11.0 to 11.4 ms, against 15.0 ms at `3b56ef916` without the wait), and the extra frame of lag in reverse and pan1000 is gone (task 6.2). The iPhone now shows a different cost: a service call takes about 0.3 ms longer than the baseline's `render_update` (8.19 to 8.24 ms against 7.89 to 7.91 ms), the map renders ahead more often (3,242 to 3,409 frames against 2,919 to 3,097), more rendered frames are replaced before Flutter displays them, and the displayed map frame rate is 5% to 6% lower. At `3b56ef916` with the wait (`MLN760_WAIT_CAMERA=1`, task 6.4), `MLN760_STAGES` reported 7.52 to 7.59 ms from the start of the service call to the frame-ready event; on `main` it reports 8.13 to 8.15 ms. Task 8.10 found the cause: on FFI `main` iOS runs the port's map thread on efficiency cores ("The iPhone's longer service call on FFI main").
+
+### Pixel 4a (5G) on FFI main (task 8.9, 2026-10-22)
+
+Baseline `c1b51b1` against the port on FFI `main` (D175 and D176; the Android target is unchanged since `3b56ef916`), 3 runs each of the frame-rate benchmark, alternating, release builds for arm64, on USB power with the screen kept on, as in task 5.3 (`docs/maplibre-pr-760-port-results/px3-*`).
+
+| | Map fps | Per-second min / p10 / p50 / p90 | Frame cycle | Service or `render_update` | Camera latency avg |
+|---|---|---|---|---|---|
+| Baseline | 52.7–53.8 | 47–50 / 49–50 / 53–54 / 56–57 | 17.18–17.29 ms | 7.59–7.77 ms | 30.0–30.2 ms |
+| Port | 51.9–52.9 | 44–46 / 48 / 52–53 / 57–58 | 17.12–17.30 ms | 7.79–7.92 ms | 30.2–30.5 ms |
+
+As at `3b56ef916`, the port's frame rate is about 1 frame per second (1% to 2%) lower and its camera latency about 0.3 ms longer; its service call takes about 0.15 ms longer than the baseline's `render_update` in this round. The camera wait doesn't shorten the Pixel's latency, because renders wait for the next 16.7 ms refresh interval in both builds (`interval_waits` about 1,700).
+
+### The iPhone's longer service call on FFI main (task 8.10, 2026-10-22)
+
+iPhone 15 Pro Max on cable power, release builds, frame-rate benchmark (30 s pan). Builds: the baseline `c1b51b1`; A, the port on FFI `main` (the ring of 4 of D174, D175, D176); B, the branch at `ae917a5` built against the same FFI `main` (the one-texture ring replaced before each frame of D168, with `MLN760_WAIT_CAMERA=1`). The result lines are in `docs/maplibre-pr-760-port-results/ios3-*` to `ios6-*`, the FFI patches of the experiments in `exp-*.patch`, and the per-core samples in `exp-map-thread-cores.txt`.
+
+| Round | Build | Displayed fps | Service or `render_update` (ms) |
+|---|---|---|---|
+| 1 | Baseline | 107.4–109.2 | 7.69–8.18 |
+| 1 | A | 105.1–106.9 | 8.18–8.34 |
+| 1 | B | 109.1–110.3 | 7.62–8.01 |
+| 2 | A | 105.0–106.7 | 8.18–8.24 |
+| 2 | B | 107.7–111.6 | 7.80–8.08 |
+| 2 | D: A with one depth and one stencil texture shared by all slots | 106.4–107.5 | 8.21–8.26 |
+| 3 | A | 106.6–106.9 | 8.15–8.27 |
+| 3 | B | 106.4–108.5 | 8.24–8.44 |
+| 3 | E: D with depth and stencil loaded with `Clear` and stored with `DontCare` | 106.4–106.9 | 8.21–8.22 |
+| 4 | A at the default QoS | 105.3–107.0 | 8.26–8.37 |
+| 4 | A at `QOS_CLASS_USER_INTERACTIVE` | 105.9–106.9 | 8.19–8.30 |
+
+A's service call was 8.15 to 8.37 ms in every run; B's varied from 7.62 to 8.44 ms. A Metal System Trace of A and of B (10 s of the measured pan each) showed that the GPU isn't the difference: each command buffer took about 3.1 ms of GPU time in A and 3.7 ms in B, and the time from submission to the start of GPU work was shorter in A. A Time Profiler trace showed where the time goes: A's map thread ran for 3.79 s of the 10 s, B's for 2.46 s, and almost every MapLibre function took about 1.7 times as long in A, which is what a slower core does, not more work. A's map thread ran on the efficiency cores for 93% of its samples, B's for 53%, the baseline's for 59%.
+
+| Map thread (10 s of the pan) | Samples on efficiency cores | CPU time |
+|---|---|---|
+| Baseline (released FFI) | 59% | 2.45 s |
+| B | 53% | 2.46 s |
+| B without the camera wait | 61% | 2.46 s |
+| A | 93% | 3.79 s |
+| A at `QOS_CLASS_USER_INTERACTIVE` | 93% | 3.70 s |
+| A without the camera wait | 94% | 3.67 s |
+| F: A with its renderable resource rebuilt every frame | 46% | 2.32 s |
+
+What ruled each candidate in or out:
+
+- Not the per-slot depth and stencil textures (D), and not their load and store actions (E): neither changed A's service time.
+- Not the frame releases: with `mln_gpu_sync_default()` (`MLN_GPU_SYNC_CPU_COMPLETE`) a release frees its slot synchronously and queues no driver work.
+- Not the QoS class: at `QOS_CLASS_USER_INTERACTIVE` the map thread stayed on the efficiency cores.
+- Not the camera wait of D176: without it A's map thread stayed on the efficiency cores, and its camera latency rose to 18.8 ms.
+- The rebuild of the renderable resource: B's replacement before each frame drops the session's renderable resource, so B allocates new depth and stencil textures through IOGPU kernel calls every frame, and the released FFI's `set_target` did the same (design of the copy-free-default change). F, the port with an FFI patch that rebuilds the resource every frame (`exp-f-rebuild-per-frame.patch`), ran on the performance cores for 54% of its samples, with a service call of 8.04 ms at 107.8 displayed fps.
+
+So the ring of 4 does less work per frame than the earlier targets, but without the per-frame allocation the system keeps mapigrade's map thread on the efficiency cores, where the same render takes longer. The baseline's frame time on the iPhone depends on the same side effect. A fix belongs in mapigrade, not in #760: the map thread needs a signal that the system uses to place frame work on the performance cores; the QoS class isn't one, and a work interval is (task 8.11, below). On the Mac the port is faster than the baseline (Q2, "On FFI main").
+
+### A work interval for the map thread (D177, task 8.11, 2026-10-22)
+
+With `MLN760_WORKGROUP=1` the map thread creates a work interval with `AudioWorkIntervalCreate`, joins it, and brackets each service call that renders with `os_workgroup_interval_start` and `os_workgroup_interval_finish`, with the end of the refresh interval as the deadline. iPhone 15 Pro Max over Wi-Fi on battery, the same app alternating without and with the switch, 3 runs each (`docs/maplibre-pr-760-port-results/ios7-*` and `ios8-*`).
+
+In a Time Profiler trace with the work interval, 33% of the map thread's samples were on the performance cores, against 7% without it, and the thread used 2.1 s of the 10 s (`exp-map-thread-cores.txt`).
+
+| Render ahead | Work interval | Displayed fps | Service call (ms) | Camera latency (ms) | Rendered / displayed frames |
+|---|---|---|---|---|---|
+| auto (default) | no | 105.6–107.1 | 8.19–8.21 | 10.84–10.96 | 3,544–3,575 / 3,168–3,212 |
+| auto (default) | yes | 103.0–103.9 | 7.24–7.27 | 9.64–9.82 | 3,483–3,519 / 3,089–3,117 |
+| always | no | 107.7–109.0 | 8.03–8.16 | 10.97–11.01 | 3,628–3,689 / 3,230–3,269 |
+| always | yes | 111.0–115.7 | 6.03–6.79 | 10.11–10.95 | 4,348–4,893 / 3,331–3,471 |
+
+The work interval makes a render about 1 ms cheaper and a camera reach a frame about 1.2 ms sooner. With the default pacing the displayed frame rate drops nonetheless: a render now costs less than the refresh interval, so the hysteresis of `RenderAhead()` (render ahead above one interval, pace below 3/4 of one) keeps the map pacing, and the map waits for Dart's choice before each render (designs D19 and D124) about 1,900 times per pan instead of about 200. A paced cycle is then Dart's choice plus a 7.2 ms render, more than the 8.3 ms interval. Rendering ahead with the work interval gives the highest frame rate of any build on the iPhone, above the released FFI's 107 to 110 fps, at the cost of about 1,000 to 1,400 undisplayed renders per 30 s pan against about 400.
+
+So a work interval is enough to place the map thread on the performance cores, and the pacing of D19 and D124 needs revisiting for renders that cost between 3/4 of and one refresh interval. The only public way to create the interval is an AudioToolbox API that Apple describes for real-time audio threads, so whether a merged port may use it is open; the time-constraint policy of D177 wasn't tried.
+
 ## Q3. Synchronous execution
 
 Answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves mapigrade. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. 
@@ -239,6 +355,7 @@ Answered (tasks 3.4, 5.2 and 6.3). What the port showed:
 - Pausing (D13): the port keeps "no GPU work while paused" by not servicing the driver while paused; demands and target replacements wait in the session. This needs no #760 change.
 - Memory reduction while paused regresses. Before #760, `mln_render_session_reduce_memory_use` released cached tiles and images at once, also while paused, which is when iOS sends memory warnings. Under #760 it is driver work, so with a caller-graphics-thread driver it runs only when the map thread services the driver, which it doesn't do while paused. Servicing it anyway would also run any queued render. A way to run CPU-only driver work, such as cache release, without running GPU work would fix this; a core-worker session wouldn't have the problem.
 - Resize: before #760 `set_target` replaced the target at once. Under #760 it is an ordered operation, while mapigrade releases the previous buffer set in the same step (D126). The previous textures must stay valid until the replacement runs, so the port services the driver until the replacement's completion before it continues. A replacement that the host could apply synchronously on the graphics thread would avoid the wait loop.
+- Resize with a borrowed ring of 4 textures (FFI `main`, D174): #760 refuses a ring replacement while a frame is acquired, and a demand armed before the resize can render into the old set while the map thread services the replacement. The port ends outstanding demands with `mln_render_session_barrier` and releases its acquired frames before it frees the old set and replaces the ring (Q1, "On FFI main").
 - Teardown: detach (servicing until its completion), then release the map and the runtime and wait for each completion, so that no completion or event callback reaches the map's object afterwards. Before #760 this was three synchronous destroy calls.
 - A lost target is terminal. Before #760 a failed render was reported, and the next target replacement recovered. Under #760 a failed render (`render_session_render_update_on_driver` returning an error) puts the session into `MLN_RENDER_SESSION_STATE_TARGET_LOST`; frame requests then fail, because they require `MLN_RENDER_SESSION_STATE_ATTACHED` (`render_session_common.cpp`, line 3096), and no replacement sets that state again. On the Pixel, "resizing on every frame for 10 seconds" lost its target after 9 to 21 frames and then showed a blank map until the test timed out. The surface that the session presented to is most likely the Surface of an ImageReader that `MapSurface` had just replaced on the main thread. The port now detaches a session whose target is lost and attaches a new one to the current surface; with that, `map_texture_test.dart` passes on the Pixel (28 passed, 2 skipped), and the map thread recovered a lost target 4 times during the file. A replacement that returns a session with a lost surface target to the attached state (or a documented recovery path) would remove the re-attachment, which also rebuilds the renderer and its caches.
 
@@ -273,6 +390,7 @@ Where the core's first 478 added lines went (tasks 3.1 and 3.2), with `map_textu
 
 - `macos-arm64-metal` (task 2.1): `scripts/build_maplibre_ffi.sh` built #760 at `3b56ef916` without changes; only `MAPLIBRE_FFI_COMMIT` in `maplibre_ffi.lock` changed. #760 still has the presets, the `[vars]` of `mise.toml` and the scripts `.mise/bin/sync-submodules` and `sync-rustls-platform-verifier` that the script uses. The build took 148 s on top of an earlier build directory.
 - `android-arm64-egl` (task 2.2): built without changes in 117 s on top of an earlier build directory, after deleting the install directory. The patched `rustls-platform-verifier-android` component built and installed as version `3b56ef916410`. NDK 30.0.16248370, which #760's `mise.toml` pins, was already installed.
+- FFI `main` at `6d9058bf6` (task 8.1, 2026-10-21): `scripts/build_maplibre_ffi.sh` built the four presets without changes, in 9 to 19 s each on top of the earlier build directories, after the local patch was reversed in the source checkout; the script applies patches but doesn't reverse one that was deleted. The port's native code built against it without changes, because the public headers changed only by additions (`render_update_generation` in `mln_completion_result`, `MLN_TEXTURE_RING_MAX_DEPTH`).
 - A defect of mapigrade's script, not of #760: the script reuses the FFI's install directory, so headers that #760 removed (`callback_adapter.h`, `diagnostics.h`) stayed in the framework. Deleting `third_party/maplibre-native-ffi-src/build/<preset>/install` before the build removes them. The real port should make the script delete the install directory.
 
 ## What broke
@@ -298,9 +416,9 @@ The benchmarks on the Mac and the iPhone ran at `c8a0321` and the Pixel's at `41
 
 For each question of the design, the answer, whether it comes from #760 or from the port, and what a port that we would merge needs.
 
-- **Q1. Display slots on Apple platforms.** From #760: a borrowed ring holds at most 3 textures, and a replacement resets the rendered update on purpose, so mapigrade's 4 slots render an idle map without end. With the local patch of D173 the slots work and the measurements match the released FFI. A merged port needs #760 to take ask 1 in some form (task 7.3); otherwise it uses a ring of 3 textures and 3 display slots instead, which changes D122 and wasn't measured.
-- **Q2. Latency from camera to frame.** From #760's asynchronous camera command, made visible by how the port orders its calls: 3.5 ms more on the iPhone, 0.3 ms on the Mac and the Pixel. Waiting for the camera command's completion before servicing removes it. A merged port needs that wait, or better asks 2 and 3, and the iPhone alignment benchmark with the wait (not yet run) to confirm that the extra frame of lag goes away.
-- **Q3. Synchronous execution.** Not needed, if #760 takes asks 1 and 2. Everything else the port needed was host-side work, though more than before (Complexity).
+- **Q1. Display slots on Apple platforms.** At `3b56ef916`, from #760: a borrowed ring held at most 3 textures, and a replacement resets the rendered update on purpose, so replacing the target before each frame rendered an idle map without end. On FFI `main`, #905 allows a ring of 4 textures, and the port renders into its 4 display slots with acquire and release and without a patch (D174); the session chooses the slot of each frame. A merged port needs the barrier before a resize that the branch has (D174), and the Darwin integration tests pass with it.
+- **Q2. Latency from camera to frame.** From the port's ordering, not from #760's executor: at `3b56ef916` the port serviced the driver before the camera command's update was published, which cost 3.5 ms on the iPhone and 0.3 ms on the Mac and the Pixel. On FFI `main` the map thread waits for the camera command's completion, and with #906's generation the iPhone's camera latency and lag match the released FFI's, and on the Mac they are lower. A merged port needs that wait (D176). On the iPhone a service call takes about 0.3 ms longer than `render_update` with the released FFI, because iOS keeps the map thread on the efficiency cores once no per-frame allocation happens (task 8.10); a work interval places the map thread on the performance cores, and with rendering ahead the port then beats the released FFI (task 8.11); a merged port needs that signal, or another, and pacing that suits the cheaper render.
+- **Q3. Synchronous execution.** Not needed. On FFI main, #905 and #906 resolved asks 1 and 3, and the host-side camera wait replaced ask 2. Everything else the port needed was host-side work, though more than before (Complexity). The iPhone's lower frame rate on `main` comes from the scheduler's placement of the map thread, not from #760 (task 8.10).
 - **Q4. Glyph load failures.** Works unchanged with a caller-graphics-thread driver. A merged port that kept this driver needs nothing; a core-worker driver would need a map event for glyph failures.
 - **Q5. Android hook before the swap.** Works, because the port sets the frame id before every service call, including those in its wait loops. Not promised by #760 (ask 5). A merged port needs that rule documented in its design.
 - **Q6. Lifecycle.** From #760: ordered replacements, operations with completions, a lost target, from which only a new session recovers, and memory reduction that doesn't run while paused. From the port: discarding a stale frame left an idle map waiting (fixed). A merged port needs the waits and the re-attachment that the branch has, a decision about memory reduction while paused (ask 4), and tests for target loss and recovery.
@@ -310,8 +428,9 @@ Shortcuts of the branch (D172) that a merged port must undo:
 
 - The native tests in `test/native/` fake the released C API and don't build. They need a fake of #760's asynchronous API (completions, frame demands, frame results, wakes), which is at least as large as the current 475 lines of `fake_mln.*`.
 - The specs of `map-texture` describe the synchronous model in places (camera applied before render, `render_update`), and need updates; the design decisions D1, D2, D20, D122, D125 and D131 need revising.
-- The branch carries temporary diagnostics: the `MLN760_STAGES` latency stages, the `MLN760_STALL` dump, the `MLN760_ACQUIRE` count and the `MLN760_WAIT_CAMERA` switch. A merged port keeps none of them; the camera wait becomes unconditional or is replaced by ask 2.
-- `scripts/build_maplibre_ffi.sh` must delete the FFI's install directory before a build (Build).
+- The branch carries temporary diagnostics: the `MLN760_STAGES` latency stages (with the frames held per slot), the `MLN760_STALL` dump, the `MLN760_ACQUIRE` count, and the experiment switches `MLN760_QOS_UI`, `MLN760_NO_CAMERA_WAIT` and `MLN760_WORKGROUP`. A merged port keeps none of them. The `MLN760_WAIT_CAMERA` switch is gone; the camera wait is unconditional (D176).
+- `scripts/build_maplibre_ffi.sh` must delete the FFI's install directory before a build, and reverse a patch that was deleted (Build).
+- `max_slots_in_use` no longer counts the slot that the session renders into (Q1); a merged port needs another way to report slot use.
 
 ## Feedback for #760
 

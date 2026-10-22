@@ -49,6 +49,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Metal"),
                 .linkedFramework("CoreVideo"),
+                .linkedFramework("AudioToolbox"),
             ]
         ),
     ],

@@ -162,23 +162,45 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   void ApplyCommands(bool* stop);
   void ApplyResize(const Viewport& viewport);
+  // Map thread: ends the demands that haven't started with a barrier, and
+  // services the session until it completes (design D174).
+  void EndDemands();
   void ApplyCamera();
+  // Map thread: waits until the completion of every submitted camera command
+  // has run (design D176).
+  void WaitForCamera();
   // The runtime's event handler, on the runtime's scheduler thread.
   static void OnEvents(void* user_data, const mln_event_batch_view* events);
   void MaybeRender();
+  // The copy path (design D3b).
   void RenderIntoBuffer(BufferRenderTarget& target);
+  // A target that renders into the buffers (design D174).
+  void RenderIntoRing(BufferRenderTarget& target);
   void RenderIntoSurface(SurfaceRenderTarget& target);
-  // Map thread: requests a frame that renders into `slot` (design D167).
-  // Returns false and releases the slot if the session refuses the demand.
+  // Map thread: requests a frame that renders into `slot` (design D167), or
+  // with -1, into the slot the session chooses (design D174). Returns false
+  // and releases the slot if the session refuses the demand.
   bool ArmDemand(int slot, bool render_ahead);
   // Map thread: services the session's driver work, which renders the
   // armed demand's frame, and handles the frame results.
   void ServiceDriver();
   void HandleFrameResult(const mln_render_frame_result& result,
                          int64_t service_start, int64_t service_ns);
-  // Map thread: acquires and releases the newest rendered frame, so that its
-  // GPU writes have completed (findings Q1).
+  // Map thread: acquires and releases the rendered frames, so that their GPU
+  // writes have completed (findings Q1).
   void AcquireAndReleaseFrame();
+  // Map thread, for a target that renders into the buffers: acquires the
+  // newest rendered frame and holds it while its display slot isn't free, and
+  // releases older ones. Returns the slot, marked rendering, or -1 if no
+  // frame could be held (design D174).
+  int HoldRenderedFrame(BufferRenderTarget& target);
+  // Map thread: releases the held frames of the slots that are free, so that
+  // the session may render into them again, or with `all`, every held frame,
+  // before a replacement of the ring or a detach (design D174).
+  void ReleaseHeldFrames(bool all);
+  // Map thread, for a target that renders into the buffers: whether a slot is
+  // free; otherwise records the skipped render, as AcquireSlot() does.
+  bool FreeSlotAvailable();
   // Map thread, for a buffer target: whether the next frame may render now,
   // because Dart has chosen the latest frame or the map renders ahead
   // (designs D19 and D124). Otherwise records the wait. Sets `render_ahead`.
@@ -312,8 +334,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   };
   std::mutex camera_generations_mutex_;
   std::vector<CameraGeneration> camera_generations_;
-  // Camera commands whose completion has run, for the experiment of waiting
-  // for a camera before the next service call (MLN760_WAIT_CAMERA, task 6.4).
+  // Camera commands whose completion has run, and camera commands submitted
+  // by the map thread (design D176).
   std::atomic<int64_t> cameras_completed_{0};
   int64_t cameras_submitted_ = 0;
   // When to tell Flutter once more that a frame is available after the last
@@ -353,6 +375,14 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // after a RENDERED result, and frames acquired (findings Q1).
   int64_t acquire_not_ready_ = 0;
   int64_t acquired_frames_ = 0;
+  // Guarded by stats_mutex_: acquired frames in a buffer of a replaced set
+  // (design D174, task 8.3).
+  int64_t old_set_frames_ = 0;
+  // Guarded by stats_mutex_: frames held per display slot (task 8.2).
+  std::array<int64_t, kMaxBufferCount> held_per_slot_{};
+  // Map thread: the acquired frame that each display slot holds, for a target
+  // that renders into the buffers (design D174).
+  std::array<mln_acquired_frame, kMaxBufferCount> held_frames_{};
 };
 
 // Pauses or resumes every live map, and maps created while paused start

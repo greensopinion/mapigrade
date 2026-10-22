@@ -1,0 +1,17 @@
+diff --git a/src/render/metal/metal_texture_backend.mm b/src/render/metal/metal_texture_backend.mm
+index b34c93e4b..de86bdde8 100644
+--- a/src/render/metal/metal_texture_backend.mm
++++ b/src/render/metal/metal_texture_backend.mm
+@@ -273,7 +273,11 @@ auto MetalTextureBackend::metal_texture() -> MTL::Texture* {
+ }
+ 
+ auto MetalTextureBackend::select_slot(std::size_t slot) -> bool {
+-  return ring_.select(slot, getSize(), resource);
++  // Experiment F: rebuild the renderable resource every frame.
++  if (!ring_.select(slot, getSize(), resource)) return false;
++  auto guard = mln::gfx::BackendScope{*this};
++  resource.reset();
++  return true;
+ }
+ 
+ void MetalTextureBackend::set_ring_size(mln::Size new_size) {
