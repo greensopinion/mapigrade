@@ -1,5 +1,9 @@
 #include "map_texture.h"
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -598,7 +602,15 @@ bool MapTexture::RunOnce() {
       if (session_ != MLN_HANDLE_NULL) {
         mln_render_session_get_snapshot(session_, &snapshot, nullptr);
       }
-      static FILE* stall_log = std::fopen("/private/tmp/mln760_stall.log", "a");
+      static FILE* stall_log = [] {
+        FILE* file = std::fopen("/private/tmp/mln760_stall.log", "a");
+        if (file == nullptr) {
+          std::string path = PlatformCachePath();
+          path = path.substr(0, path.rfind('/')) + "/mln760_stall.log";
+          file = std::fopen(path.c_str(), "a");
+        }
+        return file;
+      }();
       std::fprintf(
           stall_log != nullptr ? stall_log : stdout,
           "MLN760_STALL rendered=%lld demand=%d slot=%d stale=%d repaint=%d "
@@ -611,6 +623,19 @@ bool MapTexture::RunOnce() {
           static_cast<unsigned long long>(snapshot.rendered_update_generation),
           snapshot.pending_changes, size_.physical_width, size_.physical_height);
       std::fflush(stall_log != nullptr ? stall_log : stdout);
+#if defined(__ANDROID__)
+      __android_log_print(
+          ANDROID_LOG_WARN, "MLN760",
+          "STALL rendered=%lld demand=%d slot=%d stale=%d repaint=%d "
+          "waiting_for_buffer=%d paused=%d session_state=%u map_gen=%llu "
+          "rendered_gen=%llu pending=%d size=%ux%u",
+          static_cast<long long>(rendered), demand_outstanding_, demand_slot_,
+          demand_stale_, repaint_wanted_, waiting_for_buffer_.load(),
+          gate_.paused(), snapshot.state,
+          static_cast<unsigned long long>(snapshot.map_update_generation),
+          static_cast<unsigned long long>(snapshot.rendered_update_generation),
+          snapshot.pending_changes, size_.physical_width, size_.physical_height);
+#endif
     }
   }
   bool stop = false;
@@ -772,6 +797,13 @@ bool MapTexture::Init() {
 void MapTexture::ServiceUntil(const std::function<bool()>& done) {
   while (!done()) {
     if (session_ != MLN_HANDLE_NULL) {
+      // Any service call can render the armed demand's frame, for example
+      // after a replacement resumes a demand that waits for an update, so a
+      // surface target gets the frame's id before this one too (findings Q5).
+      if (auto* surface = target_->AsSurfaceTarget();
+          surface != nullptr && demand_outstanding_ && !demand_stale_) {
+        surface->WillRender(next_frame_id_);
+      }
       mln_status status =
           mln_render_session_service_driver_work(session_, nullptr);
       if (status != MLN_STATUS_OK && status != MLN_STATUS_BUSY) break;
@@ -942,28 +974,7 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
 
   mln_diagnostic diagnostic = NewDiagnostic();
   if (session_ == MLN_HANDLE_NULL) {
-    mln_render_session_attach_options options =
-        mln_render_session_attach_options_default();
-    options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
-    options.frame_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
-    options.driver_work_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
-    auto attached = std::make_shared<Waiter>();
-    mln_completion attach_done = Waiter::For(attached);
-    mln_status status = target_->Attach(map_, size_, options, &session_,
-                                        {&attach_done, &diagnostic});
-    if (status != MLN_STATUS_OK) {
-      Waiter::Discard(attach_done);
-      session_ = MLN_HANDLE_NULL;
-      ReportStatus("attach", status, &diagnostic);
-      return;
-    }
-    // A caller-graphics-thread session completes its attachment in driver
-    // work that the map thread services.
-    ServiceUntil([&] { return attached->Done(); });
-    if (attached->status != MLN_STATUS_OK) {
-      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
-           ("attach failed: " + attached->diagnostic).c_str());
-    }
+    AttachSession();
   } else {
     // The previous textures are released already, so the replacement must
     // run before the session renders again (findings Q6).
@@ -983,6 +994,79 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     }
   }
   render_pending_ = true;
+}
+
+bool MapTexture::AttachSession() {
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_render_session_attach_options options =
+      mln_render_session_attach_options_default();
+  options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
+  options.frame_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
+  options.driver_work_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
+  auto attached = std::make_shared<Waiter>();
+  mln_completion attach_done = Waiter::For(attached);
+  mln_status status = target_->Attach(map_, size_, options, &session_,
+                                      {&attach_done, &diagnostic});
+  if (status != MLN_STATUS_OK) {
+    Waiter::Discard(attach_done);
+    session_ = MLN_HANDLE_NULL;
+    ReportStatus("attach", status, &diagnostic);
+    return false;
+  }
+  // A caller-graphics-thread session completes its attachment in driver
+  // work that the map thread services.
+  ServiceUntil([&] { return attached->Done(); });
+  if (attached->status != MLN_STATUS_OK) {
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+         ("attach failed: " + attached->diagnostic).c_str());
+  }
+  return attached->status == MLN_STATUS_OK;
+}
+
+// Before #760 a failed render was reported, and the next target replacement
+// recovered. Under #760 a failed render leaves the session in
+// MLN_RENDER_SESSION_STATE_TARGET_LOST, which no replacement leaves, so the
+// map thread detaches the session and attaches a new one (findings Q6).
+bool MapTexture::RecoverLostTarget() {
+  if (session_ == MLN_HANDLE_NULL) return false;
+  mln_render_session_snapshot snapshot{};
+  snapshot.size = sizeof(snapshot);
+  if (mln_render_session_get_snapshot(session_, &snapshot, nullptr) !=
+          MLN_STATUS_OK ||
+      snapshot.state != MLN_RENDER_SESSION_STATE_TARGET_LOST) {
+    return false;
+  }
+  auto detached = std::make_shared<Waiter>();
+  mln_completion detach_done = Waiter::For(detached);
+  if (mln_render_session_detach(session_, &detach_done, nullptr) ==
+      MLN_STATUS_OK) {
+    ServiceUntil([&] { return detached->Done(); });
+  } else {
+    Waiter::Discard(detach_done);
+    mln_render_abandon_result abandoned{};
+    abandoned.size = sizeof(abandoned);
+    mln_render_session_abandon(session_, &abandoned, nullptr);
+  }
+  mln_render_session_release(session_, nullptr);
+  session_ = MLN_HANDLE_NULL;
+  if (demand_outstanding_ && !demand_stale_ && demand_slot_ >= 0) {
+    buffers_.Release(demand_slot_);
+  }
+  demand_outstanding_ = false;
+  demand_slot_ = -1;
+  demand_stale_ = false;
+  repaint_wanted_ = true;
+  bool attached = AttachSession();
+  ++recovered_targets_;
+#if defined(__ANDROID__)
+  __android_log_print(ANDROID_LOG_WARN, "MLN760",
+                      "recovered a lost target (%lld), attached=%d",
+                      static_cast<long long>(recovered_targets_), attached);
+#endif
+  std::printf("MLN760_RECOVERED %lld attached=%d\n",
+              static_cast<long long>(recovered_targets_), attached);
+  std::fflush(stdout);
+  return attached;
 }
 
 void MapTexture::ApplyCamera() {
@@ -1217,7 +1301,9 @@ bool MapTexture::ArmDemand(int slot, bool render_ahead) {
       mln_render_session_request_frame(session_, &demand, &diagnostic);
   if (status != MLN_STATUS_OK) {
     buffers_.Release(slot);
-    ReportStatus("mln_render_session_request_frame", status, &diagnostic);
+    if (!RecoverLostTarget()) {
+      ReportStatus("mln_render_session_request_frame", status, &diagnostic);
+    }
     return false;
   }
   demand_outstanding_ = true;
@@ -1294,6 +1380,9 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   if (result.disposition != MLN_RENDER_RESULT_RENDERED) {
     buffers_.Release(index);
     repaint_wanted_ = false;
+    if (result.disposition == MLN_RENDER_RESULT_TARGET_NOT_READY) {
+      RecoverLostTarget();
+    }
     return;
   }
   repaint_wanted_ = result.needs_repaint;

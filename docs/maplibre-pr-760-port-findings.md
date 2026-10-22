@@ -6,7 +6,7 @@ Each finding names the #760 commit it was made with, and states whether it comes
 
 ## Summary
 
-Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac, the iPhone 15 Pro Max and the Pixel 4a (5G). One integration test that passes on the baseline fails on the port on the Pixel and isn't investigated yet; a second one, on the iOS simulator, was a defect of the port and is fixed ("What broke").
+Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac, the iPhone 15 Pro Max and the Pixel 4a (5G). The integration tests that failed on the port on the Pixel and the iOS simulator now pass; the causes were two defects of the port and two behaviors of #760 that the port had to handle (frames rendered in any service call, and a lost target that only a new session recovers) ("What broke").
 
 Findings:
 
@@ -14,6 +14,7 @@ Findings:
 - **mapigrade's 4 display slots on Apple platforms don't fit #760 as it is.** A borrowed texture ring holds at most 3 textures, and replacing the ring's texture before each frame, which the port does instead, makes an idle map render about 120 frames per second without end: #760's replacement resets the session's record of the rendered update. maplibre-native-ffi#807 fixed the same behavior in the earlier API. A 26-line patch with the semantic of #807 fixes it, and all measurements use it (Q1).
 - **On the iPhone the asynchronous camera command adds about 3.5 ms of camera-to-frame latency (11.4 → 15.0 ms)**, which in fast pans is one more display frame of lag. The cause isn't #760's runtime thread, which applies a camera and publishes its update in 60 µs, nor thread priority. It is ordering: the map thread services the driver right after submitting the camera, before the update is published, so the camera misses that render. Waiting for the camera command's completion before servicing restores the baseline's 11.0–11.3 ms at no cost in frame rate. On the Mac and the Pixel the difference is about 0.3 ms; on the Pixel, renders paced to the 60 Hz refresh absorb the ordering effect (Q2).
 - **Android works with the caller-graphics-thread driver.** Setting each frame's presentation time before the service call that renders it works in practice, because no service call rendered more than one frame, but the C API doesn't promise it (Q5).
+- **A lost target is terminal on Android.** During fast window replacements the session lost its target several times. Before #760 the next replacement recovered; under #760 the port must detach the session and attach a new one, which also rebuilds the renderer (Q6).
 - **Ordered target replacement and driver-work operations make lifecycle code wait.** After a resize, a window replacement or a park, the map thread services the session until the replacement's completion before it releases the previous textures or surface. Memory reduction while paused no longer runs, because it is driver work and a paused session isn't serviced (Q6).
 - **Glyph load failures are still attributed to their map**, because with a caller-graphics-thread driver the renderer reports them on mapigrade's map thread. With a core-worker driver they wouldn't be (Q4).
 - **The native core grew by about 480 lines (18%)**, mostly completion plumbing, where every call was synchronous before, and the frame-demand loop, which replaces one `render_update` call ("Complexity").
@@ -25,7 +26,8 @@ Asks for #760, most important first (details in "Feedback for #760"):
 2. Let a caller-graphics-thread host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation. On the iPhone this is the whole difference between 15 ms and 11 ms of camera latency.
 3. Report the render update generation that a map command published in its completion, so that a host can tell which frame includes the command. Today the completion reports a snapshot generation, which is a different counter.
 4. Run CPU-only driver work, such as memory reduction, without the GPU work queued with it, so that a paused caller-driver session can release memory.
-5. Make the per-frame hook before a surface target swaps explicit, for example a frame token that the session attaches to the presented buffer.
+5. Make the per-frame hook before a surface target swaps explicit, for example a frame token that the session attaches to the presented buffer. Any service call can present a frame, including one that services a target replacement.
+6. Let a target replacement bring a session whose surface target was lost back to attached, or document how a host recovers, so that a host doesn't have to rebuild the session and the renderer after a failed swap.
 
 ## #760 commit
 
@@ -208,7 +210,7 @@ On the Pixel the port's camera latency is about 0.3 ms longer and its frame rate
 
 ## Q3. Synchronous execution
 
-Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. Still to check: the failing cache-size test on the Pixel.
+Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. 
 
 ## Q4. Glyph load failures
 
@@ -226,6 +228,7 @@ Port (task 5.1, `8af69ee`):
 - Before #760 the attachment made the dedicated context current at once, and the target set the swap interval right after it. Under #760 the context becomes current in driver work after the attach call returns, so the target sets the swap interval in `WillRender` once the session's context is current on the window surface.
 - A window replacement or a park is an ordered operation under #760, while the target destroys the previous EGL surface right after it. The target services the session until the replacement's completion before it destroys the surface (Q6).
 - The map rendered at about 55 map frames per second in that debug build, and all 6 display slots were used (130, 132, 128, 127, 84 and 2 frames).
+- Any service call can render the armed demand's frame, not only the one that the map thread makes to render: a call that services a target replacement or an attachment also runs a demand that the replacement resumed. On the Pixel, a frame rendered while the map thread waited for a window replacement reached the image reader with the system's timestamp in place of a frame id, and the port reported "received an image of unknown frame 112078786893156" (this failed "a maximum cache size set while a map exists"). The port now sets the frame id before every service call, also in its wait loops, and the test passes. This makes ask 5 more important: a host can't know which service call will present a frame.
 
 ## Q6. Lifecycle
 
@@ -235,6 +238,7 @@ Open; task 3.4 tests it. What the port showed so far:
 - Memory reduction while paused regresses. Before #760, `mln_render_session_reduce_memory_use` released cached tiles and images at once, also while paused, which is when iOS sends memory warnings. Under #760 it is driver work, so with a caller-graphics-thread driver it runs only when the map thread services the driver, which it doesn't do while paused. Servicing it anyway would also run any queued render. A way to run CPU-only driver work, such as cache release, without running GPU work would fix this; a core-worker session wouldn't have the problem.
 - Resize: before #760 `set_target` replaced the target at once. Under #760 it is an ordered operation, while mapigrade releases the previous buffer set in the same step (D126). The previous textures must stay valid until the replacement runs, so the port services the driver until the replacement's completion before it continues. A replacement that the host could apply synchronously on the graphics thread would avoid the wait loop.
 - Teardown: detach (servicing until its completion), then release the map and the runtime and wait for each completion, so that no completion or event callback reaches the map's object afterwards. Before #760 this was three synchronous destroy calls.
+- A lost target is terminal. Before #760 a failed render was reported, and the next target replacement recovered. Under #760 a failed render (`render_session_render_update_on_driver` returning an error) puts the session into `MLN_RENDER_SESSION_STATE_TARGET_LOST`; frame requests then fail, because they require `MLN_RENDER_SESSION_STATE_ATTACHED` (`render_session_common.cpp`, line 3096), and no replacement sets that state again. On the Pixel, "resizing on every frame for 10 seconds" lost its target after 9 to 21 frames and then showed a blank map until the test timed out. The surface that the session presented to is most likely the Surface of an ImageReader that `MapSurface` had just replaced on the main thread. The port now detaches a session whose target is lost and attaches a new one to the current surface; with that, `map_texture_test.dart` passes on the Pixel (28 passed, 2 skipped), and the map thread recovered a lost target 4 times during the file. A replacement that brings a lost surface target back to attached (or a documented recovery path) would remove the re-attachment, which also rebuilds the renderer and its caches.
 
 ## Q7. Other API
 
@@ -278,7 +282,7 @@ macOS integration tests on the branch at `a87c69b` (task 3.4):
 - `engines_test.dart` (`flutter drive`): all passed.
 - `resource_test.dart`: all passed, including the glyph failure test (Q4).
 
-Pixel 4a (5G) at `3e5b263` (task 5.2): stopping and resuming the activity during a continuous pan worked (the map parked on the pbuffer, frames stopped for 3.9 s and resumed with the new window). `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 27 passed, 2 skipped, 1 failed: "a maximum cache size set while a map exists" reports a `RenderError` (the test doesn't print its message). The test passes on the baseline. Not yet investigated.
+Pixel 4a (5G) at `3e5b263` (task 5.2): stopping and resuming the activity during a continuous pan worked (the map parked on the pbuffer, frames stopped for 3.9 s and resumed with the new window). `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 27 passed, 2 skipped, 1 failed: "a maximum cache size set while a map exists" reported a `RenderError`, "received an image of unknown frame", which the test passes on the baseline. The cause was a frame rendered in a service call during a window replacement, without a frame id (Q5). With the frame id set before every service call, "resizing on every frame for 10 seconds" then failed on the Pixel, because the session lost its target (Q6); it had passed before only by timing. With both fixes and the re-attachment of a lost session, `map_texture_test.dart` passes on the Pixel (28 passed, 2 skipped).
 
 iOS simulator (iPhone 17, iOS 26.5) at `3e5b263` (task 6.3): `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 28 passed, 1 skipped, 1 failed: "resizing on every frame for 10 seconds" never displayed a frame of the final size. On the baseline the same test passes (551 frames rendered, final size displayed).
 
@@ -311,3 +315,4 @@ Issue drafts and the stacked pull request go here for review before anything is 
 3. Run CPU-only driver work, such as `mln_render_session_reduce_memory_use`, without the GPU work queued with it, so that a paused caller-driver session can release memory (Q6).
 4. Let a caller-driver host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation (Q2, task 6.4). On the iPhone this is the whole difference between the port's camera latency (15 ms) and the baseline's (11 ms).
 5. Make the per-frame hook before the swap explicit for surface targets, for example a frame token that the session attaches to the presented buffer (Q5).
+6. Let a replacement recover a session whose target was lost, or document the recovery (Q6).

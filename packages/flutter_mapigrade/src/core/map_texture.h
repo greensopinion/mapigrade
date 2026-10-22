@@ -147,6 +147,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void ServiceUntil(const std::function<bool()>& done);
   void ApplyReduceMemoryUse();
   void DestroySession();
+  // Map thread: attaches a render session to the map at size_; returns
+  // whether the attachment completed.
+  bool AttachSession();
+  // Map thread: if the session lost its target, replaces it with a new one
+  // (findings Q6); returns whether it did.
+  bool RecoverLostTarget();
+  int64_t recovered_targets_ = 0;
   bool Init();
   void Teardown();
   void Signal();

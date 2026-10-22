@@ -249,6 +249,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // session queues on the window, so that the image tells which frame it
   // holds (design D131).
   void WillRender(uint64_t frame_id) override {
+    next_frame_id_ = frame_id;
     // MapLibre leaves the scissor test enabled with the frame's size, and the
     // FFI's surface session assumes at the start of each frame that it is
     // disabled, so it doesn't disable it. After the size grows, the next frame
@@ -437,6 +438,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     }
     // 1 while pending; the completion stores its status minus 1000.
     for (int i = 0; i < 2000 && done->load() == 1; ++i) {
+      // The service call can render an armed demand's frame, so it gets the
+      // id that the map thread gave the next frame (findings Q5).
+      if (next_frame_id_ != 0) WillRender(next_frame_id_);
       mln_status service =
           mln_render_session_service_driver_work(session, nullptr);
       if (service != MLN_STATUS_OK && service != MLN_STATUS_BUSY) break;
@@ -593,6 +597,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // Whether the swap interval waits for the session's context to become
   // current on the window surface.
   bool swap_interval_pending_ = false;
+  // The id of the next frame, from the last WillRender, for service calls
+  // during a window replacement.
+  uint64_t next_frame_id_ = 0;
 };
 
 // Main thread. Releases or restores the reader of every map (design D137).
