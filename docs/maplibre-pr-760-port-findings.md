@@ -6,7 +6,7 @@ Each finding names the #760 commit it was made with, and states whether it comes
 
 ## Summary
 
-Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac and the iPhone 15 Pro Max; the Pixel 4a (5G) comparison is running. Two integration tests that pass on the baseline fail on the port and aren't investigated yet ("What broke").
+Status on 2026-10-21: the port runs on macOS, iOS and Android against #760 at `3b56ef916` with one local patch (D173). It is measured against the released FFI on the Mac and the iPhone 15 Pro Max; the Pixel 4a (5G) comparison is running. One integration test that passes on the baseline fails on the port on the Pixel and isn't investigated yet; a second one, on the iOS simulator, was a defect of the port and is fixed ("What broke").
 
 Findings:
 
@@ -195,7 +195,7 @@ Not yet measured with the wait: the alignment benchmark's lag on the iPhone. Sin
 
 ## Q3. Synchronous execution
 
-Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. Still to check: the Pixel measurements, and the two failing integration tests.
+Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves the use case. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. Still to check: the Pixel measurements, and the failing cache-size test on the Pixel.
 
 ## Q4. Glyph load failures
 
@@ -267,7 +267,9 @@ macOS integration tests on the branch at `a87c69b` (task 3.4):
 
 Pixel 4a (5G) at `3e5b263` (task 5.2): stopping and resuming the activity during a continuous pan worked (the map parked on the pbuffer, frames stopped for 3.9 s and resumed with the new window). `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 27 passed, 2 skipped, 1 failed: "a maximum cache size set while a map exists" reports a `RenderError` (the test doesn't print its message). The test passes on the baseline. Not yet investigated.
 
-iOS simulator (iPhone 17, iOS 26.5) at `3e5b263` (task 6.3): `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 28 passed, 1 skipped, 1 failed: "resizing on every frame for 10 seconds" never displayed a frame of the final size; the map rendered 39 frames, 37 of which asked for a repaint, and then stopped. On the baseline the same test passes (551 frames rendered, final size displayed). On macOS the port passes it. Not yet investigated; the waits for target replacements during resizes (Q6) and the unconditional demands after a repaint request are the first suspects.
+iOS simulator (iPhone 17, iOS 26.5) at `3e5b263` (task 6.3): `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 28 passed, 1 skipped, 1 failed: "resizing on every frame for 10 seconds" never displayed a frame of the final size. On the baseline the same test passes (551 frames rendered, final size displayed).
+
+The cause was a defect of the port, not of #760. A state dump of the stalled map thread showed the session had rendered every map update (`rendered_update_generation` equal to `map_update_generation`, nothing pending), while the map thread held an armed demand with `MLN_FRAME_DEMAND_WAIT_FOR_UPDATE`. A demand armed before the last resize had rendered the final size's update into a frame that the port discarded, because the resize had reset the slots; the next demand then waited for an update that an idle map doesn't publish. Before #760 a resize set `render_pending_`, which forced a render. The port now makes the demand after a discarded result render unconditionally, and the test passes on the simulator (601 resizes, 576 frames rendered, final size displayed). The macOS run passed only by timing. A demand flag such as "render even if this update was rendered before into a target that was replaced" would make this explicit, but the host-side fix is simple, so it isn't an ask.
 
 ## Feedback for #760
 

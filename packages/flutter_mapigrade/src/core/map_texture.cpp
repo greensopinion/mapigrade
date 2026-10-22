@@ -578,6 +578,41 @@ bool MapTexture::RunOnce() {
     timeout_ms = std::clamp<int64_t>(until_ms, 0, timeout_ms);
   }
   WaitForWake(timeout_ms);
+  // Temporary diagnosis of the simulator resize stall (findings, task 6.3).
+  {
+    static thread_local int64_t last_dump_ns = 0;
+    static thread_local int64_t last_rendered = -1;
+    int64_t now = NowNs();
+    int64_t rendered;
+    {
+      std::lock_guard lock(stats_mutex_);
+      rendered = stats_.rendered_frames;
+    }
+    if (rendered != last_rendered) {
+      last_rendered = rendered;
+      last_dump_ns = now;
+    } else if (now - last_dump_ns > 2'000'000'000) {
+      last_dump_ns = now;
+      mln_render_session_snapshot snapshot{};
+      snapshot.size = sizeof(snapshot);
+      if (session_ != MLN_HANDLE_NULL) {
+        mln_render_session_get_snapshot(session_, &snapshot, nullptr);
+      }
+      static FILE* stall_log = std::fopen("/private/tmp/mln760_stall.log", "a");
+      std::fprintf(
+          stall_log != nullptr ? stall_log : stdout,
+          "MLN760_STALL rendered=%lld demand=%d slot=%d stale=%d repaint=%d "
+          "waiting_for_buffer=%d paused=%d session_state=%u map_gen=%llu "
+          "rendered_gen=%llu pending=%d size=%ux%u\n",
+          static_cast<long long>(rendered), demand_outstanding_, demand_slot_,
+          demand_stale_, repaint_wanted_, waiting_for_buffer_.load(),
+          gate_.paused(), snapshot.state,
+          static_cast<unsigned long long>(snapshot.map_update_generation),
+          static_cast<unsigned long long>(snapshot.rendered_update_generation),
+          snapshot.pending_changes, size_.physical_width, size_.physical_height);
+      std::fflush(stall_log != nullptr ? stall_log : stdout);
+    }
+  }
   bool stop = false;
   ApplyCommands(&stop);
   if (stop) return true;
@@ -1243,8 +1278,21 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   demand_slot_ = -1;
   demand_stale_ = false;
 
+  // A demand armed before a resize may render the update of the new size
+  // into a frame that isn't published. A demand that waits for an update would
+  // then wait for one that doesn't come while the map is idle, so the next
+  // demand renders unconditionally, as render_pending_ did after a resize
+  // before #760 (findings, task 6.3).
+  if (stale) {
+    repaint_wanted_ = true;
+    if (result.disposition == MLN_RENDER_RESULT_RENDERED &&
+        target_->AsBufferTarget() != nullptr && acquire_frames_) {
+      AcquireAndReleaseFrame();
+    }
+    return;
+  }
   if (result.disposition != MLN_RENDER_RESULT_RENDERED) {
-    if (!stale) buffers_.Release(index);
+    buffers_.Release(index);
     repaint_wanted_ = false;
     return;
   }
@@ -1252,9 +1300,6 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   if (target_->AsBufferTarget() != nullptr && acquire_frames_) {
     AcquireAndReleaseFrame();
   }
-  // A resize reset the slots after the demand was armed; the frame has the
-  // old size and isn't published.
-  if (stale) return;
 
   RecordRenderStart(service_start, demand_render_ahead_);
   RecordRender(service_start, service_ns);
