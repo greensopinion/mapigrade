@@ -268,6 +268,16 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // (design D125), and when Dart set it.
   int64_t applied_seq_ = 0;
   int64_t applied_set_at_ns_ = 0;
+  int64_t applied_submit_ns_ = 0;
+  int64_t applied_complete_ns_ = 0;
+  // Guarded by stats_mutex_: sums of the stages of camera-to-frame latency
+  // (task 6.4), printed every 300 cameras.
+  int64_t stage_count_ = 0;
+  int64_t stage_submit_ns_ = 0;
+  int64_t stage_complete_ns_ = 0;
+  int64_t stage_service_ns_ = 0;
+  int64_t stage_render_ns_ = 0;
+  int64_t stage_early_service_ = 0;
   // The frame demand the map thread armed and hasn't received a result for
   // (design D167): its token, the display slot it renders into, whether it
   // renders ahead, and whether a resize reset the slots since it was armed.
@@ -290,6 +300,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
     uint64_t generation = 0;
     int64_t seq = 0;
     int64_t set_at_ns = 0;
+    int64_t submit_ns = 0;
+    int64_t complete_ns = 0;
   };
   std::mutex camera_generations_mutex_;
   std::vector<CameraGeneration> camera_generations_;

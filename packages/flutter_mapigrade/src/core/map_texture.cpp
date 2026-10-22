@@ -486,6 +486,28 @@ void MapTexture::RecordCameraLatency(const FrameInfo& info) {
   std::lock_guard lock(stats_mutex_);
   if (info.seq <= latency_counted_seq_) return;
   latency_counted_seq_ = info.seq;
+  if (info.camera_submit_ns != 0 && info.camera_complete_ns != 0 &&
+      info.service_start_ns != 0) {
+    int64_t now = info.camera_set_at_ns + latency;
+    ++stage_count_;
+    stage_submit_ns_ += info.camera_submit_ns - info.camera_set_at_ns;
+    stage_complete_ns_ += info.camera_complete_ns - info.camera_submit_ns;
+    stage_service_ns_ += info.service_start_ns - info.camera_complete_ns;
+    stage_render_ns_ += now - info.service_start_ns;
+    if (info.service_start_ns < info.camera_complete_ns) ++stage_early_service_;
+    if (stage_count_ % 300 == 0) {
+      double n = static_cast<double>(stage_count_);
+      std::printf(
+          "MLN760_STAGES n=%lld set_to_submit_ms=%.3f submit_to_complete_ms=%.3f "
+          "complete_to_service_ms=%.3f service_to_ready_ms=%.3f "
+          "service_before_complete=%lld\n",
+          static_cast<long long>(stage_count_), stage_submit_ns_ / n / 1e6,
+          stage_complete_ns_ / n / 1e6, stage_service_ns_ / n / 1e6,
+          stage_render_ns_ / n / 1e6,
+          static_cast<long long>(stage_early_service_));
+      std::fflush(stdout);
+    }
+  }
   ++stats_.camera_latency_count;
   stats_.camera_latency_total_ns += latency;
   stats_.camera_latency_max_ns =
@@ -946,17 +968,19 @@ void MapTexture::ApplyCamera() {
   // command has run since (design D169, findings Q2).
   int64_t seq = update->seq;
   int64_t set_at_ns = update->set_at_ns;
+  int64_t submit_ns = NowNs();
   mln_completion done = FunctionCompletion(
-      [this, seq, set_at_ns](const mln_completion_result& result) {
+      [this, seq, set_at_ns, submit_ns](const mln_completion_result& result) {
         if (result.status != MLN_STATUS_OK) return;
+        int64_t complete_ns = NowNs();
         mln_map_snapshot snapshot{};
         snapshot.size = sizeof(snapshot);
         if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
           return;
         }
         std::lock_guard lock(camera_generations_mutex_);
-        camera_generations_.push_back(
-            {snapshot.latest_render_update_generation, seq, set_at_ns});
+        camera_generations_.push_back({snapshot.latest_render_update_generation,
+                                       seq, set_at_ns, submit_ns, complete_ns});
       });
   mln_diagnostic diagnostic = NewDiagnostic();
   mln_status status =
@@ -1209,6 +1233,7 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   RecordRenderStart(service_start, demand_render_ahead_);
   RecordRender(service_start, service_ns);
   FrameInfo info = RenderedFrameInfo(result);
+  info.service_start_ns = service_start;
   {
     std::lock_guard lock(stats_mutex_);
     ++stats_.rendered_frames;
@@ -1335,12 +1360,16 @@ FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
     if (newest < camera_generations_.size()) {
       applied_seq_ = camera_generations_[newest].seq;
       applied_set_at_ns_ = camera_generations_[newest].set_at_ns;
+      applied_submit_ns_ = camera_generations_[newest].submit_ns;
+      applied_complete_ns_ = camera_generations_[newest].complete_ns;
       camera_generations_.erase(camera_generations_.begin(),
                                 camera_generations_.begin() + newest);
     }
   }
   info.seq = applied_seq_;
   info.camera_set_at_ns = applied_set_at_ns_;
+  info.camera_submit_ns = applied_submit_ns_;
+  info.camera_complete_ns = applied_complete_ns_;
   return info;
 }
 

@@ -133,6 +133,17 @@ The alignment benchmark with `ALIGNMENT_MODE=none` (no prediction), 3 runs each,
 
 On the Mac, prediction halves the median lag under #760 as it does with the released FFI, and without prediction the two are the same. The port's slightly higher p95 in fling appears with and without prediction. On the Mac, #760's extra 0.3 ms per camera doesn't cost a frame, so prediction keeps its full effect. On the iPhone, the extra 3.5 ms cost one frame in pan1000 and reverse even with `predict1` (task 6.2); whether a longer lead (`predict2`) recovers it on the iPhone is still open.
 
+### System Trace on the iPhone (task 6.4, in progress)
+
+An Instruments System Trace of 8 s of continuous pan (release builds, `CONTINUOUS_PAN=true`, phone unplugged and out of its case, but still warm from task 6.2) of the port and of the baseline, summarized per thread from the `thread-state` table:
+
+- Every MapLibre thread runs at scheduler priority 31 (the default QoS) in both builds, including mapigrade's map thread in the baseline (the main thread runs at 47 and Flutter's raster thread at 50). #760 creates its worker threads with `pthread_create` and no QoS (`src/execution/worker_thread.cpp`), so its runtime thread has the same priority as mapigrade's map thread always had. Priority alone doesn't explain the extra latency.
+- In the port, the thread that behaves like #760's runtime scheduler thread (priority 31, about 5,500 short running intervals in 8 s) was runnable but not running for 48.8 ms in total, about 9 µs per wake. Waiting for a core isn't where the 3.5 ms go either.
+- Both builds ran mostly on performance cores; the busiest MapLibre thread spent about 10% of its running time on efficiency cores in both.
+- The extra latency is real and not an artifact of `seq` attribution (D169): the layer draws its children at the camera of the frame's `seq`, and a late attribution would have shown as alignment error, which was 0 px.
+
+The port now prints, every 300 cameras, the mean of four stages of camera-to-frame latency (`MLN760_STAGES`): `setCamera` to the camera command's submission, submission to its completion on the runtime thread, completion to the start of the service call that renders the frame, and that service call to the frame-ready event. A run on a cool phone will show which stage takes the extra time.
+
 ## Q3. Synchronous execution
 
 Open.

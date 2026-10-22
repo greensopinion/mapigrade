@@ -70,6 +70,12 @@ struct FrameInfo {
   int64_t seq = 0;
   // When the camera `seq` was set (steady clock, ns), or 0 if unknown.
   int64_t camera_set_at_ns = 0;
+  // For the experiment-maplibre-pr-760-port change (task 6.4): when the map
+  // thread submitted the camera command, when its completion ran, and when
+  // the service call that rendered the frame started (steady clock, ns).
+  int64_t camera_submit_ns = 0;
+  int64_t camera_complete_ns = 0;
+  int64_t service_start_ns = 0;
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
   double scale_factor = 1;
