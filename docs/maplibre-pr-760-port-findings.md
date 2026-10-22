@@ -74,7 +74,7 @@ Answered: 4 display slots work only with the local patch of D173 (see "Result" a
 - A borrowed ring has 1 to 3 textures, and `mln_render_session_set_metal_borrowed_texture_target` keeps the count that the session attached with. mapigrade has 4 display slots on macOS and iOS.
 - A frame that the host never acquires doesn't keep its slot. To choose the slot of a render, `render_session_common.cpp` (around line 2827) takes the first slot that isn't acquired, rendering, quarantined or holding a published frame, and otherwise the slot with the oldest published frame that isn't acquired. A ring of one texture therefore renders into its one texture every time, and D168's replacement before each render isn't refused because of an unacquired frame.
 - `mln_render_frame_result` with `MLN_RENDER_RESULT_RENDERED` "states nothing about GPU completion" (`render_session.h`). Completion is stated only for an acquired frame: with `MLN_GPU_SYNC_CPU_COMPLETE`, the default and the only producer synchronization on Metal, the GPU writes completed before the frame became acquirable. So that Flutter doesn't sample a texture that MapLibre is still writing, the map thread acquires each rendered frame and releases it before the next target replacement, which `set_metal_borrowed_texture_target` requires ("fails while a frame of the ring is acquired"). This adds an acquire and a release per frame to D168.
-- In practice the Metal backend waits for completion inside the render: `MetalTextureBackend`'s `swap()` (`metal_texture_backend.mm`, line 141) commits the command buffer and calls `waitUntilCompleted()`. With a caller-graphics-thread driver that wait runs on the map thread inside `service_driver_work`, so the GPU writes have completed when the frame result arrives. The C API doesn't promise this, so the port acquires and releases each frame anyway, and we record here whether doing so costs measurable time.
+- In practice the Metal backend waits for completion inside the render: `MetalTextureBackend`'s `swap()` (`metal_texture_backend.mm`, line 141) commits the command buffer and calls `waitUntilCompleted()`. With a caller-graphics-thread driver that wait runs on the map thread inside `service_driver_work`, so the GPU writes have completed when the frame result arrives. The C API doesn't promise this, so the port acquires and releases each frame anyway. We didn't measure the cost of the acquire and release on their own; they are part of the service-call time in the benchmarks, which matched `render_update` on the Mac and the iPhone.
 
 ### Result: a replacement before each frame renders without end (task 3.4)
 
@@ -130,7 +130,7 @@ Alignment benchmark, ranges over 3 runs. The drawn error was 0 px at max in ever
 | fling | 11.9–12.3 | 15.8–16.5 | 1.46–2.12 | 2.78–3.42 |
 | reverse | 12.5–12.9 | 16.5–18.0 | 8.34 | 16.65–16.67 |
 
-On the iPhone the port keeps the frame rate and the alignment of the layer's children (the error stays 0 px), but each camera reaches a finished frame about 3.5 ms later (about 30% more, or about 0.4 of a 120 Hz refresh interval). Where that pushes the frame past a refresh, the displayed map lags the live `flutter_map` camera by one more frame: in reverse in all 3 runs and in pan1000 in 2 of 3 runs, the median lag doubled from 8.3 px to 16.6 px (one frame at 1,000 px/s), and the p95 lag of stop and reverse rose from 16.7 px to 25 px. Camera prediction (`predict1`) doesn't hide the extra latency; task 4.2 tests whether a longer lead does. The extra time is the path from `mln_map_update_camera` through the runtime's scheduler thread, its render update and `driver_work_wake`, back to the map thread; the service call that renders costs the same as `render_update` did.
+On the iPhone the port keeps the frame rate and the alignment of the layer's children (the error stays 0 px), but each camera reaches a finished frame about 3.5 ms later (about 30% more, or about 0.4 of a 120 Hz refresh interval). Where that pushes the frame past a refresh, the displayed map lags the live `flutter_map` camera by one more frame: in reverse in all 3 runs and in pan1000 in 2 of 3 runs, the median lag doubled from 8.3 px to 16.6 px (one frame at 1,000 px/s), and the p95 lag of stop and reverse rose from 16.7 px to 25 px. Camera prediction (`predict1`) doesn't hide the extra latency; whether a longer lead (`predict2`) does wasn't tested. The service call that renders costs the same as `render_update` did. Task 6.4 found where the extra time goes: not the path through the runtime's scheduler thread, which takes about 60 µs, but the order of the camera command and the next service call ("Where the iPhone's extra latency goes").
 
 ### macOS (2026-10-21, task 4.1)
 
@@ -212,7 +212,7 @@ On the Pixel the port's camera latency is about 0.3 ms longer and its frame rate
 
 ## Q3. Synchronous execution
 
-Tentative answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves mapigrade. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. 
+Answer: not needed, if #760 takes asks 1 and 2 ("Feedback for #760"). The two places where the port couldn't match the released FFI's results are the display slots (Q1), which the patch of D173 fixes, and the iPhone's camera latency (Q2), which waiting for the camera command's completion fixes. In both cases a small change to the asynchronous API serves mapigrade. The rest of the port's added complexity (completions, waits for ordered replacements, the frame-demand loop) is the cost of the asynchronous API, not a blocker. 
 
 ## Q4. Glyph load failures
 
@@ -335,16 +335,11 @@ Issue drafts and the stacked pull request go here for review before anything is 
 >
 > We're happy to open a stacked pull request against #760 for the one you prefer, with a C test next to the existing one.
 
-1. Same-size replacement of a borrowed texture ring (Q1, D173): keep the record of the rendered update, as maplibre-native-ffi#807 did for the earlier `set_target`. Proposed as a stacked pull request with the patch above.
-2. Report the render update generation of a map command in its completion, or in a way that can be compared with `mln_render_frame_result.map_update_generation` (Q2).
-3. Run CPU-only driver work, such as `mln_render_session_reduce_memory_use`, without the GPU work queued with it, so that a paused caller-driver session can release memory (Q6).
-4. Let a caller-driver host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation (Q2, task 6.4). On the iPhone this is the whole difference between the port's camera latency (15 ms) and the baseline's (11 ms).
-5. Make the per-frame hook before the swap explicit for surface targets, for example a frame token that the session attaches to the presented buffer (Q5).
-6. Let a replacement recover a session whose target was lost, or document the recovery (Q6).
+The asks are numbered as in the summary. Ask 1 is the question above; asks 2 to 6 are in the drafts below.
 
 ### Draft issues (task 7.2, not posted)
 
-Ask 1 is the question of task 7.3 above. Asks 2 and 3 share one issue, which is also the issue on synchronous execution and frame latency promised in discussion #877.
+Asks 2 and 3 share one issue, which is also the issue on synchronous execution and frame latency promised in discussion #877.
 
 #### Draft A: render the update that includes a command the host just submitted (asks 2 and 3)
 
