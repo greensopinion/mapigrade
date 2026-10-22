@@ -305,6 +305,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   };
   std::mutex camera_generations_mutex_;
   std::vector<CameraGeneration> camera_generations_;
+  // Camera commands whose completion has run, for the experiment of waiting
+  // for a camera before the next service call (MLN760_WAIT_CAMERA, task 6.4).
+  std::atomic<int64_t> cameras_completed_{0};
+  int64_t cameras_submitted_ = 0;
   // When to tell Flutter once more that a frame is available after the last
   // resize (steady clock, ns), or 0 for not pending.
   int64_t notify_after_resize_at_ns_ = 0;

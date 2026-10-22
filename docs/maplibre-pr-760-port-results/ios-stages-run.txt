@@ -1,0 +1,20 @@
+MLN760_STAGES n=300 set_to_submit_ms=4.944 submit_to_complete_ms=0.065 complete_to_service_ms=5.400 service_to_ready_ms=7.335 service_before_complete=65
+MLN760_STAGES n=600 set_to_submit_ms=4.482 submit_to_complete_ms=0.065 complete_to_service_ms=5.050 service_to_ready_ms=7.293 service_before_complete=140
+MLN760_STAGES n=900 set_to_submit_ms=4.764 submit_to_complete_ms=0.064 complete_to_service_ms=5.359 service_to_ready_ms=7.387 service_before_complete=192
+MLN760_STAGES n=1200 set_to_submit_ms=4.290 submit_to_complete_ms=0.063 complete_to_service_ms=4.850 service_to_ready_ms=7.324 service_before_complete=297
+MLN760_STAGES n=1500 set_to_submit_ms=4.100 submit_to_complete_ms=0.063 complete_to_service_ms=4.703 service_to_ready_ms=7.215 service_before_complete=375
+MLN760_STAGES n=1800 set_to_submit_ms=3.758 submit_to_complete_ms=0.063 complete_to_service_ms=4.333 service_to_ready_ms=7.203 service_before_complete=492
+MLN760_STAGES n=2100 set_to_submit_ms=3.456 submit_to_complete_ms=0.062 complete_to_service_ms=3.927 service_to_ready_ms=7.245 service_before_complete=628
+MLN760_STAGES n=2400 set_to_submit_ms=3.189 submit_to_complete_ms=0.062 complete_to_service_ms=3.617 service_to_ready_ms=7.235 service_before_complete=772
+MLN760_STAGES n=2700 set_to_submit_ms=2.943 submit_to_complete_ms=0.062 complete_to_service_ms=3.343 service_to_ready_ms=7.217 service_before_complete=911
+MLN760_STAGES n=3000 set_to_submit_ms=2.764 submit_to_complete_ms=0.062 complete_to_service_ms=3.136 service_to_ready_ms=7.203 service_before_complete=1050
+MLN760_STAGES n=3300 set_to_submit_ms=2.776 submit_to_complete_ms=0.061 complete_to_service_ms=3.134 service_to_ready_ms=7.406 service_before_complete=1233
+MLN760_STAGES n=3600 set_to_submit_ms=2.854 submit_to_complete_ms=0.060 complete_to_service_ms=3.175 service_to_ready_ms=7.518 service_before_complete=1386
+MLN760_STAGES n=3900 set_to_submit_ms=2.861 submit_to_complete_ms=0.060 complete_to_service_ms=3.193 service_to_ready_ms=7.602 service_before_complete=1528
+MLN760_STAGES n=4200 set_to_submit_ms=2.824 submit_to_complete_ms=0.059 complete_to_service_ms=3.202 service_to_ready_ms=7.688 service_before_complete=1693
+MLN760_STAGES n=4500 set_to_submit_ms=2.895 submit_to_complete_ms=0.060 complete_to_service_ms=3.248 service_to_ready_ms=7.701 service_before_complete=1793
+MLN760_STAGES n=4800 set_to_submit_ms=2.957 submit_to_complete_ms=0.060 complete_to_service_ms=3.279 service_to_ready_ms=7.708 service_before_complete=1906
+MLN760_STAGES n=5100 set_to_submit_ms=3.068 submit_to_complete_ms=0.060 complete_to_service_ms=3.408 service_to_ready_ms=7.687 service_before_complete=1973
+MLN760_STAGES n=5400 set_to_submit_ms=3.034 submit_to_complete_ms=0.060 complete_to_service_ms=3.369 service_to_ready_ms=7.665 service_before_complete=2102
+MLN760_STAGES n=5700 set_to_submit_ms=3.035 submit_to_complete_ms=0.060 complete_to_service_ms=3.383 service_to_ready_ms=7.621 service_before_complete=2187
+BENCHMARK_RESULT {"duration_s":30.0,"map_physical_size":"1290x2796","map_scale_factor":3.0,"render_ahead":"auto","copy_free":true,"flutter_frames":3613,"flutter_frame_total_span_ms":{"median":0.451,"p95":1.136,"p99":1.491,"max":3.633},"flutter_frame_build_ms":{"median":0.144,"p95":0.447,"p99":0.607,"max":2.898},"flutter_frame_raster_ms":{"median":0.204,"p95":0.504,"p99":0.626,"max":2.693},"flutter_frame_interval_ms":{"median":8.335,"p95":8.378,"p99":8.402,"max":24.991},"map_frames_displayed":3316,"map_fps":110.53333333333333,"map_fps_per_second":{"min":104,"p10":105,"p50":110,"p90":119},"map_frame_interval_ms":{"median":8.339,"p95":16.392,"p99":16.76,"max":19.117},"rendered_frames":3600,"render_update_calls":3600,"render_update_avg_ms":7.996460555555556,"render_update_max_ms":463.538,"copy_avg_ms":0,"skipped_renders":0,"waits_for_display":602,"frame_cycle_avg_ms":8.335956388888889,"pickup_wait_avg_ms":3.64977533172497,"render_ahead_frames":3082,"present_to_render_avg_ms":0.052964636542239686,"interval_waits":0,"camera_latency_avg_ms":15.020650827933766,"camera_latency_max_ms":37.598}

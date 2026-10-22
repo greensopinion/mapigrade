@@ -133,7 +133,7 @@ The alignment benchmark with `ALIGNMENT_MODE=none` (no prediction), 3 runs each,
 
 On the Mac, prediction halves the median lag under #760 as it does with the released FFI, and without prediction the two are the same. The port's slightly higher p95 in fling appears with and without prediction. On the Mac, #760's extra 0.3 ms per camera doesn't cost a frame, so prediction keeps its full effect. On the iPhone, the extra 3.5 ms cost one frame in pan1000 and reverse even with `predict1` (task 6.2); whether a longer lead (`predict2`) recovers it on the iPhone is still open.
 
-### System Trace on the iPhone (task 6.4, in progress)
+### System Trace on the iPhone (task 6.4)
 
 An Instruments System Trace of 8 s of continuous pan (release builds, `CONTINUOUS_PAN=true`, phone unplugged and out of its case, but still warm from task 6.2) of the port and of the baseline, summarized per thread from the `thread-state` table:
 
@@ -143,6 +143,32 @@ An Instruments System Trace of 8 s of continuous pan (release builds, `CONTINUOU
 - The extra latency is real and not an artifact of `seq` attribution (D169): the layer draws its children at the camera of the frame's `seq`, and a late attribution would have shown as alignment error, which was 0 px.
 
 The port now prints, every 300 cameras, the mean of four stages of camera-to-frame latency (`MLN760_STAGES`): `setCamera` to the camera command's submission, submission to its completion on the runtime thread, completion to the start of the service call that renders the frame, and that service call to the frame-ready event. A run on a cool phone will show which stage takes the extra time.
+
+### Where the iPhone's extra latency goes (task 6.4)
+
+On a cool iPhone (unplugged, out of its case), one frame-rate run of the port printed these stage means over 5,700 cameras (`docs/maplibre-pr-760-port-results/ios-stages-run.txt`):
+
+| Stage | Mean |
+|---|---|
+| `setCamera` → the map thread submits the camera command | 3.0 ms |
+| Submission → the command's completion on #760's runtime thread | 0.06 ms |
+| Completion → start of the service call that renders the frame | 3.4 ms |
+| That service call → frame ready | 7.7 ms |
+| Camera-to-frame latency | 15.0 ms |
+
+#760's runtime thread isn't slow: it applies the camera and publishes its update in 60 µs. The extra time is an ordering effect of the asynchronous camera command. The map thread submits the camera and then services the driver at once, usually before the update is published 60 µs later (in 2,187 of 5,700 cameras the rendering service call started before the completion). That service call renders the previous update, and the camera waits for the next render, about 8 ms later, which averages to about 3.4 ms. Before #760, `mln_map_jump_to` was synchronous, so the render that followed it always included the camera.
+
+To confirm it, the port has a switch, `MLN760_WAIT_CAMERA=1`, with which the map thread waits for the camera command's completion (at most 2 ms) before it services the driver. On the iPhone, 2 runs each, alternating (`ios-wait0-*`, `ios-wait1-*`):
+
+| | Camera latency avg | Completion → service | Displayed map fps | Frame cycle |
+|---|---|---|---|---|
+| Without waiting | 15.2–15.7 ms | 3.6–3.9 ms | 108.7–109.7 | 8.38–8.45 ms |
+| Waiting for the camera | 11.0–11.3 ms | 0.03–0.04 ms | 110.1–110.6 | 8.35–8.41 ms |
+| Baseline, released FFI (task 6.2) | 11.4 ms | | 109.6 | 8.33–8.42 ms |
+
+Waiting for the camera brings the port's latency back to the baseline's, at no cost in frame rate. So #760's core executor can serve mapigrade's latency requirement on the iPhone, provided the host can make the next render include a command it just submitted. The port does that by spinning on the completion, which works but needs #760's completion to run on another thread quickly. A frame demand that names a minimum render update generation (for example the one a command's completion reports, Q2), or a camera command whose completion reports the render update generation it published, would let a caller-driver host express "render the update that includes this camera" without waiting.
+
+Not yet measured with the wait: the alignment benchmark's lag on the iPhone. Since the latency matches the baseline's, the extra frame of lag in pan1000 and reverse (task 6.2) is expected to disappear.
 
 ## Q3. Synchronous execution
 
@@ -216,6 +242,10 @@ macOS integration tests on the branch at `a87c69b` (task 3.4):
 - `engines_test.dart` (`flutter drive`): all passed.
 - `resource_test.dart`: all passed, including the glyph failure test (Q4).
 
+Pixel 4a (5G) at `3e5b263` (task 5.2): stopping and resuming the activity during a continuous pan worked (the map parked on the pbuffer, frames stopped for 3.9 s and resumed with the new window). `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 27 passed, 2 skipped, 1 failed: "a maximum cache size set while a map exists" reports a `RenderError` (the test doesn't print its message). The test passes on the baseline. Not yet investigated.
+
+iOS simulator (iPhone 17, iOS 26.5) at `3e5b263` (task 6.3): `map_layer_test.dart` passed (15 tests). `map_texture_test.dart`: 28 passed, 1 skipped, 1 failed: "resizing on every frame for 10 seconds" never displayed a frame of the final size; the map rendered 39 frames, 37 of which asked for a repaint, and then stopped. On the baseline the same test passes (551 frames rendered, final size displayed). On macOS the port passes it. Not yet investigated; the waits for target replacements during resizes (Q6) and the unconditional demands after a repaint request are the first suspects.
+
 ## Feedback for #760
 
 Issue drafts and the stacked pull request go here for review before anything is posted.
@@ -223,3 +253,5 @@ Issue drafts and the stacked pull request go here for review before anything is 
 1. Same-size replacement of a borrowed texture ring (Q1, D173): keep the record of the rendered update, as maplibre-native-ffi#807 did for the earlier `set_target`. Proposed as a stacked pull request with the patch above.
 2. Report the render update generation of a map command in its completion, or in a way that can be compared with `mln_render_frame_result.map_update_generation` (Q2).
 3. Run CPU-only driver work, such as `mln_render_session_reduce_memory_use`, without the GPU work queued with it, so that a paused caller-driver session can release memory (Q6).
+4. Let a caller-driver host make the next render include a command it just submitted, for example a frame demand with a minimum render update generation (Q2, task 6.4). On the iPhone this is the whole difference between the port's camera latency (15 ms) and the baseline's (11 ms).
+5. Make the per-frame hook before the swap explicit for surface targets, for example a frame token that the session attaches to the presented buffer (Q5).

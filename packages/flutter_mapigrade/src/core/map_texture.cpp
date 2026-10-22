@@ -971,16 +971,26 @@ void MapTexture::ApplyCamera() {
   int64_t submit_ns = NowNs();
   mln_completion done = FunctionCompletion(
       [this, seq, set_at_ns, submit_ns](const mln_completion_result& result) {
-        if (result.status != MLN_STATUS_OK) return;
+        if (result.status != MLN_STATUS_OK) {
+          cameras_completed_.fetch_add(1);
+          return;
+        }
         int64_t complete_ns = NowNs();
         mln_map_snapshot snapshot{};
         snapshot.size = sizeof(snapshot);
         if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
+          cameras_completed_.fetch_add(1);
           return;
         }
-        std::lock_guard lock(camera_generations_mutex_);
-        camera_generations_.push_back({snapshot.latest_render_update_generation,
-                                       seq, set_at_ns, submit_ns, complete_ns});
+        {
+          std::lock_guard lock(camera_generations_mutex_);
+          camera_generations_.push_back(
+              {snapshot.latest_render_update_generation, seq, set_at_ns,
+               submit_ns, complete_ns});
+        }
+        // After the generation is recorded, so that a frame that the waiting
+        // map thread renders next is matched to this camera.
+        cameras_completed_.fetch_add(1);
       });
   mln_diagnostic diagnostic = NewDiagnostic();
   mln_status status =
@@ -988,6 +998,22 @@ void MapTexture::ApplyCamera() {
   if (status != MLN_STATUS_OK) {
     DiscardFunctionCompletion(done);
     ReportStatus("mln_map_update_camera", status, &diagnostic);
+    return;
+  }
+  ++cameras_submitted_;
+  // Experiment (task 6.4): with MLN760_WAIT_CAMERA=1, wait up to 2 ms for the
+  // camera's render update to be published, so that the next service call
+  // renders it, as jump_to before render_update did before #760.
+  static const bool wait_for_camera = [] {
+    const char* value = std::getenv("MLN760_WAIT_CAMERA");
+    return value != nullptr && value[0] == '1';
+  }();
+  if (wait_for_camera) {
+    int64_t deadline = NowNs() + 2'000'000;
+    while (cameras_completed_.load() < cameras_submitted_ &&
+           NowNs() < deadline) {
+      std::this_thread::yield();
+    }
   }
 }
 

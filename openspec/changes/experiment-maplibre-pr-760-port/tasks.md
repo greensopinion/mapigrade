@@ -27,15 +27,15 @@ After each task, record its result in `docs/maplibre-pr-760-port-findings.md`, u
 ## 5. Android
 
 - [x] 5.1 Port the surface target in `map_texture_android.cpp` (D170), with `WillRender` before `service_driver_work`; verify that the test harness on the Pixel 4a (5G) shows the map and that each frame's image arrives with its frame id, and record in Q5 whether one service call ever renders more than one frame
-- [ ] 5.2 Verify that parking on the pbuffer and window replacement work by stopping and resuming the activity during a pan, and run `map_texture_test.dart` and `map_layer_test.dart` on the Pixel; record each failure that `main` doesn't have
+- [x] 5.2 Verify that parking on the pbuffer and window replacement work by stopping and resuming the activity during a pan, and run `map_texture_test.dart` and `map_layer_test.dart` on the Pixel; record each failure that `main` doesn't have
 - [ ] 5.3 Run the frame-rate benchmark and the alignment benchmark on the Pixel, 3 runs each, at the baseline commit and on the branch; verify that the findings document compares them
 
 ## 6. iOS
 
 - [x] 6.1 Build `ios-arm64-metal` and `ios-simulator-arm64-metal` (D166) and the test harness for the iPhone; verify that the xcframework has all three slices and that the test harness on the iPhone 15 Pro Max shows the map and reports frames with cameras
 - [x] 6.2 Run the frame-rate benchmark and the alignment benchmark (`ALIGNMENT_CHILDREN=1`, the phases of task 1.2) on the iPhone, 3 runs each, alternating between the baseline commit (built in a worktree without the local FFI build, so that it uses the released FFI) and the branch, with auto-lock off, on cable power, and the thermal state recorded at the start and end of each run; verify that the findings document compares frame rate, frame cycle, alignment error, lag and camera-to-frame latency for both
-- [ ] 6.3 Run `map_texture_test.dart` and `map_layer_test.dart` on the iOS simulator; record each failure that the baseline commit doesn't have
-- [ ] 6.4 Record an Instruments System Trace on the iPhone of a continuous pan with the port and with the baseline (release builds, `CONTINUOUS_PAN=true`), and compare the map thread and the runtime's scheduler thread: their QoS class or priority, the cores they run on, and the time from a camera command to the render that includes it; verify that the findings document explains where the port's extra 3.5 ms of camera latency on the iPhone go (task 6.2), or states what the trace couldn't show
+- [x] 6.3 Run `map_texture_test.dart` and `map_layer_test.dart` on the iOS simulator; record each failure that the baseline commit doesn't have
+- [x] 6.4 Record an Instruments System Trace on the iPhone of a continuous pan with the port and with the baseline (release builds, `CONTINUOUS_PAN=true`), and compare the map thread and the runtime's scheduler thread: their QoS class or priority, the cores they run on, and the time from a camera command to the render that includes it; verify that the findings document explains where the port's extra 3.5 ms of camera latency on the iPhone go (task 6.2), or states what the trace couldn't show
 
 ## 7. Conclusions and feedback
 
