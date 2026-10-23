@@ -3,6 +3,7 @@
 - The native libraries come from MapLibre Native FFI 0.202610.2, whose native core runs the map and its commands; the plugin's native code was ported to it. The Dart API doesn't change.
 - Android apps also list the notices of Kotlin and of the FFI's rustls-platform-verifier component in Flutter's license registry.
 - While rendering is paused (iOS in the background, a stopped Android activity), a memory warning releases cached renderer resources when rendering resumes, not at once.
+- The minimum iOS version is 15.0, down from 15.5, so apps whose iOS deployment target is 15.0 can depend on the package.
 
 ## 0.0.1
 

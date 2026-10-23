@@ -13,10 +13,10 @@ write_info_plist() {
     macos-*)
       platform_keys="<key>LSMinimumSystemVersion</key><string>14.3</string>" ;;
     ios-simulator-*)
-      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
+      platform_keys="<key>MinimumOSVersion</key><string>15.0</string>
   <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>" ;;
     ios-*)
-      platform_keys="<key>MinimumOSVersion</key><string>15.5</string>
+      platform_keys="<key>MinimumOSVersion</key><string>15.0</string>
   <key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>" ;;
   esac
   cat > "$plist" <<PLIST
