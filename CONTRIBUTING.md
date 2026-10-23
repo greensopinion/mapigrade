@@ -22,7 +22,7 @@ third_party/                             fetched FFI release, and the local FFI 
 - An Apple silicon Mac with macOS 14.3 or later
 - Xcode 26.6 with the macOS and iOS SDKs, and an iOS simulator runtime
 - Flutter 3.47.5 with macOS desktop support
-- For an iPhone: iOS 15.5 or later, an Apple account added in Xcode (Settings > Accounts) for automatic signing, and the device paired with Xcode. The test harness's iOS project uses development team `2J9XYBV642`; change it in Xcode (Runner > Signing & Capabilities) for another team
+- For an iPhone: iOS 15.0 or later, an Apple account added in Xcode (Settings > Accounts) for automatic signing, and the device paired with Xcode. The test harness's iOS project uses development team `2J9XYBV642`; change it in Xcode (Runner > Signing & Capabilities) for another team
 - For a local FFI build only (optional, see Build MapLibre Native FFI): git and [mise](https://mise.jdx.dev) (`brew install mise`); the build script installs CMake, Ninja, Rust and cargo-about through mise
 - CMake for the C++ unit tests (`brew install cmake`)
 - For Android: the Android SDK with NDK 30.0.16248370 (Android Studio's SDK Manager, or `sdkmanager "ndk;30.0.16248370"`). The FFI build and Gradle find the SDK through `ANDROID_HOME`; the FFI build uses `~/Library/Android/sdk` when it isn't set. The FFI build installs the Rust target `aarch64-linux-android` and the JDK for its Gradle build through mise
@@ -34,7 +34,7 @@ third_party/                             fetched FFI release, and the local FFI 
 | --- | --- |
 | MapLibre Native FFI | release 0.202610.2, commit `a27e607357aef2cc9c9c89d10ebba7b3bde26fe8`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
-| Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.5 |
+| Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.0 |
 | Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 29, ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
 
 The plugin uses Swift Package Manager, the native build integration that the Flutter 3.47.5 plugin template uses by default. It has no podspec, so CocoaPods builds are not supported.
@@ -133,7 +133,7 @@ Output in `third_party/maplibre-native-ffi/` (gitignored):
 - `<preset>/lib/libmaplibre-native-c.dylib`, `<preset>/include/maplibre_native_c.h` and `<preset>/share/maplibre-native-c/` (the FFI license and third-party notices)
 - `android-arm64-egl/lib/libmaplibre-native-c.so` (16 KB segment alignment), with the same `include/` and `share/maplibre-native-c/` as the Apple presets; the plugin's Gradle build links it and packages it in the APK
 - `android-maven/org/maplibre/nativeffi/rustls-platform-verifier-android/<version>/`, the verifier's AAR and POM, where `<version>` is the first 12 characters of the FFI commit; the AAR's classes are in `org.maplibre.nativeffi.internal.rustlsplatformverifier`, where the FFI's patch moves them. The plugin's Gradle build adds the repository and depends on the AAR, and `mln_android_init` needs it at run time
-- `MaplibreNativeC.xcframework` with three slices: `macos-arm64` (a versioned framework, install name `@rpath/MaplibreNativeC.framework/Versions/A/MaplibreNativeC`, minimum macOS 14.3), `ios-arm64` and `ios-arm64-simulator` (flat frameworks, install name `@rpath/MaplibreNativeC.framework/MaplibreNativeC`, minimum iOS 15.5); each has the headers, a module map with the submodule `Plugin`, `PrivacyInfo.xcprivacy` and the FFI's license notices, as the FFI's CMake install creates them
+- `MaplibreNativeC.xcframework` with three slices: `macos-arm64` (a versioned framework, install name `@rpath/MaplibreNativeC.framework/Versions/A/MaplibreNativeC`, minimum macOS 14.3), `ios-arm64` and `ios-arm64-simulator` (flat frameworks, install name `@rpath/MaplibreNativeC.framework/MaplibreNativeC`, minimum iOS 15.0); each has the headers, a module map with the submodule `Plugin`, `PrivacyInfo.xcprivacy` and the FFI's license notices, as the FFI's CMake install creates them
 
 Measured on an Apple M2 Max, macOS 26.6.2, Xcode 26.6, from a clean checkout:
 

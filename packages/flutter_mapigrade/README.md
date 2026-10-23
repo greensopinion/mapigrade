@@ -38,7 +38,7 @@ Gradle and Swift Package Manager cache the downloads for later builds.
 An application created with `flutter create` needs these changes before it builds with the package:
 
 - Android: set `minSdk = 29` in `android/app/build.gradle.kts`.
-- iOS: set the deployment target to 15.5 (`IPHONEOS_DEPLOYMENT_TARGET` of the Runner target), and exclude `x86_64` from simulator builds, because the FFI's xcframework has no `x86_64` slice. Add this line to `ios/Flutter/Debug.xcconfig` and `ios/Flutter/Release.xcconfig`:
+- iOS: set the deployment target to 15.0 (`IPHONEOS_DEPLOYMENT_TARGET` of the Runner target), and exclude `x86_64` from simulator builds, because the FFI's xcframework has no `x86_64` slice. Add this line to `ios/Flutter/Debug.xcconfig` and `ios/Flutter/Release.xcconfig`:
 
   ```
   EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
@@ -84,7 +84,7 @@ Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a di
 | Platform | Minimum version | Architecture |
 | --- | --- | --- |
 | Android | API level 29 | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
-| iOS | 15.5 | arm64 (devices, and the simulator on Apple silicon Macs) |
+| iOS | 15.0 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
 Apps built for web build with the package, compiled to JavaScript or to WebAssembly, but the layer draws no map there: `MapigradeLayer.isSupported` is false, and a placed layer reports a `LayerCreateException`.

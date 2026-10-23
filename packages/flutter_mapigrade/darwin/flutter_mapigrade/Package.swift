@@ -27,7 +27,7 @@ let package = Package(
     name: "flutter_mapigrade",
     platforms: [
         .macOS("14.3"),
-        .iOS("15.5"),
+        .iOS("15.0"),
     ],
     products: [
         .library(name: "flutter-mapigrade", targets: ["flutter_mapigrade"])
