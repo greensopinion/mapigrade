@@ -12,11 +12,10 @@ import io.flutter.view.TextureRegistry
 import java.util.IdentityHashMap
 
 /**
- * The image texture and image readers of one map (designs D130 and D131 of the
- * android-layer-children-alignment change). The map renders into the surface of the current
- * reader. A listener on a thread of its own acquires each image and passes it to the native
- * render target at address [target], which keeps the images of its display slots, gives the
- * chosen one to Flutter with [push] and releases each with [closeImage].
+ * The image texture and image readers of one map. The map renders into the surface of the current
+ * reader. A listener on a thread of its own acquires each image and passes it to the native render
+ * target at address [target], which keeps the images of its display slots, gives the chosen one to
+ * Flutter with [push] and releases each with [closeImage].
  *
  * Native code creates, resizes and releases this object on the main thread.
  */
@@ -42,7 +41,7 @@ internal class MapSurface(registry: TextureRegistry, private val target: Long) {
 
     /**
      * Creates a reader of the given size and returns the surface to render into. The previous
-     * reader is closed once it has no open image (design D136).
+     * reader is closed once it has no open image.
      */
     fun resize(width: Int, height: Int): Surface {
         val reader =
@@ -63,7 +62,7 @@ internal class MapSurface(registry: TextureRegistry, private val target: Long) {
         return reader.surface
     }
 
-    /** Gives [image] to Flutter for the Flutter frame being built (design D132). */
+    /** Gives [image] to Flutter for the Flutter frame being built. */
     fun push(image: Image) {
         entry.pushImage(image)
     }
@@ -83,7 +82,7 @@ internal class MapSurface(registry: TextureRegistry, private val target: Long) {
 
     /**
      * Closes the readers once their images are closed, so that the map doesn't render until
-     * [resize] creates a reader again (design D137).
+     * [resize] creates a reader again.
      */
     fun releaseReaders() {
         synchronized(lock) {
@@ -160,7 +159,7 @@ internal class MapSurface(registry: TextureRegistry, private val target: Long) {
     private companion object {
         const val TAG = "flutter_mapigrade"
 
-        // One image per display slot (design D133).
+        // One image per display slot.
         const val MAX_IMAGES = 6
     }
 }

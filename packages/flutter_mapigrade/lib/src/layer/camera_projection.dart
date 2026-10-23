@@ -1,5 +1,3 @@
-// Camera conversion (design D22) and the Web Mercator projection that camera
-// prediction and the alignment error use.
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -64,10 +62,9 @@ ViewCamera viewCameraOf(fm.MapCamera camera) => ViewCamera(
 );
 
 /// The `flutter_map` camera that [viewCameraOf] converts to [camera]: its
-/// inverse, with the CRS, viewport size and zoom limits of [live] (design D125
-/// of the layer-children-alignment change). The layer builds it for a
-/// predicted camera, to draw its children at the camera of the map frame
-/// rendered with it.
+/// inverse, with the CRS, viewport size and zoom limits of [live]. The layer
+/// builds it for a predicted camera, to draw its children at the camera of the
+/// map frame rendered with it.
 fm.MapCamera flutterMapCameraOf(MapCamera camera, fm.MapCamera live) =>
     fm.MapCamera(
       crs: live.crs,

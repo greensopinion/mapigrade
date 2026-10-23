@@ -1,7 +1,3 @@
-// The map controller's interface and the types it uses, without FFI. The
-// controller's implementation is in map_texture_controller_ffi.dart, and on
-// web in map_texture_controller_web.dart (design D160 of the
-// web-build-compatibility change).
 import 'dart:ui';
 
 import 'map_texture_controller_ffi.dart'
@@ -125,7 +121,7 @@ class MapIdle extends MapEvent {
 /// Counters from the native map thread.
 class MapTextureStats {
   /// Counters with the given values. The controller reads them from the map
-  /// thread; tests that have no native map give them directly (design D113).
+  /// thread; tests that have no native map give them directly.
   const MapTextureStats({
     this.renderedFrames = 0,
     this.skippedRenders = 0,
@@ -299,14 +295,7 @@ abstract interface class MapTextureController {
   /// With [copyFree] (the default), MapLibre renders each frame directly into
   /// the buffer that Flutter displays. With `copyFree: false`, it renders into
   /// a separate texture, and each frame is copied into that buffer on the GPU.
-  /// On an iPhone 15 Pro Max copy-free rendering saved the 1.5 ms copy per
-  /// frame and raised the slowest seconds of a continuous pan from 83–88 to
-  /// 98–104 frames per second. A copy-free frame costs about one display
-  /// refresh interval there, so the map more often renders a frame that Flutter
-  /// replaces before displaying it (6.9–8.5% of rendered frames, against
-  /// 3.0–5.4% with the copy). On an M2 Max Mac at 3200x2000 physical pixels it
-  /// gave no consistent gain, because rendering took longer by more than the
-  /// copy it saved.
+  /// `docs/benchmarks.md` compares the two.
   ///
   /// On Android every map renders directly into the buffers that Flutter
   /// displays, and [copyFree] has no effect.
@@ -314,12 +303,11 @@ abstract interface class MapTextureController {
   /// The map registers its textures with the Flutter engine of the calling
   /// isolate. The first creation in an isolate asks the plugin for the
   /// engine's token over a platform channel; later creations wait only for a
-  /// microtask (designs D154 and D155 of the multiple-flutter-engines change).
+  /// microtask.
   ///
   /// Throws [MapTextureException] without calling native code when the native
-  /// library isn't available in this process (design D86 of the
-  /// unsupported-architectures change), which is always the case on web, and
-  /// when the plugin doesn't give the engine's token.
+  /// library isn't available in this process, which is always the case on
+  /// web, and when the plugin doesn't give the engine's token.
   static Future<MapTextureController> create({
     required double pixelRatio,
     bool copyFree = true,
@@ -339,14 +327,12 @@ abstract interface class MapTextureController {
   }
 
   /// Sets the maximum size in [bytes] of the tile cache for maps created after
-  /// the call, in the whole process (design D61 of the
-  /// tile-cache-maximum-size change). Maps that already exist keep their
+  /// the call, in the whole process. Maps that already exist keep their
   /// maximum size.
   ///
   /// Throws [ArgumentError] for a negative [bytes] without calling native
   /// code, and [MapTextureException] if the native call fails. Does nothing
-  /// when the native library isn't available in this process (design D86 of
-  /// the unsupported-architectures change).
+  /// when the native library isn't available in this process.
   static void setMaximumCacheSize(int bytes) {
     if (bytes < 0) {
       throw ArgumentError.value(bytes, 'bytes', 'must not be negative');
@@ -355,12 +341,10 @@ abstract interface class MapTextureController {
     platform.setMaximumCacheSize(bytes);
   }
 
-  /// The ids for `Texture` widgets, one per display slot (design D122 of the
-  /// layer-children-alignment change). Dart chooses the frame to display with
-  /// [selectNewest]. There are four slots on macOS and iOS, each with its own
-  /// texture, and six on Android, which share one texture, so that all six
-  /// ids are equal there (design D135 of the android-layer-children-alignment
-  /// change).
+  /// The ids for `Texture` widgets, one per display slot. Dart chooses the
+  /// frame to display with [selectNewest]. There are four slots on macOS and
+  /// iOS, each with its own texture, and six on Android, which share one
+  /// texture, so that all six ids are equal there.
   List<int> get textureIds;
 
   /// Whether the map was created to render directly into the displayed
@@ -378,9 +362,9 @@ abstract interface class MapTextureController {
   FrameCamera? get displayedFrame;
 
   /// Each frame when it has finished rendering into a display slot, before
-  /// Flutter displays it. Each one asks for a build, in which Dart chooses
-  /// the newest finished frame with [selectNewest] (design D141). That frame
-  /// can be newer than the frame added here last.
+  /// Flutter displays it. Each one asks for a build, in which Dart chooses the
+  /// newest finished frame with [selectNewest]. That frame can be newer than
+  /// the frame added here last.
   Stream<FrameCamera> get readyFrames;
 
   /// The frame added to [readyFrames] last, if any.
@@ -406,9 +390,9 @@ abstract interface class MapTextureController {
 
   /// Chooses, for the Flutter frame being built, the newest frame that has
   /// finished rendering and that Dart hasn't chosen, on the platform thread,
-  /// and returns it (designs D139 and D141 of the synchronous-frame-choice
-  /// change). Display `textureIds[frame.slot]` in the same build; the map
-  /// doesn't render into the slot while a Flutter frame may still display it.
+  /// and returns it. Display `textureIds[frame.slot]` in the same build; the
+  /// map doesn't render into the slot while a Flutter frame may still display
+  /// it.
   ///
   /// Returns null and changes nothing if no such frame has finished. Then keep
   /// displaying [selectedFrame], the frame chosen before.

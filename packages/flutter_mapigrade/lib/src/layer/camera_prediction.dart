@@ -1,4 +1,3 @@
-// Camera prediction (designs D32 and D33 of the camera-prediction change).
 import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -7,7 +6,7 @@ import '../texture/map_texture_controller.dart';
 import 'camera_projection.dart';
 
 /// Records older than this are not used for the velocity, so a pause between
-/// gestures starts from zero velocity (design D32).
+/// gestures starts from zero velocity.
 const Duration maxCameraRecordAge = Duration(milliseconds: 50);
 
 /// A converted camera and the vsync target time of the Flutter frame whose
@@ -80,7 +79,7 @@ CameraVelocity cameraVelocity(List<CameraRecord> records) {
 }
 
 /// [view] moved by [velocity] for [seconds], with the latitude clamped to the
-/// Mercator limit and the longitude normalized to [-180, 180) (design D33).
+/// Mercator limit and the longitude normalized to [-180, 180).
 ViewCamera extrapolateCamera(
   ViewCamera view,
   CameraVelocity velocity,
@@ -118,7 +117,7 @@ ViewCamera extrapolateCamera(
 }
 
 /// Predicts the camera from the converted cameras of the layer's recent
-/// builds (designs D32 and D33).
+/// builds.
 class CameraPredictor {
   final Queue<CameraRecord> _records = Queue();
 

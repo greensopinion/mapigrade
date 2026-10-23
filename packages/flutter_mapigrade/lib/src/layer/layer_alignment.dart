@@ -1,7 +1,3 @@
-// The layer's alignment option (design D43 of the camera-prediction-default
-// change, D47 of the remove-camera-transform change, D65 of the public-api
-// change).
-
 enum _Kind { prediction, none }
 
 /// How `MapigradeLayer` aligns the map with the `FlutterMap` overlays while

@@ -1,7 +1,5 @@
-/// The metrics of a layer's map (designs D109 and D110 of the layer-metrics
-/// change). The main library exports [LayerMetrics] and
-/// [LayerMetricsSnapshot] only; [bindMetrics] and [releaseMetrics] are for
-/// the layer.
+/// [bindMetrics] and [releaseMetrics] are for the layer; the main library
+/// doesn't export them.
 library;
 
 import '../texture/map_texture_controller.dart';
@@ -18,8 +16,6 @@ const _Values _zero = (
   renderTime: Duration.zero,
 );
 
-// One clock for all metrics objects in the process, started by the first
-// snapshot.
 final _clock = Stopwatch()..start();
 
 /// Reads the frame counts and render time of the map of a `MapigradeLayer`.
@@ -129,7 +125,7 @@ void bindMetrics(LayerMetrics metrics, MapTextureController controller) {
 
 /// Keeps the current values of [controller] in [metrics] and stops reading
 /// it. Does nothing unless [metrics] reports [controller], so that a later
-/// [bindMetrics] to another map isn't undone (design D109).
+/// [bindMetrics] to another map isn't undone.
 void releaseMetrics(LayerMetrics metrics, MapTextureController controller) {
   if (!identical(metrics._controller, controller)) return;
   metrics._kept = metrics._read();

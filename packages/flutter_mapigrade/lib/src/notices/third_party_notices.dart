@@ -1,7 +1,5 @@
-// Registers the third-party notices of MapLibre Native FFI with Flutter's
-// license registry (design D94 and D95 of the third-party-notices change). The
-// generated plugin registrant calls registerWith() before main, through the
-// dartPluginClass entries in pubspec.yaml, so applications need no code for the
+// The dartPluginClass entries in pubspec.yaml make the generated plugin
+// registrant call registerWith(), so applications need no code for the
 // notices to appear in showLicensePage.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';

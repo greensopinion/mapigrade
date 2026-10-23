@@ -1,11 +1,10 @@
-// State of the display slots, one buffer each (designs D3, D4, D124 and
-// D133).
+// State of the display slots, one buffer each.
 //
 // Each slot is in one of these states:
 // - free: the map thread may render into it
 // - rendering: the map thread renders into it
 // - queued: on Android, its frame is rendered and queued on the surface, and
-//   its image hasn't arrived yet (design D131)
+//   its image hasn't arrived yet
 // - ready: it holds a finished frame that Dart hasn't chosen
 // - held: Dart has chosen its frame, and a Flutter frame may display it
 //
@@ -38,16 +37,16 @@
 namespace map_texture {
 
 inline constexpr int kBufferCount = 4;
-// The slots of an Android map (design D133).
+// The slots of an Android map.
 inline constexpr int kChoiceReleasedBufferCount = 6;
 inline constexpr int kMaxBufferCount = 6;
 // With ReleaseRule::kLaterChoices, the number of later choices after which a
-// held slot becomes free (design D133).
+// held slot becomes free.
 inline constexpr int kLaterChoices = 3;
 
 // The clock of Flutter's FrameTiming on macOS and iOS, in microseconds: the
-// engine reads Dart_TimelineGetTicks, which is CLOCK_MONOTONIC_RAW (design
-// D24). std::chrono::steady_clock is CLOCK_UPTIME_RAW on Apple platforms and
+// engine reads Dart_TimelineGetTicks, which is CLOCK_MONOTONIC_RAW.
+// std::chrono::steady_clock is CLOCK_UPTIME_RAW on Apple platforms and
 // differs from it by the time the device has slept. Android uses no buffer
 // state with display times, so there it is CLOCK_MONOTONIC.
 inline int64_t DisplayClockUs() {
@@ -62,8 +61,7 @@ inline int64_t DisplayClockUs() {
 }
 
 // What a buffer holds: the frame id and the camera and size it was rendered
-// with, and the sequence number of the camera update it was rendered with
-// (design D125).
+// with, and the sequence number of the camera update it was rendered with.
 struct FrameInfo {
   uint64_t frame_id = 0;
   Camera camera;
@@ -84,8 +82,8 @@ class BufferState {
   // and kPresent a free one exists while Dart chooses each ready frame and
   // Flutter presents one frame behind: one slot presented, one chosen, one
   // ready and one rendering. With six slots and kLaterChoices: three held,
-  // one ready, one queued and one rendering (design D133). Tests use fewer to reach the "no free slot"
-  // case.
+  // one ready, one queued and one rendering. Tests use fewer to reach the "no
+  // free slot" case.
   explicit BufferState(int count = kBufferCount,
                        ReleaseRule rule = ReleaseRule::kPresent)
       : count_(count), rule_(rule) {}
@@ -147,7 +145,7 @@ class BufferState {
 
   // Records that the rendering slot `index` renders the frame `frame_id`,
   // before the render, so that an image that arrives before Queue() finds the
-  // slot (design D131).
+  // slot.
   void Expect(int index, uint64_t frame_id) {
     std::lock_guard lock(mutex_);
     if (slots_[index] != Slot::kRendering) return;
@@ -158,8 +156,7 @@ class BufferState {
 
   // The render into slot `index` has queued its frame on the surface. If the
   // frame's image arrived already, publishes the frame and returns true;
-  // otherwise marks the slot as waiting for the image and returns false
-  // (design D131).
+  // otherwise marks the slot as waiting for the image and returns false.
   bool Queue(int index, const FrameInfo& info) {
     std::lock_guard lock(mutex_);
     if (slots_[index] != Slot::kRendering) return false;
@@ -225,8 +222,8 @@ class BufferState {
   }
 
   // Records that Dart chose the ready slot, which holds the newest finished
-  // frame, and returns its index (design D139). A ready frame is newer than
-  // every held frame, because a slot becomes held only by a choice. Returns
+  // frame, and returns its index. A ready frame is newer than every held frame,
+  // because a slot becomes held only by a choice. Returns
   // -1 and changes nothing if no slot is ready. `on_selected(index, info)`
   // runs under the state lock when the choice is recorded.
   template <typename F>
@@ -269,9 +266,9 @@ class BufferState {
   };
 
   // Flutter's raster thread presents slot `index`. If Dart chose it, returns
-  // it, and with kPresent frees the slots chosen before it. `use` runs under the state lock
-  // with the result, so the caller can read the buffer before the map thread
-  // can replace the set.
+  // it, and with kPresent frees the slots chosen before it. `use` runs under
+  // the state lock with the result, so the caller can read the buffer before
+  // the map thread can replace the set.
   template <typename F>
   Presented Present(int index, F&& use) {
     std::lock_guard lock(mutex_);
@@ -367,7 +364,6 @@ class BufferState {
   uint64_t selections_ = 0;
   // The newest frame id passed to Expect().
   uint64_t max_expected_frame_id_ = 0;
-  // Whether the image of the slot's frame arrived (design D131).
   std::array<bool, kMaxBufferCount> image_arrived_{};
   int last_selected_ = -1;
   int max_in_use_ = 0;

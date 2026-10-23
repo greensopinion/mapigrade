@@ -1,16 +1,4 @@
-/// The `flutter_map` layer (designs D21 and D22 of the flutter-map-layer
-/// change), its camera prediction (D31 to D33 of the camera-prediction
-/// change), its alignment option (D43 of the camera-prediction-default
-/// change, D47 of the remove-camera-transform change, which removed the
-/// compensating transform of D23), and its callbacks and failure reports (D66
-/// and D67 of the public-api change), D80 of the http-headers-and-assets
-/// change, its metrics (D111 of the layer-metrics change), and its children,
-/// drawn at the camera of the displayed map frame (D125 and D127 of the
-/// layer-children-alignment change). It creates its map asynchronously (D155
-/// of the multiple-flutter-engines change).
-///
-/// Only files in `lib/src/layer/` may import `package:flutter_map` (design
-/// D9).
+/// Only files in `lib/src/layer/` may import `package:flutter_map`.
 library;
 
 import 'dart:async';
@@ -19,9 +7,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 // flutter_map doesn't export MapInheritedModel, which its layers read the
-// camera from. This is the only file that imports it (design D127 of the
-// layer-children-alignment change); a test builds it, so that a flutter_map
-// release that changes it fails the tests.
+// camera from. This is the only file that imports it; a test builds it, so
+// that a flutter_map release that changes it fails the tests.
 // ignore: implementation_imports
 import 'package:flutter_map/src/map/inherited_model.dart';
 
@@ -127,15 +114,12 @@ Future<MapTextureController> _createController({
   ],
 );
 
-// The number of sent cameras the layer keeps (design D125).
 const _sentCameraCount = 32;
 
 class _MapTextureLayerState extends State<MapTextureLayer> {
   MapTextureController? _controller;
-  // Whether a creation has started and not completed, so that only one runs.
   bool _creating = false;
   bool _createFailed = false;
-  // The messages of the load failures reported since the last style load.
   final Set<String> _loadFailures = {};
   StreamSubscription<FrameCamera>? _frames;
   StreamSubscription<FrameCamera>? _readyFrames;
@@ -143,7 +127,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   ViewCamera? _sentCamera;
   CameraPredictor _predictor = CameraPredictor();
   // The flutter_map camera of each of the last sent cameras, by sequence
-  // number, oldest first (design D125).
+  // number, oldest first.
   final _sentCameras = <int, fm.MapCamera>{};
 
   @override
@@ -159,9 +143,6 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     _create(MediaQuery.devicePixelRatioOf(context));
   }
 
-  // Creates the map at `pixelRatio`, the ratio when creation started. Until
-  // the controller arrives, the layer builds an empty placeholder (design
-  // D155).
   Future<void> _create(double pixelRatio) async {
     final create = widget.createController ?? _createController;
     final MapTextureController controller;
@@ -174,7 +155,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     } on MapTextureException catch (e) {
       if (!mounted) return;
       // Not retried while the layer is in the tree, so that the failure is
-      // reported once (design D67).
+      // reported once.
       setState(() {
         _creating = false;
         _createFailed = true;
@@ -194,10 +175,10 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     _events = controller.events.listen(_onEvent);
     // With camera prediction, the rebuild after a new displayed frame, once
     // the camera has stopped, finds the camera unchanged and sets the
-    // converted camera instead of the last predicted one (design D32).
+    // converted camera instead of the last predicted one.
     _frames = controller.frames.listen((_) => setState(() {}));
     // Each finished frame starts a build, which chooses the newest finished
-    // frame (design D127, and D141 of the synchronous-frame-choice change).
+    // frame.
     _readyFrames = controller.readyFrames.listen((_) => setState(() {}));
     _loadStyle();
     widget.onController?.call(controller);
@@ -232,13 +213,13 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   }
 
   // The callbacks are read from the current widget, so that a rebuild with a
-  // new callback takes effect for the next event (design D67).
+  // new callback takes effect for the next event.
   void _onEvent(MapEvent event) {
     switch (event) {
       case StyleLoaded():
         widget.onStyleLoaded?.call();
       // MapLibre retries a request that failed to connect, and reports each
-      // failed attempt with the same message (design D67).
+      // failed attempt with the same message.
       case LoadingFailed(:final message):
         if (_loadFailures.add(message)) _report(LayerLoadException(message));
       case RenderError(:final message):
@@ -268,8 +249,6 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     _frames?.cancel();
     _readyFrames?.cancel();
     if (_controller case final controller?) {
-      // The values kept by the metrics can lack a frame that the map renders
-      // between this read and the dispose (design D111).
       if (widget.metrics case final metrics?) {
         releaseMetrics(metrics, controller);
       }
@@ -282,8 +261,6 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   Widget build(BuildContext context) {
     final controller = _controller;
     if (controller == null) {
-      // While creation has failed, the layer occupies the viewport without
-      // drawing anything (design D67).
       if (_createFailed) {
         return SizedBox.fromSize(size: fm.MapCamera.of(context).nonRotatedSize);
       }
@@ -303,7 +280,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     }
     // Setting the camera here instead of after the frame starts the render
     // about one frame earlier; setCamera only stores the camera and wakes the
-    // map thread (design D22).
+    // map thread.
     if (camera != _sentCamera && !camera.viewport.isEmpty) {
       final seq = controller.setCamera(camera.camera);
       _sentCamera = camera;
@@ -316,9 +293,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     }
 
     // The map chooses its newest finished frame, which can be newer than the
-    // last frame reported to Dart. If no frame has finished since the last
-    // choice, the layer keeps the frame it chose before, which the map still
-    // holds (design D141 of the synchronous-frame-choice change).
+    // last frame reported to Dart.
     controller.selectNewest();
     final chosen = controller.selectedFrame;
     // A chosen frame without a sent camera was rendered before the first

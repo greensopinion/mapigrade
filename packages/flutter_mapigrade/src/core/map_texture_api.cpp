@@ -24,15 +24,14 @@ std::unordered_map<int64_t, std::shared_ptr<MapTexture>>& Registry() {
   return *registry;
 }
 int64_t next_handle = 1;
-// Whether rendering is paused for the whole process; guarded by
-// registry_mutex.
+// Guarded by registry_mutex.
 bool all_paused = false;
 // The maximum size in bytes of the tile cache for maps created next, or -1 if
-// Dart hasn't set one; guarded by registry_mutex (design D61).
+// Dart hasn't set one; guarded by registry_mutex.
 int64_t maximum_cache_size = -1;
 
-// Copies and validates the rules of map_texture_create() (design D82). On
-// failure, `error` names the header without its value.
+// Copies and validates the rules of map_texture_create(). On failure, `error`
+// names the header without its value.
 bool ReadHeaderRules(const char* const* strings, const int32_t* counts,
                      int32_t rule_count,
                      std::vector<map_texture::HttpHeaderRule>* rules,
@@ -65,9 +64,8 @@ bool ReadHeaderRules(const char* const* strings, const int32_t* counts,
         *error = "a header name or value is null";
         return false;
       }
-      // #760 has no separate header check: the runtime validates the rules
-      // when the map thread registers them, and map creation fails with its
-      // diagnostic.
+      // The runtime validates the headers when the map thread registers the
+      // rules, and map creation fails with its diagnostic.
       rule.headers.push_back({name, value});
     }
     rules->push_back(std::move(rule));

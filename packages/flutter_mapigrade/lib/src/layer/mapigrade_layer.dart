@@ -1,4 +1,3 @@
-// The public layer (design D66 of the public-api change).
 import 'package:flutter/widgets.dart';
 
 import '../texture/map_texture_controller.dart';

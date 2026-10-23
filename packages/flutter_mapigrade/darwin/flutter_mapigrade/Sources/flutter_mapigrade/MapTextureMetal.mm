@@ -1,11 +1,10 @@
-// macOS and iOS render target (designs D3b, D4, D20 and D122). MapLibre
-// renders through a borrowed-texture session into one private MTLTexture.
-// Each rendered frame is copied on the GPU into one of four IOSurface-backed
-// CVPixelBuffers, one per display slot, each wrapped as an MTLTexture made
-// from its IOSurface. Each slot has its own registered FlutterTexture, and
-// Flutter samples the IOSurface of the slot Dart displays. A copy-free map has
-// no private texture: MapLibre renders directly into the buffers' textures. No
-// pixels pass through CPU memory.
+// macOS and iOS render target. MapLibre renders through a borrowed-texture
+// session into one private MTLTexture. Each rendered frame is copied on the GPU
+// into one of four IOSurface-backed CVPixelBuffers, one per display slot, each
+// wrapped as an MTLTexture made from its IOSurface. Each slot has its own
+// registered FlutterTexture, and Flutter samples the IOSurface of the slot Dart
+// displays. A copy-free map has no private texture: MapLibre renders directly
+// into the buffers' textures. No pixels pass through CPU memory.
 //
 // The textures are made directly from the IOSurfaces rather than through a
 // CVMetalTextureCache: a cache keeps the IOSurfaces of released buffers alive
@@ -82,7 +81,6 @@ static void RecordReleased(CVPixelBufferRef buffer) {
 namespace map_texture {
 namespace {
 
-// Runs `block` on the main thread and waits for it.
 void RunOnMainSync(dispatch_block_t block) {
   if ([NSThread isMainThread]) {
     block();
@@ -115,7 +113,6 @@ struct BufferSet {
   }
 };
 
-// The registered textures, one per display slot.
 struct SlotTextures {
   std::array<MLTFlutterTexture*, kBufferCount> textures{};
   std::array<int64_t, kBufferCount> ids{};
@@ -193,7 +190,7 @@ class MetalRenderTarget : public BufferRenderTarget {
   }
 
   // Without a chosen slot in the outgoing set, the fallback from before
-  // stays: it is still the frame Dart displays (design D126).
+  // stays: it is still the frame Dart displays.
   void SwapBuffersLocked(int chosen) override {
     if (chosen >= 0 && !current_.empty()) {
       if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
@@ -220,9 +217,8 @@ class MetalRenderTarget : public BufferRenderTarget {
   }
 
   // A copy-free map's ring holds the current set's buffers in slot order, so
-  // ring slot n is display slot n (design D182 of the
-  // adopt-ffi-core-executor change). Otherwise the ring is the one
-  // render texture.
+  // ring slot n is display slot n. Otherwise the ring is the one render
+  // texture.
   mln_status Attach(mln_map map, const TargetSize& size,
                     const mln_render_session_attach_options& options,
                     mln_render_session* out_session,
@@ -270,10 +266,10 @@ class MetalRenderTarget : public BufferRenderTarget {
     return commands.status == MTLCommandBufferStatusCompleted;
   }
 
-  // Dart chooses the slot on the platform thread, which is the main thread,
-  // so the texture is marked before the raster thread composites the Flutter
-  // frame that displays it (design D123). The engine asserts the platform
-  // thread, so a call from another thread is dispatched to it.
+  // Dart chooses the slot on the platform thread, which is the main thread, so
+  // the texture is marked before the raster thread composites the Flutter frame
+  // that displays it. The engine asserts the platform thread, so a call from
+  // another thread is dispatched to it.
   void FrameAvailable(int slot) override {
     int64_t texture_id = slots_.ids[slot];
     if ([NSThread isMainThread]) {
@@ -291,7 +287,7 @@ class MetalRenderTarget : public BufferRenderTarget {
   }
 
   void FrameAvailable() override {
-    // See design.md, task 3.4, for why this dispatches to the main queue.
+    // Map thread; the engine asserts the platform thread.
     NSObject<FlutterTextureRegistry>* registry = registry_;
     SlotTextures slots = slots_;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -353,7 +349,7 @@ class MetalRenderTarget : public BufferRenderTarget {
   BufferSet current_;
   BufferSet prepared_;
   // The frame of the slot Dart chose last before the last resize, shown until
-  // Dart chooses a frame of the new size (design D126).
+  // Dart chooses a frame of the new size.
   CVPixelBufferRef fallback_ = nullptr;
 };
 
@@ -386,7 +382,7 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 
 // The map thread is a std::thread with no autorelease pool, so objects
 // autoreleased there, such as each frame's command buffer and with it the
-// buffer it copied into, stayed alive until the thread exited at dispose.
+// buffer it copied into, would stay alive until the thread exits at dispose.
 void RunInPlatformScope(const std::function<void()>& work) {
   @autoreleasepool {
     work();

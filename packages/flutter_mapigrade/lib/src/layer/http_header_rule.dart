@@ -1,5 +1,3 @@
-// Designs D80 and D82 of the http-headers-and-assets change.
-
 /// HTTP headers that `MapigradeLayer` adds to requests whose URL matches
 /// [url]. Each HTTP request that the map sends gets the headers of the first
 /// rule whose [url] matches the request's complete URL, and no headers when no

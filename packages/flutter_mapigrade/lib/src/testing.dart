@@ -1,6 +1,6 @@
-/// The internal types and test hooks that the test harness uses (design D69
-/// of the public-api change). Not API: it may change in any version, and the
-/// naming rule for exported names doesn't apply to it.
+/// The internal types and test hooks that the test harness uses. Not API: it
+/// may change in any version, and the naming rule for exported names doesn't
+/// apply to it.
 library;
 
 export 'layer/alignment_error.dart' show AlignmentError, alignmentError;

@@ -1,6 +1,3 @@
-// The token of the Flutter engine of this isolate, which map_texture_create
-// takes so that the map registers its textures with this engine (designs D153
-// and D154 of the multiple-flutter-engines change).
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 
@@ -13,9 +10,10 @@ const engineChannel = MethodChannel('flutter_mapigrade');
 int? _token;
 Future<int>? _request;
 
-/// The token of this isolate's engine. The first call asks the plugin over
-/// [engineChannel]; calls while that request is pending wait for it. A failed
-/// request isn't kept, so the next call asks again.
+/// The token of this isolate's engine, which map_texture_create takes so that
+/// the map registers its textures with this engine. The first call asks the
+/// plugin over [engineChannel]; calls while that request is pending wait for
+/// it. A failed request isn't kept, so the next call asks again.
 ///
 /// Throws [MapTextureException] if the plugin doesn't give the token, for
 /// example when it isn't registered with this engine.

@@ -62,9 +62,6 @@ class _MapTextureViewState extends State<MapTextureView> {
     super.dispose();
   }
 
-  // The slot that the view chooses: that of the newest finished frame, or if
-  // no frame has finished since the last choice, that of the frame chosen
-  // before (design D141 of the synchronous-frame-choice change).
   int _chooseSlot(MapTextureController controller) {
     if (!controller.isDisposed) controller.selectNewest();
     return controller.selectedFrame?.slot ?? 0;
