@@ -37,22 +37,25 @@ On Android the entries SHALL also include:
 | --- | --- |
 | MapLibre Native FFI Rust crates | `licenses/rust.md` |
 | Android NDK C++ runtime | `licenses/cxx-runtime.txt` |
+| Kotlin | `licenses/kotlin.txt` |
+| Kotlin NOTICE | `licenses/kotlin-notice.txt` |
+| rustls-platform-verifier | `licenses/rustls-platform-verifier-notice.txt` |
 
-Applications for macOS and iOS SHALL NOT list the two Android entries, and SHALL NOT contain their notice files.
+Applications for macOS and iOS SHALL NOT list the five Android entries, and SHALL NOT contain their notice files.
 
 The package SHALL NOT read the notice files before an application reads the license registry.
 
 #### Scenario: License page on Android
 - **WHEN** an application that depends on the package and contains no code that refers to licenses opens `showLicensePage` on Android
-- **THEN** the page lists the six entries for every platform and the two Android entries, and each entry shows the text of its notice file
+- **THEN** the page lists the six entries for every platform and the five Android entries, and each entry shows the text of its notice file
 
 #### Scenario: License page on macOS and iOS
 - **WHEN** such an application opens `showLicensePage` on macOS or iOS
-- **THEN** the page lists the six entries for every platform, and lists neither "MapLibre Native FFI Rust crates" nor "Android NDK C++ runtime"
+- **THEN** the page lists the six entries for every platform, and none of the five Android entries
 
 #### Scenario: Apple app bundle
 - **WHEN** an application that depends on the package is built for macOS or iOS
-- **THEN** the application bundle contains the six notice files for every platform and doesn't contain `rust.md` or `cxx-runtime.txt`
+- **THEN** the application bundle contains the six notice files for every platform and none of the five Android notice files
 
 #### Scenario: Registry not read
 - **WHEN** an application starts and never reads the license registry

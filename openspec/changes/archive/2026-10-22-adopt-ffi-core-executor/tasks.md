@@ -38,5 +38,5 @@
 
 - [x] 8.1 Run `map_texture_test.dart`, `map_layer_test.dart` and `engines_test.dart` (with `flutter drive`) on macOS, and `map_texture_test.dart` and `map_layer_test.dart` on the iOS simulator, the iPhone 15 Pro Max and the Pixel 4a (5G); verify that every test passes or is skipped as on `main`
 - [x] 8.2 Run the frame-rate benchmark on the Mac, the iPhone 15 Pro Max, the iPhone 13 and the Pixel 4a (5G), and the alignment benchmark (`ALIGNMENT_CHILDREN=1`, phases `pan100,pan500,pan1000,stop,fling,reverse`) on the Mac, the iPhone 15 Pro Max and the iPhone 13, 3 runs each, alternating with `main`, on cable power where available (the iPhone 15 Pro Max ran over Wi-Fi); verify that `docs/benchmarks.md` records the results against `main`, the drawn error is 0 px in every phase, and the frame rates are within the ranges of D188, or record each difference
-- [ ] 8.3 Run the CI consumer build on the branch's pull request; verify that it passes against 0.202610.2
+- [x] 8.3 Run the CI consumer build on the branch's pull request; verify that it passes against 0.202610.2
 - [x] 8.4 Run `openspec validate adopt-ffi-core-executor` and confirm that the delta specs describe the merged behavior; verify that validation passes

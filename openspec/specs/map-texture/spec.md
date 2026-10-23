@@ -160,11 +160,15 @@ On iOS while the application is in the background, and on Android while the appl
 - **THEN** the system releases the map's resources without deadlock, and no events follow the dispose
 
 ### Requirement: Memory warnings release cached renderer resources
-When the operating system reports memory pressure (a memory warning on iOS; on Android, a trim memory level of `TRIM_MEMORY_BACKGROUND` or higher, or low memory), the system SHALL ask the renderer to release cached resources that it can rebuild. The map SHALL continue to render and display frames afterwards.
+When the operating system reports memory pressure (a memory warning on iOS; on Android, a trim memory level of `TRIM_MEMORY_BACKGROUND` or higher, or low memory), the system SHALL ask the renderer to release cached resources that it can rebuild. While the system submits no GPU work for the map because the application is in the background (requirement "No rendering while the application is in the background"), the renderer SHALL release them when rendering resumes, before it renders the next frame. The map SHALL continue to render and display frames afterwards.
 
 #### Scenario: Memory warning during use
 - **WHEN** the operating system reports memory pressure while a map is displayed
 - **THEN** the application does not crash, and a later camera change produces a frame with that camera
+
+#### Scenario: Memory warning while in the background
+- **WHEN** the operating system reports memory pressure while the application is in the background, and the application then returns to the foreground
+- **THEN** no GPU work is submitted for the map while the application is in the background, the map's statistics report the memory reduction after rendering resumes, and a later camera change produces a frame with that camera
 
 ### Requirement: Copy-free rendering by default
 By default the system SHALL render each map frame directly into the display buffer that Flutter shows, without a GPU copy. On macOS and iOS, the system SHALL provide an option, chosen when a map is created, to render each frame into a separate texture and copy it on the GPU into the display buffer. On Android, the system SHALL render every map directly into the display buffer, and the option SHALL have no effect. In every mode the system SHALL meet the requirements "Rendering on demand" and "No CPU readback on the frame path", and SHALL report the number of GPU copies, which is 0 for a copy-free map.
