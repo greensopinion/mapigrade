@@ -43,6 +43,9 @@ common_notices=(
 android_notices=(
   "licenses/rust.md android/rust.md"
   "licenses/cxx-runtime.txt android/cxx-runtime.txt"
+  "licenses/kotlin.txt android/kotlin.txt"
+  "licenses/kotlin-notice.txt android/kotlin-notice.txt"
+  "licenses/rustls-platform-verifier-notice.txt android/rustls-platform-verifier-notice.txt"
 )
 
 read -r -a presets <<< "$MAPLIBRE_FFI_PRESETS $MAPLIBRE_FFI_ANDROID_PRESETS"

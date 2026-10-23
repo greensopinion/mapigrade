@@ -11,20 +11,23 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     // MLT_WINDOW_SIZE=<width>x<height> sets the content size in logical
-    // pixels, for the frame rate measurement.
-    if let value = ProcessInfo.processInfo.environment["MLT_WINDOW_SIZE"] {
+    // pixels, for the frame rate measurement. MLT_WINDOW_SCREEN=builtin
+    // centers the window on the built-in display, whose refresh rate the
+    // measurements assume, wherever macOS restores the window.
+    let environment = ProcessInfo.processInfo.environment
+    var size: NSSize?
+    if let value = environment["MLT_WINDOW_SIZE"] {
       let parts = value.split(separator: "x").compactMap { Double($0) }
       if parts.count == 2 {
-        let size = NSSize(width: parts[0], height: parts[1])
-        self.setContentSize(size)
-        self.center()
-        // Something after awakeFromNib resets the window to the nib's 800x600
-        // content size, so apply the size again once launch has finished.
-        DispatchQueue.main.async {
-          self.setContentSize(size)
-          self.center()
-        }
+        size = NSSize(width: parts[0], height: parts[1])
       }
+    }
+    let screen = environment["MLT_WINDOW_SCREEN"] == "builtin" ? Self.builtinScreen() : nil
+    if size != nil || screen != nil {
+      place(size: size, screen: screen)
+      // Something after awakeFromNib resets the window to the nib's 800x600
+      // content size, so apply the size again once launch has finished.
+      DispatchQueue.main.async { self.place(size: size, screen: screen) }
     }
 
     RegisterGeneratedPlugins(registry: flutterViewController)
@@ -32,6 +35,26 @@ class MainFlutterWindow: NSWindow {
       messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
+  }
+
+  private func place(size: NSSize?, screen: NSScreen?) {
+    if let size { setContentSize(size) }
+    guard let screen else {
+      center()
+      return
+    }
+    let area = screen.visibleFrame
+    setFrameOrigin(NSPoint(
+      x: area.midX - frame.width / 2, y: area.midY - frame.height / 2))
+  }
+
+  private static func builtinScreen() -> NSScreen? {
+    NSScreen.screens.first { screen in
+      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+        as? NSNumber
+      else { return false }
+      return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0
+    }
   }
 }
 

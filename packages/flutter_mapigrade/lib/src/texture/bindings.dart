@@ -128,6 +128,12 @@ final class MapTextureStatsStruct extends Struct {
   external int intervalWaits;
   @Int64()
   external int maxSlotsInUse;
+  @Int64()
+  external int cameraLatencyCount;
+  @Int64()
+  external int cameraLatencyTotalNs;
+  @Int64()
+  external int cameraLatencyMaxNs;
 }
 
 typedef MapTextureEventCallback = Void Function(

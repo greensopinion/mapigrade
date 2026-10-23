@@ -134,7 +134,16 @@ class Benchmark {
     await _pan();
     _measuring = false;
     final after = controller.stats();
-    writeLine('BENCHMARK_RESULT ${jsonEncode(_result(before, after))}');
+    final result = _result(before, after);
+    writeLine('BENCHMARK_RESULT ${jsonEncode(result)}');
+    // Android's log truncates long lines, so the timing fields are repeated in
+    // a short line.
+    writeLine(
+      'BENCHMARK_KEY ${jsonEncode({
+        for (final key in const ['map_fps', 'map_fps_per_second', 'frame_cycle_avg_ms', 'render_update_avg_ms', 'camera_latency_avg_ms', 'interval_waits', 'rendered_frames', 'skipped_renders'])
+          if (result.containsKey(key)) key: result[key],
+      })}',
+    );
     await stdout.flush();
     exit(0);
   }
@@ -313,6 +322,12 @@ class Benchmark {
         after.presentToRenderCount - before.presentToRenderCount,
       ),
       'interval_waits': after.intervalWaits - before.intervalWaits,
+      // From setCamera until the first frame with that camera finished.
+      'camera_latency_avg_ms': _avgMs(
+        after.cameraLatencyTotal - before.cameraLatencyTotal,
+        after.cameraLatencyCount - before.cameraLatencyCount,
+      ),
+      'camera_latency_max_ms': ms(after.cameraLatencyMax),
     };
   }
 }

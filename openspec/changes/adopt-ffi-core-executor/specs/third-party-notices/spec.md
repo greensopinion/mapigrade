@@ -1,24 +1,45 @@
 ## MODIFIED Requirements
 
-### Requirement: Notices equal to the FFI build
-The notice files of the MapLibre Native FFI are the files that the release tarballs of the FFI version the package states contain as `share/maplibre-native-c/LICENSE` and in `share/maplibre-native-c/licenses/`, for the presets whose libraries applications built with the package contain. Other files in `share/maplibre-native-c/`, such as `artifact.json`, are not notice files. The notice files in the package SHALL be byte-identical to the notice files of that release, and the package SHALL contain one for every notice file of every such preset. A script SHALL update the notice files in the package from the release. A test SHALL fail when a notice file in the package differs from, or is missing for, a notice file of the release, and SHALL be skipped when the release tarballs aren't available to it. While the package states the FFI snapshot, the notice files in the package SHALL stay those of the last FFI release that the package stated, and the test SHALL be skipped.
+### Requirement: Native notices in the license registry
+An application that depends on the package SHALL list, in Flutter's license registry, one license entry for each notice file of the MapLibre Native FFI that applies to the platform the application runs on, without calling any code of the package. Each entry SHALL contain the notice file's text unchanged and SHALL name the component that the file covers.
 
-#### Scenario: FFI update changes a notice
-- **WHEN** a developer changes the FFI version that the package states and runs the script, and the new release adds a Rust crate
-- **THEN** the package's `rust.md` contains the new crate's notice, and the diff of the change shows it
+On every supported platform the entries SHALL be:
 
-#### Scenario: Notice files out of date
-- **WHEN** a release tarball of the stated version has a notice file that differs from the package's copy, or that the package doesn't contain
-- **THEN** the package's tests fail and name the file
+| Package name in the entry | Notice file |
+| --- | --- |
+| MapLibre Native FFI | the FFI's `LICENSE` |
+| MapLibre Native | `licenses/maplibre-native.md` |
+| ICU | `licenses/icu.txt` |
+| FastPFOR | `licenses/fastpfor.txt` |
+| nunicode | `licenses/nunicode.txt` |
+| PMTiles | `licenses/pmtiles.txt` |
 
-#### Scenario: No FFI build present
-- **WHEN** the package's tests run where the release tarballs of the stated version aren't available
-- **THEN** the comparison test is skipped and the other tests run
+On Android the entries SHALL also include:
 
-#### Scenario: Local FFI build at another commit
-- **WHEN** a developer builds the FFI locally at a commit other than the stated release's
-- **THEN** the notice files in the package don't change
+| Package name in the entry | Notice file |
+| --- | --- |
+| MapLibre Native FFI Rust crates | `licenses/rust.md` |
+| Android NDK C++ runtime | `licenses/cxx-runtime.txt` |
+| Kotlin | `licenses/kotlin.txt` |
+| Kotlin NOTICE | `licenses/kotlin-notice.txt` |
+| rustls-platform-verifier | `licenses/rustls-platform-verifier-notice.txt` |
 
-#### Scenario: Package states the snapshot
-- **WHEN** the package's FFI changes from a release to the snapshot, and the package's tests run
-- **THEN** the notice files in the package don't change, and the comparison test is skipped
+Applications for macOS and iOS SHALL NOT list the five Android entries, and SHALL NOT contain their notice files.
+
+The package SHALL NOT read the notice files before an application reads the license registry.
+
+#### Scenario: License page on Android
+- **WHEN** an application that depends on the package and contains no code that refers to licenses opens `showLicensePage` on Android
+- **THEN** the page lists the six entries for every platform and the five Android entries, and each entry shows the text of its notice file
+
+#### Scenario: License page on macOS and iOS
+- **WHEN** such an application opens `showLicensePage` on macOS or iOS
+- **THEN** the page lists the six entries for every platform, and none of the five Android entries
+
+#### Scenario: Apple app bundle
+- **WHEN** an application that depends on the package is built for macOS or iOS
+- **THEN** the application bundle contains the six notice files for every platform and none of the five Android notice files
+
+#### Scenario: Registry not read
+- **WHEN** an application starts and never reads the license registry
+- **THEN** the package doesn't load any notice file

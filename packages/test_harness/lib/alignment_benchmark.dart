@@ -742,6 +742,17 @@ class AlignmentBenchmark {
                   (after.renderUpdateCount - before.renderUpdateCount),
             ),
       'max_slots_in_use': after.maxSlotsInUse,
+      // From setCamera until the first frame with that camera finished.
+      'camera_latency_avg_ms':
+          after.cameraLatencyCount == before.cameraLatencyCount
+          ? 0
+          : r(
+              (after.cameraLatencyTotal - before.cameraLatencyTotal)
+                      .inMicroseconds /
+                  1000 /
+                  (after.cameraLatencyCount - before.cameraLatencyCount),
+            ),
+      'camera_latency_max_ms': r(after.cameraLatencyMax.inMicroseconds / 1000),
     };
   }
 

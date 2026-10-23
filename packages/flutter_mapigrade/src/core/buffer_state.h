@@ -68,6 +68,8 @@ struct FrameInfo {
   uint64_t frame_id = 0;
   Camera camera;
   int64_t seq = 0;
+  // When the camera `seq` was set (steady clock, ns), or 0 if unknown.
+  int64_t camera_set_at_ns = 0;
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
   double scale_factor = 1;

@@ -3,6 +3,8 @@
 **Status:** Concept and decisions; stages 1 (macOS) and 2 (iOS) done, decision: continue
 **Updated:** 2026-10-09
 
+The FFI calls that this concept names (`mln_runtime_pump`, `mln_metal_borrowed_texture_set_target`, `mln_render_session_render_update` and others) are those of the FFI before maplibre-native-ffi#760, which replaced them with a core executor. [architecture.md](architecture.md) describes the current implementation.
+
 ## 1. Purpose
 
 We maintain a vector map renderer for Flutter in two versions:

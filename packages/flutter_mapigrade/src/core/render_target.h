@@ -39,7 +39,15 @@ class SurfaceRenderTarget;
 struct TargetSize {
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
-  mln_render_target_extent extent{};
+  mln_logical_extent extent{};
+};
+
+// The arguments that every asynchronous FFI call of a target takes
+// (maplibre-native-ffi PR #760): the completion, and the diagnostic of a
+// rejected call.
+struct AsyncCall {
+  const mln_completion* completion = nullptr;
+  mln_diagnostic* diagnostic = nullptr;
 };
 
 class RenderTarget {
@@ -60,13 +68,19 @@ class RenderTarget {
   // for the map thread. `size` is the size the map thread will apply.
   virtual void WillResize(const TargetSize& size) {}
 
-  // Map thread. Attaches a render session to `map`.
+  // Map thread. Starts the attachment of a render session to `map` with
+  // `options`; the map thread services the session until `call.completion`
+  // runs.
   virtual mln_status Attach(mln_map map, const TargetSize& size,
-                            mln_render_session* out_session) = 0;
+                            const mln_render_session_attach_options& options,
+                            mln_render_session* out_session,
+                            const AsyncCall& call) = 0;
 
-  // Map thread. Changes the session's target after a resize.
+  // Map thread. Starts the replacement of the session's target after a
+  // resize, ordered with the session's other driver work.
   virtual mln_status SetTarget(mln_render_session session,
-                               const TargetSize& size) = 0;
+                               const TargetSize& size,
+                               const AsyncCall& call) = 0;
 
   // The thread that disposes the map, after the map thread has stopped.
   // Unregisters the Flutter textures.
@@ -101,7 +115,7 @@ class BufferRenderTarget : public RenderTarget {
   virtual void ReleaseFallbackLocked() = 0;
 
   // Attach() and SetTarget() make the session render into the render
-  // texture, or the current set's first buffer.
+  // texture, or the current set's buffers.
 
   // Map thread. Copies the render texture into buffer `index` on the GPU and
   // returns when the copy has completed (design D3b). Not called when the
@@ -109,11 +123,19 @@ class BufferRenderTarget : public RenderTarget {
   virtual bool CopyToBuffer(int index) = 0;
 
   // Whether the session renders directly into the display buffers (a
-  // copy-free map, design D20). Then SelectBuffer() makes buffer `index` the
-  // session's target before each render, and no copy is needed.
+  // copy-free map, design D20), and no copy is needed. Under #760 the
+  // session's target is a borrowed ring of the current set's buffers in slot
+  // order, and the session chooses the slot of each frame among the slots
+  // whose frames the map thread doesn't hold acquired (design D182 of the
+  // adopt-ffi-core-executor change).
   virtual bool RendersIntoBuffers() const { return false; }
-  virtual mln_status SelectBuffer(mln_render_session session, int index) {
-    return MLN_STATUS_OK;
+
+  // Map thread, when the target renders into the buffers. Returns the display
+  // slot of the acquired `frame`, or -1 if it can't be read, and sets
+  // `out_current` to whether the frame is in the current set's buffer of that
+  // slot.
+  virtual int FrameSlot(mln_acquired_frame frame, bool* out_current) {
+    return -1;
   }
 
   // The platform thread, from MapTexture::SelectNewest. Tells Flutter that the

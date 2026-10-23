@@ -25,7 +25,8 @@ const commonNotices = <Notice>[
 ];
 
 /// The notices that only Android applications show: the FFI's Android build
-/// links Rust crates and the NDK's C++ runtime, which the Apple builds don't.
+/// links Rust crates, the NDK's C++ runtime, Kotlin code and the FFI's patched
+/// rustls-platform-verifier component, which the Apple builds don't.
 /// `pubspec.yaml` leaves these files out of the other platforms' builds.
 const androidNotices = <Notice>[
   (
@@ -35,6 +36,12 @@ const androidNotices = <Notice>[
   (
     packageName: 'Android NDK C++ runtime',
     path: 'notices/android/cxx-runtime.txt',
+  ),
+  (packageName: 'Kotlin', path: 'notices/android/kotlin.txt'),
+  (packageName: 'Kotlin NOTICE', path: 'notices/android/kotlin-notice.txt'),
+  (
+    packageName: 'rustls-platform-verifier',
+    path: 'notices/android/rustls-platform-verifier-notice.txt',
   ),
 ];
 
