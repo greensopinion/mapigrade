@@ -1,12 +1,10 @@
-// Bindings for the C ABI in src/core/map_texture_api.h (design D5).
+// The declarations mirror src/core/map_texture_api.h, which documents them.
 //
 // On macOS and iOS the plugin's native code is linked into the app, so the
 // symbols resolve from the process. On Android they are in
 // libflutter_mapigrade.so, which hook/build.dart declares as the code asset
-// `package:flutter_mapigrade/native` (design D56 of the
-// android-texture-vertical-slice change, D71 of the public-api change). The
-// asset id doesn't depend on this file's path.
-// The declarations mirror src/core/map_texture_api.h, which documents them.
+// `package:flutter_mapigrade/native`. The asset id doesn't depend on this
+// file's path.
 // ignore_for_file: public_member_api_docs
 @DefaultAsset('package:flutter_mapigrade/native')
 library;

@@ -1,7 +1,6 @@
-// The map controller on platforms with FFI (design D160 of the
-// web-build-compatibility change). MapTextureController.create and
-// MapTextureController.setMaximumCacheSize check that the native library is
-// available before they call these functions.
+// MapTextureController.create and MapTextureController.setMaximumCacheSize
+// check that the native library is available before they call these
+// functions.
 import 'dart:async';
 import 'dart:ffi' hide Size;
 import 'dart:ui';
@@ -27,7 +26,7 @@ Future<MapTextureController> createMapTextureController({
     (Pointer<MapTextureEventStruct> event) => controller._onEvent(event),
   );
   final (handle, error) = using((arena) {
-    // Each rule's URL, then its names and values (design D81).
+    // Each rule's URL, then its names and values.
     final strings = [
       for (final rule in httpHeaders) ...[
         rule.url,
@@ -129,7 +128,6 @@ class _FfiMapTextureController implements MapTextureController {
 
   final int _handle;
   final NativeCallable<MapTextureEventCallback> _callable;
-  // The frame that selectNewest() receives; freed in dispose().
   final Pointer<MapTextureFrameStruct> _chosen =
       calloc<MapTextureFrameStruct>();
 

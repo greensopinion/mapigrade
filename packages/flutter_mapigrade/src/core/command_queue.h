@@ -1,10 +1,10 @@
-// Commands from Dart to the map thread (design D5).
+// Commands from Dart to the map thread.
 //
 // Style loads, resizes, memory reduction, target tasks and dispose go into an
-// ordered queue and are never dropped or reordered. Consecutive resizes are coalesced so that a window drag
-// doesn't allocate a buffer set per intermediate size (D7). Camera updates go
-// into a single slot where the latest update wins, with its sequence number
-// (D125).
+// ordered queue and are never dropped or reordered. Consecutive resizes are
+// coalesced so that a window drag doesn't allocate a buffer set per
+// intermediate size. Camera updates go into a single slot where the latest
+// update wins, with its sequence number.
 //
 // All methods are safe to call from any thread.
 #pragma once
@@ -28,8 +28,6 @@ struct Camera {
   bool operator==(const Camera&) const = default;
 };
 
-// A camera from Dart and the sequence number Dart assigned to it (design
-// D125).
 struct CameraUpdate {
   Camera camera;
   int64_t seq = 0;
@@ -38,7 +36,6 @@ struct CameraUpdate {
 };
 
 struct Viewport {
-  // Logical size in Flutter logical pixels.
   double logical_width = 0;
   double logical_height = 0;
   double pixel_ratio = 1;
@@ -95,13 +92,11 @@ class CommandQueue {
     commands_.push_back(std::move(command));
   }
 
-  // Removes and returns all queued commands in the order they were pushed.
   std::deque<Command> TakeAll() {
     std::lock_guard lock(mutex_);
     return std::exchange(commands_, {});
   }
 
-  // Whether a dispose is queued.
   bool DisposeQueued() {
     std::lock_guard lock(mutex_);
     for (const Command& command : commands_) {

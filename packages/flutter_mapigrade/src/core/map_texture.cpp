@@ -30,18 +30,18 @@ void SetClockForTesting(int64_t (*now_ns)()) { test_clock.store(now_ns); }
 
 namespace {
 
-// #760 has no render-update-available event: an armed frame demand waits for
-// the map's next update instead.
+// The FFI has no render-update-available event: an armed frame demand waits
+// for the map's next update instead.
 constexpr uint64_t kMapEventMask =
     MLN_RUNTIME_EVENT_MASK_MAP_STYLE_LOADED |
     MLN_RUNTIME_EVENT_MASK_MAP_LOADING_FAILED |
     MLN_RUNTIME_EVENT_MASK_MAP_RENDER_ERROR | MLN_RUNTIME_EVENT_MASK_MAP_IDLE;
 
-// Park bound with nothing to do. Wakes come from #760's wakes and from
+// Park bound with nothing to do. Wakes come from the session's wakes and from
 // commands, so this only bounds a missed wake.
 constexpr int64_t kIdleWaitMs = 250;
 // The refresh interval a surface target paces by until the display's refresh
-// rate is set (design D53): 60 Hz.
+// rate is set: 60 Hz.
 constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 // Delay after the last resize before Flutter is told once more that a frame
 // is available. Longer than the default maximum texture age (1 s) of a
@@ -49,10 +49,9 @@ constexpr int64_t kDefaultIntervalNs = 1'000'000'000 / 60;
 constexpr int64_t kResizeSettledNs = 1'100'000'000;
 
 // The map whose map thread this is; null on other threads. MapLibre logs
-// error records synchronously, on the thread that runs the failed work. Before
-// #760 each map's resource responses ran on its own map thread, in
-// mln_runtime_pump(); under #760 they run on the runtime's scheduler thread
-// (findings Q4).
+// error records synchronously, on the thread that runs the failed work.
+// Resource responses run on the runtime's scheduler thread, where this is
+// null.
 thread_local MapTexture* map_thread_owner = nullptr;
 
 // Sets map_thread_owner for the lifetime of the map thread.
@@ -256,8 +255,7 @@ bool MapTexture::Start(bool copy_free, std::string* out_error) {
     return false;
   }
   if (auto* surface = target_->AsSurfaceTarget()) {
-    // Flutter doesn't report when it has finished with an image (design
-    // D133).
+    // Flutter doesn't report when it has finished with an image.
     buffers_.Configure(surface->slot_count(),
                        BufferState::ReleaseRule::kLaterChoices);
     buffers_.set_on_freed([surface](int slot) { surface->SlotFreed(slot); });
@@ -341,9 +339,9 @@ void MapTexture::RunTargetTask(TargetTask task, bool wait) {
           // freed, and the pending render no longer waits for them.
           buffers_.ReleaseQueued();
           waiting_for_buffer_.store(false);
-          // The next demand renders the pending frame unconditionally (design
-          // D54). A task that replaces the target also makes the session run
-          // an outstanding demand again.
+          // The next demand renders the pending frame unconditionally. A task
+          // that replaces the target also makes the session run an
+          // outstanding demand again.
           repaint_wanted_ = true;
         }));
   }
@@ -378,7 +376,7 @@ void MapTexture::Signal() {
   wake_cv_.notify_one();
 }
 
-// #760 requires that a wake callback returns without waiting for another
+// The FFI requires that a wake callback returns without waiting for another
 // thread. wake_mutex_ is held only briefly, and never while calling the FFI.
 void MapTexture::OnWake(void* user_data) {
   static_cast<MapTexture*>(user_data)->Signal();
@@ -416,7 +414,7 @@ bool MapTexture::SelectNewest(int* out_slot, FrameInfo* out_info) {
   }
   auto* target = target_->AsBufferTarget();
   // The first choice of a frame of a new set releases the frame kept from
-  // before the resize (design D126).
+  // before the resize.
   int slot = buffers_.SelectNewest([&](int, const FrameInfo& info) {
     *out_info = info;
     target->ReleaseFallbackLocked();
@@ -531,9 +529,8 @@ void MapTexture::Run() {
   RunInPlatformScope([&] { Teardown(); });
 }
 
-// Under #760 the map thread arms one frame demand at a time. The demand waits
-// for the map's next update, so a slot is taken for it as soon as one may be
-// rendered (design D180).
+// The map thread arms one frame demand at a time. The demand waits for the
+// map's next update, so a slot is taken for it as soon as one may be rendered.
 bool MapTexture::RenderWanted() {
   if (demand_outstanding_ || session_ == MLN_HANDLE_NULL || gate_.paused()) {
     return false;
@@ -548,9 +545,9 @@ bool MapTexture::RunOnce() {
   bool render_now = RenderWanted();
   int64_t timeout_ms = render_now ? 0 : kIdleWaitMs;
   if (render_now && target_->AsSurfaceTarget() != nullptr) {
-    // A surface target's render waits for the end of the refresh interval
-    // (designs D53 and D134). The wait parks in whole milliseconds, so the
-    // part of the wait below one millisecond is slept here.
+    // A surface target's render waits for the end of the refresh interval.
+    // The wait parks in whole milliseconds, so the part of the wait below one
+    // millisecond is slept here.
     int64_t remaining = IntervalRemainingNs();
     if (remaining > 0 && remaining < 1'000'000) {
       std::this_thread::sleep_for(std::chrono::nanoseconds(remaining));
@@ -642,9 +639,8 @@ bool MapTexture::Init() {
   }
 
   // Runtime operations run in order, so the maximum size is in effect before
-  // the first resource request or write of the style load (design D62). If
-  // the call fails, the map uses MapLibre's default and continues to render
-  // (D63).
+  // the first resource request or write of the style load. If the call fails,
+  // the map uses MapLibre's default and continues to render.
   if (maximum_cache_size_) {
     mln_completion size_done =
         ReportingCompletion("mln_runtime_set_maximum_ambient_cache_size");
@@ -657,8 +653,8 @@ bool MapTexture::Init() {
     }
   }
 
-  // Before the map, so that style requests carry the headers. #760 applies
-  // the rules in native code; the call copies them.
+  // Before the map, so that style requests carry the headers. The runtime
+  // applies the rules in native code; the call copies them.
   if (!header_rules_.empty()) {
     std::vector<mln_http_header> headers;
     for (const auto& rule : header_rules_) {
@@ -725,7 +721,7 @@ void MapTexture::ServiceUntil(const std::function<bool()>& done) {
     if (session_ != MLN_HANDLE_NULL) {
       // Any service call can render the armed demand's frame, for example
       // after a replacement resumes a demand that waits for an update, so a
-      // surface target gets the frame's id before this one too (findings Q5).
+      // surface target gets the frame's id before this one too.
       if (auto* surface = target_->AsSurfaceTarget();
           surface != nullptr && demand_outstanding_ && !demand_stale_) {
         surface->WillRender(next_frame_id_);
@@ -848,8 +844,8 @@ void MapTexture::ApplyCommands(bool* stop) {
 
 void MapTexture::ApplyReduceMemoryUse() {
   if (session_ == MLN_HANDLE_NULL) return;
-  // This releases cached tiles and images. Under #760 it is driver work, which
-  // the map thread services, also while rendering is paused (findings Q6).
+  // This releases cached tiles and images. It is driver work, which the map
+  // thread services, also while rendering is paused.
   mln_completion done = FunctionCompletion(
       [this](const mln_completion_result& result) {
         if (result.status == MLN_STATUS_OK) {
@@ -887,7 +883,7 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     // replacement is refused while a frame is acquired, and the frames are
     // released while their textures exist. The map thread requests no frame
     // before the replacement, so the session renders no frame into the
-    // replaced set (design D183).
+    // replaced set.
     if (session_ != MLN_HANDLE_NULL && demand_outstanding_) EndDemands();
     ReleaseHeldFrames(true);
     buffers_.WithLock([buffer_target, this](int chosen) {
@@ -905,7 +901,7 @@ void MapTexture::ApplyResize(const Viewport& viewport) {
     AttachSession();
   } else {
     // The previous textures are released already, so the replacement must
-    // run before the session renders again (findings Q6).
+    // run before the session renders again.
     auto replaced = std::make_shared<Waiter>();
     mln_completion replace_done = Waiter::For(replaced);
     mln_status status =
@@ -964,10 +960,9 @@ bool MapTexture::AttachSession() {
   return attached->status == MLN_STATUS_OK;
 }
 
-// Before #760 a failed render was reported, and the next target replacement
-// recovered. Under #760 a failed render leaves the session in
-// MLN_RENDER_SESSION_STATE_TARGET_LOST, which no replacement leaves, so the
-// map thread detaches the session and attaches a new one (findings Q6).
+// A failed render leaves the session in MLN_RENDER_SESSION_STATE_TARGET_LOST,
+// which no target replacement leaves, so the map thread detaches the session
+// and attaches a new one.
 bool MapTexture::RecoverLostTarget() {
   if (session_ == MLN_HANDLE_NULL) return false;
   mln_render_session_snapshot snapshot{};
@@ -1014,8 +1009,7 @@ void MapTexture::ApplyCamera() {
   camera_update.camera.zoom = camera.zoom;
   camera_update.camera.bearing = camera.bearing;
   // The completion reports the render update that includes the camera, which
-  // a frame result's map_update_generation counts (maplibre-native-ffi#906,
-  // design D181).
+  // a frame result's map_update_generation counts.
   int64_t seq = update->seq;
   int64_t set_at_ns = update->set_at_ns;
   mln_completion done = FunctionCompletion(
@@ -1026,7 +1020,7 @@ void MapTexture::ApplyCamera() {
               {result.render_update_generation, seq, set_at_ns});
         }
         // After the generation is recorded, so that a frame that the waiting
-        // map thread renders next is matched to this camera (design D181).
+        // map thread renders next is matched to this camera.
         cameras_completed_.fetch_add(1);
         Signal();
       });
@@ -1042,9 +1036,9 @@ void MapTexture::ApplyCamera() {
 }
 
 // Rendering before the camera's update is published would render the previous
-// camera, which cost the iPhone one more display frame of lag (findings Q2).
+// camera, which cost the iPhone one more display frame of lag.
 // The completion signals the wake, so the map thread waits without spinning.
-// Every command completes, and a dispose also signals the wake (design D181).
+// Every command completes, and a dispose also signals the wake.
 void MapTexture::WaitForCamera() {
   bool waited = false;
   while (cameras_completed_.load() < cameras_submitted_ &&
@@ -1093,7 +1087,7 @@ void MapTexture::MaybeRender() {
   if (demand_outstanding_ || session_ == MLN_HANDLE_NULL) return;
 
   // While paused, no demand is armed and ServiceDriver() renders nothing;
-  // SetPaused(false) wakes the map thread to arm one (design D13).
+  // SetPaused(false) wakes the map thread to arm one.
   if (gate_.paused()) {
     std::lock_guard lock(stats_mutex_);
     ++stats_.paused_renders;
@@ -1110,10 +1104,10 @@ void MapTexture::MaybeRender() {
 }
 
 // Normally the next frame renders only after Dart has chosen the latest one,
-// and SelectNewest() signals the wake source to retry the render (design
-// D124). While a frame takes longer than a display refresh interval, waiting
-// would cost a whole refresh interval per frame, so the next frame renders
-// right away; a frame Dart hasn't chosen yet is then replaced (design D19).
+// and SelectNewest() signals the wake source to retry the render. While a
+// frame takes longer than a display refresh interval, waiting would cost a
+// whole refresh interval per frame, so the next frame renders right away; a
+// frame Dart hasn't chosen yet is then replaced.
 bool MapTexture::MayRender(bool* render_ahead) {
   bool latest_chosen = buffers_.LatestReadyChosen();
   *render_ahead = !latest_chosen && RenderAhead();
@@ -1158,9 +1152,8 @@ void MapTexture::RecordRenderStart(int64_t start, bool render_ahead) {
   render_waited_for_display_ = false;
 }
 
-// Under #760 the slot is taken and made the session's target when the demand
-// is armed, and the frame is published when its result arrives
-// (HandleFrameResult).
+// The slot is taken and made the session's target when the demand is armed,
+// and the frame is published when its result arrives (HandleFrameResult).
 void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
   bool render_ahead = false;
   if (!MayRender(&render_ahead)) return;
@@ -1172,7 +1165,7 @@ void MapTexture::RenderIntoBuffer(BufferRenderTarget& target) {
 
 // The session chooses the slot among those whose frames the map thread
 // doesn't hold, so the slot is known when the frame is acquired
-// (HandleFrameResult, design D182).
+// (HandleFrameResult).
 void MapTexture::RenderIntoRing(BufferRenderTarget& target) {
   bool render_ahead = false;
   if (!MayRender(&render_ahead)) return;
@@ -1203,11 +1196,11 @@ bool MapTexture::FreeSlotAvailable() {
 }
 
 // A surface target's session queues each frame on the surface, and the frame
-// is published when its image arrives (design D131). Renders are paced to one
-// per display refresh interval, not by Dart's choice: on Android a frame
-// reaches Dart only after its image arrives, and Dart chooses it in the next
-// Flutter frame, so waiting for the choice would cost a refresh interval per
-// frame (design D134). A ready frame that Dart hasn't chosen is replaced.
+// is published when its image arrives. Renders are paced to one per display
+// refresh interval, not by Dart's choice: on Android a frame reaches Dart only
+// after its image arrives, and Dart chooses it in the next Flutter frame, so
+// waiting for the choice would cost a refresh interval per frame. A ready
+// frame that Dart hasn't chosen is replaced.
 void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
   if (!target.CanPresent()) return;
   if (IntervalRemainingNs() > 0) {
@@ -1255,9 +1248,9 @@ bool MapTexture::ArmDemand(int slot, bool render_ahead) {
 
 void MapTexture::ServiceDriver() {
   if (session_ == MLN_HANDLE_NULL) return;
-  // While paused, the map thread submits no GPU work (design D13); the
-  // driver work waits until rendering resumes. An armed frame demand that
-  // waits counts as a render that the pause deferred.
+  // While paused, the map thread submits no GPU work; the driver work waits
+  // until rendering resumes. An armed frame demand that waits counts as a
+  // render that the pause deferred.
   if (!gate_.TryBeginRender()) {
     if (demand_outstanding_) {
       std::lock_guard lock(stats_mutex_);
@@ -1268,7 +1261,7 @@ void MapTexture::ServiceDriver() {
   RenderGateScope gate_scope(gate_);
 
   if (auto* surface = target_->AsSurfaceTarget()) {
-    // The id goes with the next frame the session presents (design D131).
+    // The id goes with the next frame the session presents.
     if (demand_outstanding_ && !demand_stale_) {
       surface->WillRender(next_frame_id_);
     }
@@ -1314,8 +1307,7 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
   // A demand armed before a resize may render the update of the new size
   // into a frame that isn't published. A demand that waits for an update would
   // then wait for one that doesn't come while the map is idle, so the next
-  // demand renders unconditionally, as render_pending_ did after a resize
-  // before #760 (findings, "What broke").
+  // demand renders unconditionally.
   if (stale) {
     repaint_wanted_ = true;
     if (result.disposition == MLN_RENDER_RESULT_RENDERED &&
@@ -1391,8 +1383,7 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
                            : frame_cost_avg_ns_ + (cost - frame_cost_avg_ns_) / 8;
   buffers_.Publish(index, info);
   published_at_ns_.store(NowNs());
-  // Dart marks the slot's texture available when it chooses the frame
-  // (design D123).
+  // Dart marks the slot's texture available when it chooses the frame.
   RecordCameraLatency(info);
   Emit(MAP_TEXTURE_EVENT_FRAME_READY, nullptr, &info, 0, index);
 }
@@ -1494,7 +1485,7 @@ void MapTexture::RecordRender(int64_t start, int64_t elapsed) {
     stats_.frame_cycle_total_ns += start - last_render_start_ns_;
   }
   last_render_start_ns_ = start;
-  // The service call that rendered the frame; render_update before #760.
+  // render_update_count counts the service calls that rendered a frame.
   ++stats_.render_update_count;
   stats_.render_update_total_ns += elapsed;
   stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
@@ -1511,8 +1502,8 @@ FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   info.camera = {camera.center.latitude, camera.center.longitude, camera.zoom,
                  camera.bearing};
   {
-    // The newest camera command whose generation the frame's update includes
-    // (design D181). Older entries are no longer needed.
+    // The newest camera command whose generation the frame's update includes.
+    // Older entries are no longer needed.
     std::lock_guard lock(camera_generations_mutex_);
     size_t newest = camera_generations_.size();
     for (size_t i = 0; i < camera_generations_.size(); ++i) {

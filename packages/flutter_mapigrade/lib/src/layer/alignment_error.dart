@@ -1,5 +1,3 @@
-// Alignment error of one Flutter frame (design D26 of the flutter-map-layer
-// change, D49 of the remove-camera-transform change).
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -25,8 +23,8 @@ class AlignmentError {
   String toString() => 'AlignmentError($error, center: $center)';
 }
 
-/// The alignment error of a Flutter frame whose overlays use [target] (C_N)
-/// and in which Flutter displayed the frame [shown] (k_shown).
+/// The alignment error of a Flutter frame whose overlays use [target] and in
+/// which Flutter displayed the frame [shown].
 AlignmentError alignmentError({
   required ViewCamera target,
   required ViewCamera shown,

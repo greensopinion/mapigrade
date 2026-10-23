@@ -1,20 +1,20 @@
 // The platform-specific part of a map texture: where MapLibre renders, how
 // Flutter gets the frames, and the Flutter texture registration. There are two
-// kinds of target (design D52):
+// kinds of target:
 //
 // - A buffer target (macOS and iOS) owns a set of display buffers, one per
-//   display slot, and registers one Flutter texture per slot (design D122).
+//   display slot, and registers one Flutter texture per slot.
 //   Dart chooses the slot to display, and Flutter's raster thread takes its
 //   buffer through MapTexture::Present(slot).
 //   A copy-free map, the default, renders directly into the free buffer, made
-//   the session's target with set_target before each render (design D20).
+//   the session's target with set_target before each render.
 //   Otherwise the session renders into one render texture, and each frame is
-//   copied on the GPU into a free buffer (design D3b).
+//   copied on the GPU into a free buffer.
 // - A surface target (Android) renders into a surface whose buffers the
 //   plugin receives as images, one per frame. The session presents each frame
 //   itself, so there is no copy and no Present(). Display slots refer to the
 //   images, and all slots share one Flutter texture: when Dart chooses a
-//   frame, the target gives its image to Flutter (designs D130 to D135).
+//   frame, the target gives its image to Flutter.
 //
 // The core in this directory has no platform dependencies. Each platform
 // implements one kind of target and the four functions at the end of this
@@ -42,9 +42,8 @@ struct TargetSize {
   mln_logical_extent extent{};
 };
 
-// The arguments that every asynchronous FFI call of a target takes
-// (maplibre-native-ffi PR #760): the completion, and the diagnostic of a
-// rejected call.
+// The arguments that every asynchronous FFI call of a target takes: the
+// completion, and the diagnostic of a rejected call.
 struct AsyncCall {
   const mln_completion* completion = nullptr;
   mln_diagnostic* diagnostic = nullptr;
@@ -58,7 +57,7 @@ class RenderTarget {
   virtual BufferRenderTarget* AsBufferTarget() { return nullptr; }
   virtual SurfaceRenderTarget* AsSurfaceTarget() { return nullptr; }
 
-  // The number of display slots, each with its own Flutter texture.
+  // The number of display slots.
   virtual int slot_count() const { return 1; }
 
   // The id of the registered Flutter texture of `slot`.
@@ -101,7 +100,7 @@ class BufferRenderTarget : public RenderTarget {
   // with the prepared one. The buffer of slot `chosen` of the outgoing set,
   // the slot Dart chose last (if `chosen` >= 0), stays displayable as the
   // fallback until ReleaseFallbackLocked(), so that Flutter shows the frame
-  // Dart displays during a resize (design D126).
+  // Dart displays during a resize.
   virtual void SwapBuffersLocked(int chosen) = 0;
 
   // Flutter's raster thread. Returns the buffer to display for slot `index`
@@ -118,16 +117,15 @@ class BufferRenderTarget : public RenderTarget {
   // texture, or the current set's buffers.
 
   // Map thread. Copies the render texture into buffer `index` on the GPU and
-  // returns when the copy has completed (design D3b). Not called when the
-  // target renders into the buffers.
+  // returns when the copy has completed. Not called when the target renders
+  // into the buffers.
   virtual bool CopyToBuffer(int index) = 0;
 
   // Whether the session renders directly into the display buffers (a
-  // copy-free map, design D20), and no copy is needed. Under #760 the
-  // session's target is a borrowed ring of the current set's buffers in slot
-  // order, and the session chooses the slot of each frame among the slots
-  // whose frames the map thread doesn't hold acquired (design D182 of the
-  // adopt-ffi-core-executor change).
+  // copy-free map), and no copy is needed. The session's target is then a
+  // borrowed ring of the current set's buffers in slot order, and the session
+  // chooses the slot of each frame among the slots whose frames the map thread
+  // doesn't hold acquired.
   virtual bool RendersIntoBuffers() const { return false; }
 
   // Map thread, when the target renders into the buffers. Returns the display
@@ -140,7 +138,7 @@ class BufferRenderTarget : public RenderTarget {
 
   // The platform thread, from MapTexture::SelectNewest. Tells Flutter that the
   // texture of `slot` has a new frame, before the Flutter frame that Dart is
-  // building is rasterized (design D123).
+  // building is rasterized.
   virtual void FrameAvailable(int slot) = 0;
 
   // Map thread. Tells Flutter that every slot's texture has a new frame,
@@ -154,8 +152,7 @@ class BufferRenderTarget : public RenderTarget {
 // A target that presents through a surface whose buffers the plugin receives
 // as images (Android). Each render_update that renders a frame also queues it
 // on the surface. When the frame's image arrives, the target calls
-// MapTexture::OnFrameImage, which publishes the frame into its slot (design
-// D131).
+// MapTexture::OnFrameImage, which publishes the frame into its slot.
 class SurfaceRenderTarget : public RenderTarget {
  public:
   SurfaceRenderTarget* AsSurfaceTarget() override { return this; }
@@ -165,15 +162,14 @@ class SurfaceRenderTarget : public RenderTarget {
   // can tell which frame an image holds.
   virtual void WillRender(uint64_t frame_id) {}
 
-  // The platform thread, under the BufferState lock, from MapTexture::SelectNewest:
-  // Dart chose the frame in `slot`, so give its image to Flutter for the
-  // Flutter frame that Dart is building (design D132).
+  // The platform thread, under the BufferState lock, from
+  // MapTexture::SelectNewest: Dart chose the frame in `slot`, so give its image
+  // to Flutter for the Flutter frame that Dart is building.
   virtual void FrameAvailable(int slot) = 0;
 
   // Under the BufferState lock, on the thread that freed the slot: `slot` no
-  // longer holds a frame that Flutter may display, so release its image, if
-  // it has one (design D133). The map thread frees only slots without an
-  // image.
+  // longer holds a frame that Flutter may display, so release its image, if it
+  // has one. The map thread frees only slots without an image.
   virtual void SlotFreed(int slot) = 0;
 
   // Attach() and SetTarget() make the session present through the current
@@ -189,7 +185,7 @@ class SurfaceRenderTarget : public RenderTarget {
 };
 
 // The error of a map creation with the token of an engine that has detached
-// the plugin, or that the plugin never gave out (design D156).
+// the plugin, or that the plugin never gave out.
 inline constexpr const char* kEngineDetachedError =
     "the Flutter engine of this isolate has detached flutter_mapigrade";
 
@@ -204,7 +200,7 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 // The path of MapLibre's tile cache database, or an empty string for none.
 std::string PlatformCachePath();
 
-// The root of asset:// URLs, or empty if unknown (design D83).
+// The root of asset:// URLs, or empty if unknown.
 std::string PlatformAssetPath();
 
 // Runs `work` in the platform's per-iteration scope on the map thread. On

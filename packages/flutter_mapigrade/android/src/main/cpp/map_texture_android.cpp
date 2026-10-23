@@ -1,10 +1,8 @@
-// Android render target (designs D51, D54 and D58 of the
-// android-texture-vertical-slice change, D130 to D137 of the
-// android-layer-children-alignment change). MapLibre renders through an EGL
-// window surface on the Surface of an ImageReader that MapSurface owns. Its
-// buffers are HardwareBuffers that Flutter samples through an image texture,
-// so no pixels are copied and none pass through CPU memory. The session is
-// dedicated: it owns the map thread's EGL context.
+// Android render target. MapLibre renders through an EGL window surface on the
+// Surface of an ImageReader that MapSurface owns. Its buffers are
+// HardwareBuffers that Flutter samples through an image texture, so no pixels
+// are copied and none pass through CPU memory. The session is dedicated: it
+// owns the map thread's EGL context.
 //
 // Each frame carries its frame id as its presentation time. MapSurface's
 // listener thread passes each image to OnFrameImage, which publishes the frame
@@ -65,8 +63,8 @@ std::mutex cache_dir_mutex;
 std::string cache_dir;
 
 // The TextureRegistry of each engine that attached the plugin, as a global
-// reference, by token (design D153 of the multiple-flutter-engines change).
-// nativeInit adds an engine's registry and nativeDetach removes it.
+// reference, by token. nativeInit adds an engine's registry and nativeDetach
+// removes it.
 std::mutex registries_mutex;
 int64_t next_token = 1;
 std::unordered_map<int64_t, jobject>& Registries() {
@@ -124,7 +122,7 @@ std::string EglError(const char* what) {
 class AndroidSurfaceTarget;
 
 // The live targets, so that the plugin can release and restore their readers
-// when the activity stops and starts (design D137). Main thread only.
+// when the activity stops and starts. Main thread only.
 std::set<AndroidSurfaceTarget*>& Targets() {
   static std::set<AndroidSurfaceTarget*> targets;
   return targets;
@@ -159,13 +157,13 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     return !CheckException(env, "MapSurface.id");
   }
 
-  // Six display slots share the one image texture (designs D133 and D135).
+  // Six display slots share the one image texture.
   int slot_count() const override { return kChoiceReleasedBufferCount; }
   int64_t texture_id(int) const override { return texture_id_; }
 
   // Main thread. A new physical size makes MapSurface create a reader of that
   // size, whose Surface replaces the window on the map thread before the map
-  // thread applies the resize (design D136).
+  // thread applies the resize.
   void WillResize(const TargetSize& size) override {
     if (size.physical_width == requested_width_ &&
         size.physical_height == requested_height_) {
@@ -176,9 +174,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     if (!released_) CreateReader();
   }
 
-  // Main thread, when the activity stops (design D137). Returns when the map
-  // thread no longer uses the reader's surface, and the slots' images and
-  // the readers are closed.
+  // Main thread, when the activity stops. Returns when the map thread no longer
+  // uses the reader's surface, and the slots' images and the readers are
+  // closed.
   void ReleaseReader() {
     if (released_) return;
     released_ = true;
@@ -216,7 +214,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     });
   }
 
-  // Main thread, under the BufferState lock (design D132).
+  // Main thread, under the BufferState lock.
   void FrameAvailable(int slot) override {
     JNIEnv* env = Env();
     if (env == nullptr || map_surface_ == nullptr) return;
@@ -226,11 +224,10 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     CheckException(env, "MapSurface.push");
   }
 
-  // Under the BufferState lock, on the main thread, the listener thread or
-  // the map thread (design D133). The map thread frees a slot with an image
-  // when render_update queued a frame on the surface but reported none; it
-  // doesn't call into Java, so the image is closed by the next call on another
-  // thread.
+  // Under the BufferState lock, on the main thread, the listener thread or the
+  // map thread. The map thread frees a slot with an image when render_update
+  // queued a frame on the surface but reported none; it doesn't call into Java,
+  // so the image is closed by the next call on another thread.
   void SlotFreed(int slot) override {
     if (images_[slot] == nullptr) return;
     JNIEnv* env = Env();
@@ -247,7 +244,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
 
   // Sets the frame id as the presentation time of the next frame that the
   // session queues on the window, so that the image tells which frame it
-  // holds (design D131).
+  // holds.
   void WillRender(uint64_t frame_id) override {
     next_frame_id_ = frame_id;
     // MapLibre leaves the scissor test enabled with the frame's size, and the
@@ -256,9 +253,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     // would be clipped to the previous size. Disabling it makes the GL state
     // match the assumption.
     glDisable(GL_SCISSOR_TEST);
-    // Under #760 the dedicated context becomes current in driver work, after
-    // the attachment call returns, so the swap interval is set here, once the
-    // session's context is current on the window (findings Q5).
+    // The dedicated context becomes current in driver work, after the
+    // attachment call returns, so the swap interval is set here, once the
+    // session's context is current on the window.
     if (swap_interval_pending_ && window_surface_ != EGL_NO_SURFACE &&
         eglGetCurrentContext() != EGL_NO_CONTEXT &&
         eglGetCurrentSurface(EGL_DRAW) == window_surface_) {
@@ -406,9 +403,9 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // Map thread. Makes the session present through `surface`, and makes it
   // current at once: set_target makes it current only on the next render
   // (surface.h), and until then EGL would keep using the previous surface.
-  // Under #760 the replacement is an ordered operation, and the caller
-  // destroys the previous surface after this returns, so this services the
-  // session until the replacement has run (findings Q6).
+  // The replacement is an ordered operation, and the caller destroys the
+  // previous surface after this returns, so this services the session until
+  // the replacement has run.
   void SwitchSession(mln_render_session session, const TargetSize& size,
                      EGLSurface surface) {
     mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
@@ -439,7 +436,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     // 1 while pending; the completion stores its status minus 1000.
     for (int i = 0; i < 2000 && done->load() == 1; ++i) {
       // The service call can render an armed demand's frame, so it gets the
-      // id that the map thread gave the next frame (findings Q5).
+      // id that the map thread gave the next frame.
       if (next_frame_id_ != 0) WillRender(next_frame_id_);
       mln_status service =
           mln_render_session_service_driver_work(session, nullptr);
@@ -471,7 +468,6 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     deferred_images_.clear();
   }
 
-  // Closes the image of `slot`, if it has one.
   void CloseImage(JNIEnv* env, int slot) {
     if (images_[slot] == nullptr) return;
     env->CallVoidMethod(map_surface_, map_surface_close_image, images_[slot]);
@@ -484,8 +480,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // window queues frames in async mode: a frame replaces a queued frame that
   // the listener hasn't acquired yet, and eglSwapBuffers never waits for a
   // buffer to be released. A swap that waited could deadlock with the main
-  // thread's waits for the map thread (dispose, activity stop) (design D53;
-  // D131 keeps it).
+  // thread's waits for the map thread (dispose, activity stop).
   void SetNonBlockingSwap() {
     if (!eglSwapInterval(display_, 0)) Report(EglError("eglSwapInterval"));
   }
@@ -602,7 +597,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   uint64_t next_frame_id_ = 0;
 };
 
-// Main thread. Releases or restores the reader of every map (design D137).
+// Main thread. Releases or restores the reader of every map.
 void SetReadersReleased(bool released) {
   // A copy: a release waits for the map thread, and no target is created or
   // destroyed meanwhile, but the set is not iterated across the waits.
@@ -667,8 +662,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
   return JNI_VERSION_1_6;
 }
 
-// Returns the token of the engine's registry (design D153), or 0 if the
-// plugin can't create maps.
+// Returns the token of the engine's registry, or 0 if the plugin can't create
+// maps.
 JNIEXPORT jlong JNICALL
 Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
     JNIEnv* env, jobject, jobject registry, jobject context,
@@ -717,7 +712,7 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
 }
 
 // The engine of `token` detached the plugin: removes its registry and releases
-// the maps that Dart in that engine created and didn't dispose (design D157).
+// the maps that Dart in that engine created and didn't dispose.
 JNIEXPORT void JNICALL
 Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeDetach(
     JNIEnv* env, jobject, jlong token) {
@@ -764,7 +759,7 @@ void map_texture_trim_surfaces_for_testing(int32_t restore) {
   map_texture::SetReadersReleased(restore == 0);
 }
 
-// Measurement functions (design D58).
+// Measurement functions.
 
 int32_t map_texture_process_thread_count(void) {
   DIR* tasks = opendir("/proc/self/task");

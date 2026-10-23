@@ -8,7 +8,6 @@
 // One instance for each Flutter engine that registers the plugin. It keeps the
 // engine's texture registry under a token, which it gives to Dart on the
 // channel `flutter_mapigrade`; the map textures created through the C ABI with
-// that token register with that registry (designs D153 and D154 of the
-// multiple-flutter-engines change).
+// that token register with that registry.
 @interface MapigradePlugin : NSObject <FlutterPlugin>
 @end

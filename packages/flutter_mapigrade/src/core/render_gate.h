@@ -1,5 +1,5 @@
 // Stops the map thread from submitting GPU work while the application can't
-// use the GPU, for example while an iOS app is in the background (design D13).
+// use the GPU, for example while an iOS app is in the background.
 //
 // The map thread brackets each render (render_update plus the copy into a
 // buffer) with TryBeginRender() and EndRender(). SetPaused(true) returns only

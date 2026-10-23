@@ -18,19 +18,17 @@ import io.flutter.view.TextureRegistry
 
 /**
  * Loads the plugin's native library, which Dart calls through @Native bindings, and passes it the
- * texture registry and the application context (design D54). Rendering pauses while the Flutter
- * activity is stopped, and the maps release their image readers then (D137 of the
- * android-layer-children-alignment change). The renderers release cached resources under memory
- * pressure (D55).
+ * texture registry and the application context. Rendering pauses while the Flutter activity is
+ * stopped, and the maps release their image readers then. The renderers release cached resources
+ * under memory pressure.
  *
  * Each engine that attaches the plugin has its own instance. The native library keeps the engine's
  * texture registry under a token, which the instance gives to Dart on the channel
  * `flutter_mapigrade`, and the maps that Dart in that engine creates register with that registry.
- * When the engine detaches the plugin, the native library releases those maps (designs D153, D154
- * and D157 of the multiple-flutter-engines change).
+ * When the engine detaches the plugin, the native library releases those maps.
  *
  * When the process can't load the native library, for example on a device without an arm64 ABI,
- * the plugin logs a warning and calls no native function for the life of the process (D85).
+ * the plugin logs a warning and calls no native function for the life of the process.
  */
 class MapigradePlugin : FlutterPlugin, ActivityAware {
     private var applicationContext: Context? = null
@@ -90,8 +88,7 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
         applicationContext = context
         token = nativeInit(binding.textureRegistry, context, context.cacheDir.absolutePath)
         context.registerComponentCallbacks(memoryCallbacks)
-        // The channel belongs to this engine, so Dart in this engine receives this engine's token
-        // (design D154).
+        // The channel belongs to this engine, so Dart in this engine receives this engine's token.
         channel =
             MethodChannel(binding.binaryMessenger, CHANNEL).apply {
                 setMethodCallHandler { call, result ->
@@ -160,7 +157,6 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
         // the process, so a second engine doesn't load the library again.
         private var loadResult: Boolean? = null
 
-        /** Whether the process loaded the native library. */
         private val libraryLoaded: Boolean
             get() = loadResult == true
 

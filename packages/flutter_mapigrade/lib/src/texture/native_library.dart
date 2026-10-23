@@ -1,13 +1,8 @@
-// Whether the plugin's native library is available in this process (design
-// D86 of the unsupported-architectures change). The platform result comes
-// from the FFI file, or on web from a file without FFI (designs D161 and D162
-// of the web-build-compatibility change).
 import 'native_library_ffi.dart'
     if (dart.library.js_interop) 'native_library_web.dart'
     as platform;
 
-/// For tests: when not null, [nativeLibraryAvailable] returns this value
-/// (design D87).
+/// For tests: when not null, [nativeLibraryAvailable] returns this value.
 bool? nativeLibraryAvailableOverride;
 
 /// Whether the native library is available in this process, so that the

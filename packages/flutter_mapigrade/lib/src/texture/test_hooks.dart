@@ -1,7 +1,3 @@
-// Test hooks for lifecycle behavior that tests can't trigger themselves
-// (design D15), and measurement helpers. The hooks call the same native
-// functions as the platform's application lifecycle and memory warning
-// handlers.
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -54,8 +50,7 @@ int memoryFootprintForTesting() => mapTextureMemoryFootprint();
 
 /// On Android, releases the image readers the maps render into, as the plugin
 /// does when the activity stops, or with [restore], creates them again, as it
-/// does when the activity starts (design D137 of the
-/// android-layer-children-alignment change). Does nothing on macOS and iOS.
+/// does when the activity starts. Does nothing on macOS and iOS.
 void trimSurfacesForTesting({required bool restore}) =>
     mapTextureTrimSurfacesForTesting(restore ? 1 : 0);
 

@@ -1,8 +1,7 @@
-// The map controller's platform functions on web, which has no native library
-// (design D160 of the web-build-compatibility change). They aren't reached:
-// MapTextureController.create and MapTextureController.setMaximumCacheSize
-// return before they call them, because nativeLibraryAvailable is false on
-// web unless a test overrides it.
+// The map controller's platform functions on web, which has no native library.
+// They aren't reached: MapTextureController.create and
+// MapTextureController.setMaximumCacheSize return before they call them,
+// because nativeLibraryAvailable is false on web unless a test overrides it.
 import 'map_texture_controller.dart';
 
 /// Not reached on web; see the comment at the top of this file.
