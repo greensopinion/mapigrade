@@ -33,6 +33,8 @@ struct Camera {
 struct CameraUpdate {
   Camera camera;
   int64_t seq = 0;
+  // When the camera was set (steady clock, ns), or 0 if unknown.
+  int64_t set_at_ns = 0;
 };
 
 struct Viewport {
@@ -99,9 +101,18 @@ class CommandQueue {
     return std::exchange(commands_, {});
   }
 
-  void SetCamera(const Camera& camera, int64_t seq) {
+  // Whether a dispose is queued.
+  bool DisposeQueued() {
     std::lock_guard lock(mutex_);
-    camera_ = CameraUpdate{camera, seq};
+    for (const Command& command : commands_) {
+      if (command.kind == Command::Kind::kDispose) return true;
+    }
+    return false;
+  }
+
+  void SetCamera(const Camera& camera, int64_t seq, int64_t set_at_ns = 0) {
+    std::lock_guard lock(mutex_);
+    camera_ = CameraUpdate{camera, seq, set_at_ns};
   }
 
   // Returns the camera set since the last call, or nothing if no camera was

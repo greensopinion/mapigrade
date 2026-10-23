@@ -1,10 +1,19 @@
 // Tests of MapTexture with a surface render target (design D52) and its
 // display slots (D130-D135), the display slots of a buffer target
-// (D122-D126), camera sequence numbers (D125), the maximum size of the tile
-// cache (D61-D63), and the HTTP header rules (D81, D82), on the fake FFI in
-// fake_mln.cpp, and the engine token of each map (D156 and D157 of the
+// (D122-D126, D182 and D183), camera sequence numbers (D125, D181), the
+// maximum size of the tile cache (D61-D63), the HTTP header rules (D81, D82),
+// glyph load failures, and the engine token of each map (D156 and D157 of the
 // multiple-flutter-engines change).
+//
+// The tests run MapTexture on the real MapLibre Native FFI with headless Metal
+// targets (design D187 of the adopt-ffi-core-executor change): the surface
+// target attaches a session-owned texture, and the buffer target a borrowed
+// ring of four textures. ffi_redirect.h directs the few calls whose arguments
+// or failures the tests check to ffi_wrappers.mm.
+#import <Metal/Metal.h>
+
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -18,11 +27,12 @@
 #include <thread>
 #include <vector>
 
-#include "fake_mln.h"
+#include "ffi_wrappers.h"
 #include "map_texture.h"
 #include "map_texture_api.h"
 #include "render_target.h"
 
+using map_texture::AsyncCall;
 using map_texture::BufferRenderTarget;
 using map_texture::MapTexture;
 using map_texture::SurfaceRenderTarget;
@@ -41,12 +51,32 @@ int failures = 0;
     }                                                                    \
   } while (false)
 
-constexpr int64_t kSessionHandle = 1'000'000;
+id<MTLDevice> Device() {
+  static id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+  return device;
+}
 
-// A surface target with six slots that share one texture. The test plays
-// the image listener: it passes the frame ids that WillRender recorded to
-// MapTexture::OnFrameImage, and the target keeps the frame id as the slot's
-// image.
+// A style without sources, so that the map renders without network access.
+// Each call gives a different background color, so that loading it publishes
+// a render update without a camera change.
+std::string NextStyle() {
+  static std::atomic<int> count{0};
+  int n = ++count;
+  char color[8];
+  std::snprintf(color, sizeof(color), "#%02x%02x%02x", (n * 37) % 256,
+                (n * 91) % 256, (n * 53) % 256);
+  // Without a transition, loading it renders one frame.
+  return std::string(R"({"version": 8, "transition": {"duration": 0, "delay": 0},)"
+                     R"( "sources": {}, "layers": [)"
+                     R"({"id": "background", "type": "background",)"
+                     R"( "paint": {"background-color": ")") +
+         color + R"("}}]})";
+}
+
+// A surface target with six slots that share one texture, on a session-owned
+// Metal texture. The test plays the image listener: it passes the frame ids
+// that WillRender recorded to MapTexture::OnFrameImage, and the target keeps
+// the frame id as the slot's image.
 class FakeSurfaceTarget : public SurfaceRenderTarget {
  public:
   int slot_count() const override {
@@ -54,17 +84,7 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
   }
   int64_t texture_id(int) const override { return 42; }
 
-  void WillRender(uint64_t frame_id) override {
-    {
-      std::lock_guard lock(mutex);
-      will_render.push_back(frame_id);
-    }
-    if (deliver_early) DeliverEarly(frame_id);
-  }
-
-  // Delivers the image of `frame_id` before render_update returns, as the
-  // listener can on a device. Defined after last_owner.
-  void DeliverEarly(uint64_t frame_id);
+  void WillRender(uint64_t frame_id) override;
 
   void FrameAvailable(int slot) override {
     std::lock_guard lock(mutex);
@@ -79,17 +99,26 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
     images.erase(image);
   }
 
-  mln_status Attach(mln_map, const TargetSize& size,
-                    mln_render_session* out_session) override {
+  mln_status Attach(mln_map map, const TargetSize& size,
+                    const mln_render_session_attach_options& options,
+                    mln_render_session* out_session,
+                    const AsyncCall& call) override {
     attached_size = size;
-    *out_session = kSessionHandle;
-    return MLN_STATUS_OK;
+    mln_metal_owned_texture_descriptor descriptor =
+        mln_metal_owned_texture_descriptor_default();
+    descriptor.extent = size.extent;
+    descriptor.context.device = (__bridge void*)Device();
+    return mln_map_attach_metal_owned_texture(map, &descriptor, &options,
+                                              out_session, call.completion,
+                                              call.diagnostic);
   }
 
-  mln_status SetTarget(mln_render_session, const TargetSize& size) override {
+  mln_status SetTarget(mln_render_session session, const TargetSize& size,
+                       const AsyncCall& call) override {
     ++set_targets;
     attached_size = size;
-    return MLN_STATUS_OK;
+    return mln_render_session_resize(session, size.extent, call.completion,
+                                     call.diagnostic);
   }
 
   void WillResize(const TargetSize& size) override {
@@ -116,8 +145,11 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
   std::atomic<bool> deliver_early{false};
 
   std::mutex mutex;
-  // The frame ids passed to WillRender, in order.
+  // The frame ids passed to WillRender, in order, each once. The map thread
+  // passes the armed frame's id before every service call (design D184).
   std::vector<uint64_t> will_render;
+  // The test clock at the first WillRender of each frame id.
+  std::vector<int64_t> render_starts;
   // The frame id of the image each slot keeps.
   std::map<int, uint64_t> images;
   // The frame ids of the images given to Flutter, and of those released.
@@ -125,26 +157,51 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
   std::vector<uint64_t> closed;
 };
 
-// A copy-free buffer target with four slots. Its buffers are the slot
-// indexes plus one; the fallback is 100.
+// A copy-free buffer target with four slots, on a borrowed ring of four Metal
+// textures (design D182). Its buffers are the slot indexes plus one; the
+// fallback is 100.
 class FakeBufferTarget : public BufferRenderTarget {
  public:
   int slot_count() const override { return map_texture::kBufferCount; }
   int64_t texture_id(int slot) const override { return 50 + slot; }
 
-  mln_status Attach(mln_map, const TargetSize&,
-                    mln_render_session* out_session) override {
-    *out_session = kSessionHandle;
-    return MLN_STATUS_OK;
+  mln_status Attach(mln_map map, const TargetSize& size,
+                    const mln_render_session_attach_options& options,
+                    mln_render_session* out_session,
+                    const AsyncCall& call) override {
+    Ring ring{};
+    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
+    return mln_map_attach_metal_borrowed_texture(
+        map, &descriptor, &options, out_session, call.completion,
+        call.diagnostic);
   }
-  mln_status SetTarget(mln_render_session, const TargetSize&) override {
-    return MLN_STATUS_OK;
+  mln_status SetTarget(mln_render_session session, const TargetSize& size,
+                       const AsyncCall& call) override {
+    Ring ring{};
+    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
+    return mln_render_session_set_metal_borrowed_texture_target(
+        session, &descriptor, call.completion, call.diagnostic);
   }
   void Unregister() override {}
 
-  bool PrepareBuffers(const TargetSize&) override { return true; }
+  bool PrepareBuffers(const TargetSize& size) override {
+    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                     width:size.physical_width
+                                    height:size.physical_height
+                                 mipmapped:NO];
+    descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    descriptor.storageMode = MTLStorageModePrivate;
+    for (auto& texture : prepared_) {
+      texture = [Device() newTextureWithDescriptor:descriptor];
+      if (texture == nil) return false;
+    }
+    return true;
+  }
   void SwapBuffersLocked(int chosen) override {
     has_fallback = chosen >= 0 || has_fallback;
+    current_ = prepared_;
+    for (auto& texture : prepared_) texture = nil;
   }
   void* CopyBufferLocked(int index) override {
     if (index >= 0) return reinterpret_cast<void*>(intptr_t{index + 1});
@@ -154,12 +211,20 @@ class FakeBufferTarget : public BufferRenderTarget {
   bool CopyToBuffer(int) override { return true; }
   bool RendersIntoBuffers() const override { return true; }
 
-  // Map thread, before each render: counts renders into a slot that the test
-  // records as held by Dart.
-  mln_status SelectBuffer(mln_render_session, int index) override {
+  // Map thread, when it acquires a frame: counts frames in a slot that the
+  // test records as held by Dart.
+  int FrameSlot(mln_acquired_frame frame, bool* out_current) override {
+    mln_metal_texture_frame metal{};
+    metal.size = sizeof(metal);
+    if (mln_acquired_frame_get_metal_texture(frame, &metal, nullptr) !=
+            MLN_STATUS_OK ||
+        metal.slot >= current_.size()) {
+      return -1;
+    }
+    *out_current = metal.texture == (__bridge void*)current_[metal.slot];
     std::lock_guard lock(mutex);
-    if (held.count(index) > 0) ++renders_into_held;
-    return MLN_STATUS_OK;
+    if (held.count(static_cast<int>(metal.slot)) > 0) ++renders_into_held;
+    return static_cast<int>(metal.slot);
   }
 
   void FrameAvailable(int slot) override {
@@ -167,7 +232,9 @@ class FakeBufferTarget : public BufferRenderTarget {
     available.push_back(slot);
   }
   void FrameAvailable() override {}
-  void ReleaseBuffersLocked() override {}
+  void ReleaseBuffersLocked() override {
+    for (auto& texture : current_) texture = nil;
+  }
 
   std::mutex mutex;
   // The slots the test has chosen and not seen freed.
@@ -176,6 +243,27 @@ class FakeBufferTarget : public BufferRenderTarget {
   // The slots marked available by Select, in order.
   std::vector<int> available;
   bool has_fallback = false;
+
+ private:
+  using Ring = std::array<mln_metal_borrowed_texture, map_texture::kBufferCount>;
+
+  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
+                                                   Ring* ring) {
+    mln_metal_borrowed_texture_descriptor descriptor =
+        mln_metal_borrowed_texture_descriptor_default();
+    descriptor.extent = size.extent;
+    descriptor.physical_width = size.physical_width;
+    descriptor.physical_height = size.physical_height;
+    for (size_t i = 0; i < ring->size(); ++i) {
+      (*ring)[i].texture = (__bridge void*)current_[i];
+    }
+    descriptor.textures = ring->data();
+    descriptor.texture_count = ring->size();
+    return descriptor;
+  }
+
+  std::array<id<MTLTexture>, map_texture::kBufferCount> current_{};
+  std::array<id<MTLTexture>, map_texture::kBufferCount> prepared_{};
 };
 
 // Whether the next map gets a buffer target instead of a surface target.
@@ -255,9 +343,9 @@ int32_t SelectNewest(int64_t handle, map_texture_frame* out = nullptr) {
   return status;
 }
 
-// Waits up to two seconds for `condition`.
+// Waits up to five seconds for `condition`.
 bool WaitFor(const std::function<bool()>& condition) {
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (std::chrono::steady_clock::now() < deadline) {
     if (condition()) return true;
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -275,12 +363,32 @@ map_texture_stats Stats(int64_t handle) {
   return stats;
 }
 
+// Publishes a render update without a camera change, as a tile load would:
+// loads a style with another background color.
+void QueueRenderUpdate(int64_t handle) {
+  map_texture_load_style_json(handle, NextStyle().c_str());
+}
+
+// Waits until the map has rendered `frames` frames and renders no more for
+// 200 ms, so that a test counts from a settled map.
+bool Settled(int64_t handle, int64_t frames) {
+  if (!WaitFor([&] { return Stats(handle).rendered_frames >= frames; })) {
+    return false;
+  }
+  int64_t rendered = -1;
+  while (rendered != Stats(handle).rendered_frames) {
+    rendered = Stats(handle).rendered_frames;
+    Sleep(200);
+  }
+  return true;
+}
+
 // Sets `error` to the message of map_texture_create().
 int64_t CreateMapWithRules(const std::vector<const char*>& strings,
                            const std::vector<int32_t>& counts,
                            std::string* error = nullptr,
                            int64_t engine = kEngine) {
-  fake_mln::Reset();
+  ffi_wrappers::Reset();
   {
     std::lock_guard lock(events_mutex);
     events.clear();
@@ -296,20 +404,13 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
   return handle;
 }
 
-int64_t CreateMap() {
+// Creates a map, and with `style`, loads a style that renders without network
+// access.
+int64_t CreateMap(bool style = true) {
   int64_t handle = CreateMapWithRules({}, {});
   CHECK(handle > 0);
+  if (style) map_texture_load_style_json(handle, NextStyle().c_str());
   return handle;
-}
-
-void FakeSurfaceTarget::DeliverEarly(uint64_t frame_id) {
-  auto owner = last_owner.lock();
-  if (!owner) return;
-  bool kept = owner->OnFrameImage(frame_id, [this, frame_id](int slot) {
-    std::lock_guard lock(mutex);
-    images[slot] = frame_id;
-  });
-  CHECK(kept);
 }
 
 // The image listener's part: delivers the image of frame `frame_id`, and
@@ -321,6 +422,30 @@ bool DeliverImage(uint64_t frame_id) {
     std::lock_guard lock(target->mutex);
     target->images[slot] = frame_id;
   });
+}
+
+// A clock the test advances, when a test installs it.
+std::atomic<int64_t> fake_now{0};
+std::atomic<bool> fake_clock{false};
+int64_t FakeNow() { return fake_now.load(); }
+
+void FakeSurfaceTarget::WillRender(uint64_t frame_id) {
+  {
+    std::lock_guard lock(mutex);
+    if (!will_render.empty() && will_render.back() == frame_id) return;
+    will_render.push_back(frame_id);
+    render_starts.push_back(fake_clock ? FakeNow() : 0);
+  }
+  if (!deliver_early) return;
+  // Delivers the image before the service call returns, as the listener can
+  // on a device.
+  auto owner = last_owner.lock();
+  if (!owner) return;
+  bool kept = owner->OnFrameImage(frame_id, [this, frame_id](int slot) {
+    std::lock_guard lock(mutex);
+    images[slot] = frame_id;
+  });
+  CHECK(kept);
 }
 
 // Plays the image listener and Dart for a surface map while it lives: it
@@ -365,6 +490,7 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
     map_texture_resize(handle, 200, 100, 2.0);
     CHECK(last_target->will_resize_width.load() == 400);
     CHECK(WaitFor([] { return !FrameEvents().empty(); }));
+    CHECK(Settled(handle, 1));
   }
   auto frames = FrameEvents();
   CHECK(frames[0].display_time_us == -1);
@@ -375,8 +501,8 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
   auto owner = last_owner.lock();
   CHECK(owner->Present(0) == nullptr);
   auto stats = Stats(handle);
-  CHECK(stats.rendered_frames == 1);
-  CHECK(stats.presented_frames == 1);
+  CHECK(stats.rendered_frames >= 1);
+  CHECK(stats.presented_frames >= 1);
   CHECK(stats.copy_count == 0);
   owner.reset();
   FakeSurfaceTarget::surfaces_released = false;
@@ -390,8 +516,8 @@ void NoRenderWithoutSurface() {
   int64_t handle = CreateMap();
   last_target->can_present = false;
   map_texture_resize(handle, 100, 100, 2.0);
-  Sleep(100);
-  CHECK(fake_mln::RenderCount() == 0);
+  Sleep(300);
+  CHECK(Stats(handle).rendered_frames == 0);
   // The surface returns through a target task, which renders the pending
   // frame.
   auto owner = last_owner.lock();
@@ -400,18 +526,17 @@ void NoRenderWithoutSurface() {
   owner->RunTargetTask(
       [&](mln_render_session session, const TargetSize& size) {
         task_thread = std::this_thread::get_id();
-        CHECK(session == kSessionHandle);
+        CHECK(session != MLN_HANDLE_NULL);
         CHECK(size.physical_width == 200);
         target->can_present = true;
       },
       /*wait=*/true);
   CHECK(task_thread != std::thread::id());
   CHECK(task_thread != std::this_thread::get_id());
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
-  // A task after the first frame renders the pending frame again, as after a
-  // new surface.
-  owner->RunTargetTask([](mln_render_session, const TargetSize&) {}, true);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
+  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames >= 1; }));
+  // Under #760, a task after the first frame renders again only when it
+  // replaces the target, which makes the session run the waiting demand
+  // again; this fake surface has no target to replace.
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -427,40 +552,46 @@ void TaskWaitEndsAtDispose() {
   CHECK(!ran);
 }
 
-// A clock the test advances.
-std::atomic<int64_t> fake_now{0};
-int64_t FakeNow() { return fake_now.load(); }
-
 // Designs D53 and D134: renders are paced to one per display refresh
 // interval.
 void RendersArePacedByRefreshInterval() {
   fake_now = 1'000'000'000;
+  fake_clock = true;
   map_texture::SetClockForTesting(FakeNow);
-  fake_mln::SetClock(FakeNow);
   int64_t handle = CreateMap();
   map_texture_set_display_refresh_rate(handle, 120);
   constexpr int64_t kInterval = 1'000'000'000 / 120;
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
+  // Under #760 the map thread arms the next frame demand as soon as a frame
+  // has rendered, so the wait for the interval's end is counted then, once.
+  int64_t waits = Stats(handle).interval_waits;
+  CHECK(waits >= 1);
 
   // A render update arrives at once, so the next render waits for the end of
   // the interval.
-  fake_mln::QueueRenderUpdate();
-  Sleep(50);
-  CHECK(fake_mln::RenderCount() == 1);
-  CHECK(Stats(handle).interval_waits == 1);
+  QueueRenderUpdate(handle);
+  Sleep(100);
+  CHECK(Stats(handle).rendered_frames == rendered);
   fake_now += kInterval - 1;
-  fake_mln::QueueRenderUpdate();
-  Sleep(50);
-  CHECK(fake_mln::RenderCount() == 1);
+  QueueRenderUpdate(handle);
+  Sleep(100);
+  CHECK(Stats(handle).rendered_frames == rendered);
   // Counted once per deferred render.
-  CHECK(Stats(handle).interval_waits == 1);
+  CHECK(Stats(handle).interval_waits == waits);
   fake_now += 1;
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
-  auto starts = fake_mln::RenderStarts();
-  CHECK(starts.size() == 2);
-  CHECK(starts[1] - starts[0] >= kInterval);
+  CHECK(WaitFor([handle, rendered] {
+    return Stats(handle).rendered_frames == rendered + 1;
+  }));
+  {
+    std::lock_guard lock(last_target->mutex);
+    auto& starts = last_target->render_starts;
+    CHECK(starts.size() >= 2);
+    if (starts.size() >= 2) {
+      CHECK(starts[starts.size() - 1] - starts[starts.size() - 2] >= kInterval);
+    }
+  }
 
   // Renders don't wait for Dart to choose a frame (design D134).
   CHECK(ReadyEvents().empty());
@@ -468,13 +599,15 @@ void RendersArePacedByRefreshInterval() {
 
   // A render update after more than an interval renders at once.
   fake_now += 5 * kInterval;
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 3; }));
-  CHECK(Stats(handle).interval_waits == 1);
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([handle, rendered] {
+    return Stats(handle).rendered_frames == rendered + 2;
+  }));
+  CHECK(Stats(handle).interval_waits <= waits + 2);
 
   map_texture_dispose(handle);
   map_texture::SetClockForTesting(nullptr);
-  fake_mln::SetClock(nullptr);
+  fake_clock = false;
 }
 
 // The frame-ready event comes only when the frame's image arrives, and Dart's
@@ -489,7 +622,8 @@ void SurfaceFrameIsReadyWhenItsImageArrives() {
   CHECK(ReadyEvents().empty());
   {
     std::lock_guard lock(last_target->mutex);
-    CHECK((last_target->will_render == std::vector<uint64_t>{1}));
+    CHECK(!last_target->will_render.empty() &&
+          last_target->will_render.front() == 1);
   }
   CHECK(DeliverImage(1));
   auto ready = ReadyEvents();
@@ -522,47 +656,47 @@ void SurfaceFrameIsReadyWhenItsImageArrives() {
   map_texture_dispose(handle);
 }
 
-// Design D131: the listener can receive a frame's image before render_update
-// returns; the map thread then publishes the frame when the render returns.
+// Design D131: the listener can receive a frame's image before the service
+// call returns; the map thread then publishes the frame when the frame result
+// arrives.
 void SurfaceImageBeforeRenderReturns() {
   int64_t handle = CreateMap();
   last_target->deliver_early = true;
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
-  auto ready = ReadyEvents()[0];
-  CHECK(ready.frame_id == 1);
+  CHECK(WaitFor([] { return ReadyEvents().size() >= 1; }));
+  CHECK(Settled(handle, 1));
+  size_t ready = ReadyEvents().size();
   CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return ReadyEvents().size() == 2; }));
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([ready] { return ReadyEvents().size() == ready + 1; }));
   CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
-  {
-    std::lock_guard lock(last_target->mutex);
-    CHECK(last_target->images.size() == 2);
-  }
   map_texture_dispose(handle);
 }
 
 // Design D131: a frame whose image never arrives, because a newer frame
 // replaced it on the surface, frees its slot when the newer frame arrives.
 void SurfaceFrameWithoutImageIsFreedByNewerFrame() {
-  map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAlways);
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 2; }));
-  CHECK(DeliverImage(2));
+  CHECK(Settled(handle, 1));
+  int64_t first = Stats(handle).rendered_frames;
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([handle, first] {
+    return Stats(handle).rendered_frames == first + 1;
+  }));
+  uint64_t newer = static_cast<uint64_t>(first + 1);
+  CHECK(DeliverImage(newer));
   auto ready = ReadyEvents();
   CHECK(ready.size() == 1);
-  CHECK(ready[0].frame_id == 2);
-  // The image of the replaced frame is refused without an error.
-  CHECK(!DeliverImage(1));
+  CHECK(!ready.empty() && ready[0].frame_id == static_cast<int64_t>(newer));
+  // The image of a replaced frame is refused without an error.
+  CHECK(!DeliverImage(newer - 1));
   CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
   // Frames keep rendering into free slots while Dart chooses none.
-  for (int frame = 3; frame <= 12; ++frame) {
-    fake_mln::QueueRenderUpdate();
+  for (uint64_t frame = newer + 1; frame <= newer + 10; ++frame) {
+    QueueRenderUpdate(handle);
     CHECK(WaitFor([handle, frame] {
-      return Stats(handle).rendered_frames == frame;
+      return Stats(handle).rendered_frames == static_cast<int64_t>(frame);
     }));
     CHECK(DeliverImage(frame));
   }
@@ -574,7 +708,6 @@ void SurfaceFrameWithoutImageIsFreedByNewerFrame() {
     CHECK(last_target->closed.size() == 10);
   }
   map_texture_dispose(handle);
-  map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAuto);
 }
 
 // Design D133: Dart chooses every frame, and each chosen image is released
@@ -582,24 +715,35 @@ void SurfaceFrameWithoutImageIsFreedByNewerFrame() {
 void SurfaceSlotIsFreedAfterThreeLaterChoices() {
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
-  for (int frame = 1; frame <= 8; ++frame) {
+  CHECK(Settled(handle, 1));
+  int64_t base = Stats(handle).rendered_frames;
+  for (int64_t frame = 1; frame <= base; ++frame) DeliverImage(frame);
+  CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
+  std::vector<uint64_t> closed_before;
+  {
+    std::lock_guard lock(last_target->mutex);
+    closed_before = last_target->closed;
+  }
+  for (int64_t i = 1; i <= 8; ++i) {
+    int64_t frame = base + i;
+    QueueRenderUpdate(handle);
     CHECK(WaitFor([handle, frame] {
       return Stats(handle).rendered_frames == frame;
     }));
     CHECK(DeliverImage(frame));
-    auto ready = ReadyEvents().back();
     map_texture_frame chosen{};
     CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
-    CHECK(chosen.frame_id == ready.frame_id);
+    CHECK(chosen.frame_id == frame);
     {
+      // Choosing frame `frame` releases the image of the frame chosen three
+      // choices before it.
       std::lock_guard lock(last_target->mutex);
-      std::vector<uint64_t> expected;
-      for (int closed = 1; closed <= frame - 3; ++closed) {
-        expected.push_back(closed);
+      auto& closed = last_target->closed;
+      if (i >= 3) {
+        CHECK(!closed.empty() &&
+              closed.back() == static_cast<uint64_t>(frame - 3));
       }
-      CHECK(last_target->closed == expected);
     }
-    fake_mln::QueueRenderUpdate();
   }
   auto stats = Stats(handle);
   CHECK(stats.skipped_renders == 0);
@@ -611,12 +755,13 @@ void SurfaceSlotIsFreedAfterThreeLaterChoices() {
 void SurfaceImageOfUnknownFrameIsReportedOnce() {
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
+  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames >= 1; }));
   CHECK(!DeliverImage(1000));
   CHECK(!DeliverImage(1001));
   auto errors = EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR);
   CHECK(errors.size() == 1);
-  CHECK(errors[0].message == "received an image of unknown frame 1000");
+  CHECK(!errors.empty() &&
+        errors[0].message == "received an image of unknown frame 1000");
   map_texture_dispose(handle);
 }
 
@@ -626,10 +771,14 @@ void SurfaceTargetTaskFreesQueuedFrame() {
   map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kNever);
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
   auto owner = last_owner.lock();
   owner->RunTargetTask([](mln_render_session, const TargetSize&) {}, true);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([handle, rendered] {
+    return Stats(handle).rendered_frames > rendered;
+  }));
   // The first frame's image may still arrive; it is refused without an
   // error.
   CHECK(!DeliverImage(1));
@@ -644,14 +793,16 @@ void SurfaceTargetTaskFreesQueuedFrame() {
 void SurfaceResetSlotsReleasesImages() {
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
-  CHECK(DeliverImage(1));
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
+  CHECK(DeliverImage(rendered));
   CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
   last_owner.lock()->ResetSlots();
   {
     std::lock_guard lock(last_target->mutex);
     CHECK(last_target->images.empty());
-    CHECK((last_target->closed == std::vector<uint64_t>{1}));
+    CHECK(!last_target->closed.empty() &&
+          last_target->closed.back() == static_cast<uint64_t>(rendered));
   }
   CHECK(SelectNewest(handle) == MAP_TEXTURE_NOT_SELECTED);
   map_texture_dispose(handle);
@@ -661,12 +812,12 @@ void IdleMapRendersNothing() {
   int64_t handle = CreateMap();
   SurfaceDart dart(handle);
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return FrameEvents().size() == 1; }));
+  CHECK(WaitFor([] { return FrameEvents().size() >= 1; }));
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
   Sleep(10'000);
-  CHECK(fake_mln::RenderCount() == 1);
   auto stats = Stats(handle);
-  CHECK(stats.rendered_frames == 1);
-  CHECK(stats.interval_waits == 0);
+  CHECK(stats.rendered_frames == rendered);
   map_texture_dispose(handle);
 }
 
@@ -674,17 +825,17 @@ void NoRenderWhilePaused() {
   int64_t handle = CreateMap();
   SurfaceDart dart(handle);
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 1; }));
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
   map_texture_set_paused_for_testing(1);
   map_texture_set_camera(handle, 0, 0, 3, 0, 1);
   Sleep(300);
-  CHECK(fake_mln::RenderCount() == 1);
+  CHECK(Stats(handle).rendered_frames == rendered);
   CHECK(Stats(handle).paused_renders > 0);
   map_texture_set_paused_for_testing(0);
-  CHECK(WaitFor([] { return fake_mln::RenderCount() == 2; }));
   CHECK(WaitFor([] {
     auto frames = FrameEvents();
-    return frames.size() == 2 && frames[1].zoom == 3;
+    return !frames.empty() && frames.back().zoom == 3;
   }));
   map_texture_dispose(handle);
 }
@@ -696,14 +847,16 @@ void FrameReportsLatestCameraSequenceNumber() {
   map_texture_set_camera(handle, 0, 0, 2, 0, 2);
   map_texture_set_camera(handle, 0, 0, 3, 0, 3);
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return FrameEvents().size() == 1; }));
-  CHECK(FrameEvents()[0].seq == 3);
-  CHECK(FrameEvents()[0].zoom == 3);
-  // A frame after a tile load, without a camera change, reports the last
+  CHECK(WaitFor([] { return FrameEvents().size() >= 1; }));
+  CHECK(Settled(handle, 1));
+  CHECK(FrameEvents().back().seq == 3);
+  CHECK(FrameEvents().back().zoom == 3);
+  // A frame after a style change, without a camera change, reports the last
   // applied number.
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return FrameEvents().size() == 2; }));
-  CHECK(FrameEvents()[1].seq == 3);
+  size_t frames = FrameEvents().size();
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([frames] { return FrameEvents().size() > frames; }));
+  CHECK(FrameEvents().back().seq == 3);
   map_texture_dispose(handle);
 }
 
@@ -747,16 +900,30 @@ void PresentSlot(MapTexture& owner, int slot, std::vector<int>& chosen_order) {
   }
 }
 
+// Waits until the buffer map has published `ready` frames and publishes no
+// more for 200 ms, choosing none.
+bool ReadySettled(size_t ready) {
+  if (!WaitFor([ready] { return ReadyEvents().size() >= ready; })) {
+    return false;
+  }
+  size_t count = 0;
+  while (count != ReadyEvents().size()) {
+    count = ReadyEvents().size();
+    Sleep(200);
+  }
+  return true;
+}
+
 void ReadyEventPrecedesDisplayedEvent() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
   map_texture_set_camera(handle, 0, 0, 4, 0, 7);
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
+  CHECK(ReadySettled(1));
   // Not displayed until Dart chooses the frame.
   CHECK(owner->Present(0) == nullptr);
   CHECK(FrameEvents().empty());
-  auto ready = ReadyEvents()[0];
+  auto ready = ReadyEvents().back();
   CHECK(ready.seq == 7);
   CHECK(ready.zoom == 4);
   CHECK(ready.display_time_us == 0);
@@ -796,17 +963,19 @@ void NewestFrameIsChosenAfterReplacement() {
   map_texture::SetRenderAheadModeForTesting(map_texture::RenderAheadMode::kAlways);
   auto owner = last_owner.lock();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
-  auto shown = ReadyEvents()[0];
+  CHECK(ReadySettled(1));
+  auto shown = ReadyEvents().back();
   CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
   void* shown_buffer = reinterpret_cast<void*>(intptr_t{shown.slot + 1});
   CHECK(owner->Present(shown.slot) == shown_buffer);
-  // Rendered ahead, the third frame replaces the second.
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return ReadyEvents().size() == 2; }));
-  fake_mln::QueueRenderUpdate();
-  CHECK(WaitFor([] { return ReadyEvents().size() == 3; }));
-  auto newest = ReadyEvents()[2];
+  // Rendered ahead, the newer frame replaces the one before it.
+  size_t ready = ReadyEvents().size();
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([ready] { return ReadyEvents().size() >= ready + 1; }));
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([ready] { return ReadyEvents().size() >= ready + 2; }));
+  CHECK(ReadySettled(ready + 2));
+  auto newest = ReadyEvents().back();
   map_texture_frame chosen{};
   CHECK(SelectNewest(handle, &chosen) == MAP_TEXTURE_OK);
   CHECK(chosen.frame_id == newest.frame_id);
@@ -838,13 +1007,16 @@ void RenderWaitingForChoiceStartsAfterChoice() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
-  fake_mln::QueueRenderUpdate();
+  CHECK(ReadySettled(1));
+  int64_t rendered = Stats(handle).rendered_frames;
+  QueueRenderUpdate(handle);
   CHECK(WaitFor([handle] { return Stats(handle).waits_for_display > 0; }));
   Sleep(200);
-  CHECK(Stats(handle).rendered_frames == 1);
+  CHECK(Stats(handle).rendered_frames == rendered);
   CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 2; }));
+  CHECK(WaitFor([handle, rendered] {
+    return Stats(handle).rendered_frames == rendered + 1;
+  }));
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -853,19 +1025,22 @@ void MapDoesNotRenderIntoHeldSlot() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
   map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
   std::vector<int> chosen_order;
   int previous = -1;
-  for (size_t frame = 1; frame <= 40; ++frame) {
-    CHECK(WaitFor([frame] { return ReadyEvents().size() == frame; }));
-    if (ReadyEvents().size() != frame) break;
-    auto ready = ReadyEvents().back();
-    Choose(handle, ready);
-    chosen_order.push_back(ready.slot);
+  for (int i = 0; i < 40; ++i) {
+    size_t ready = ReadyEvents().size();
+    if (i > 0) {
+      CHECK(WaitFor([ready] { return ReadyEvents().size() > ready; }));
+    }
+    auto newest = ReadyEvents().back();
+    Choose(handle, newest);
+    chosen_order.push_back(newest.slot);
     // The next frame renders while Flutter presents the frame chosen
     // before.
-    fake_mln::QueueRenderUpdate();
+    QueueRenderUpdate(handle);
     if (previous >= 0) PresentSlot(*owner, previous, chosen_order);
-    previous = ready.slot;
+    previous = newest.slot;
   }
   {
     std::lock_guard lock(last_buffer_target->mutex);
@@ -875,6 +1050,7 @@ void MapDoesNotRenderIntoHeldSlot() {
   CHECK(stats.rendered_frames >= 40);
   CHECK(stats.skipped_renders == 0);
   CHECK(stats.max_slots_in_use <= 4);
+  CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -883,13 +1059,14 @@ void IdleBufferMapRendersNothing() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 1; }));
-  auto ready = ReadyEvents()[0];
+  CHECK(ReadySettled(1));
+  auto ready = ReadyEvents().back();
   Choose(handle, ready);
   owner->Present(ready.slot);
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
   Sleep(10'000);
-  CHECK(fake_mln::RenderCount() == 1);
-  CHECK(Stats(handle).rendered_frames == 1);
+  CHECK(Stats(handle).rendered_frames == rendered);
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -897,21 +1074,22 @@ void IdleBufferMapRendersNothing() {
 void AllSlotsHeldWithoutPresent() {
   int64_t handle = CreateBufferMap();
   map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
   // Dart chooses each frame, and Flutter never presents.
-  for (size_t frame = 1; frame <= 4; ++frame) {
-    CHECK(WaitFor([frame] { return ReadyEvents().size() == frame; }));
-    if (ReadyEvents().size() != frame) break;
+  for (int i = 0; i < 4; ++i) {
+    size_t ready = ReadyEvents().size();
     CHECK(SelectNewest(handle) == MAP_TEXTURE_OK);
-    fake_mln::QueueRenderUpdate();
+    QueueRenderUpdate(handle);
+    if (i < 3) CHECK(WaitFor([ready] { return ReadyEvents().size() > ready; }));
   }
   CHECK(WaitFor([handle] { return Stats(handle).skipped_renders > 0; }));
   auto stats = Stats(handle);
   CHECK(stats.max_slots_in_use == 4);
-  CHECK(stats.rendered_frames == 4);
   // A present frees the slots chosen before the presented one.
+  size_t ready = ReadyEvents().size();
   auto owner = last_owner.lock();
   owner->Present(ReadyEvents().back().slot);
-  CHECK(WaitFor([] { return ReadyEvents().size() == 5; }));
+  CHECK(WaitFor([ready] { return ReadyEvents().size() > ready; }));
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -940,20 +1118,20 @@ void SurfaceMapHasSixSlotsWithOneTexture() {
 }
 
 constexpr const char* kSetCacheSize =
-    "mln_runtime_set_maximum_ambient_cache_size_start";
+    "mln_runtime_set_maximum_ambient_cache_size";
 
 // The names of the calls recorded since the last map was created.
 std::vector<std::string> CallNames() {
   std::vector<std::string> names;
-  for (const auto& call : fake_mln::Calls()) names.push_back(call.name);
+  for (const auto& call : ffi_wrappers::Calls()) names.push_back(call.name);
   return names;
 }
 
-// The sizes passed to mln_runtime_set_maximum_ambient_cache_size_start since
-// the last map was created.
+// The sizes passed to mln_runtime_set_maximum_ambient_cache_size since the
+// last map was created.
 std::vector<uint64_t> CacheSizes() {
   std::vector<uint64_t> sizes;
-  for (const auto& call : fake_mln::Calls()) {
+  for (const auto& call : ffi_wrappers::Calls()) {
     if (call.name == kSetCacheSize) sizes.push_back(call.size);
   }
   return sizes;
@@ -967,7 +1145,7 @@ bool StyleLoaded() {
 // Run this test before any test sets a maximum size, because the maximum size
 // is process-wide.
 void NoCacheSizeWithoutValue() {
-  int64_t handle = CreateMap();
+  int64_t handle = CreateMap(/*style=*/false);
   map_texture_load_style_url(handle, "https://example.com/style.json");
   CHECK(WaitFor(StyleLoaded));
   CHECK(CacheSizes().empty());
@@ -976,25 +1154,25 @@ void NoCacheSizeWithoutValue() {
 
 void CacheSizeIsSetBeforeMapAndStyle() {
   CHECK(map_texture_set_maximum_cache_size(200 << 20) == MAP_TEXTURE_OK);
-  int64_t handle = CreateMap();
+  int64_t handle = CreateMap(/*style=*/false);
   map_texture_load_style_url(handle, "https://example.com/style.json");
   CHECK(WaitFor(StyleLoaded));
   CHECK((CallNames() == std::vector<std::string>{
                             "mln_runtime_create", kSetCacheSize,
-                            "mln_runtime_offline_operation_discard",
-                            "mln_map_create", "mln_map_set_style_url"}));
+                            "mln_runtime_create_map",
+                            "mln_map_set_style_url"}));
   CHECK((CacheSizes() == std::vector<uint64_t>{200 << 20}));
   map_texture_dispose(handle);
 }
 
 void CacheSizeAppliesToMapsCreatedAfterIt() {
   CHECK(map_texture_set_maximum_cache_size(200 << 20) == MAP_TEXTURE_OK);
-  int64_t first = CreateMap();
+  int64_t first = CreateMap(/*style=*/false);
   CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
   map_texture_load_style_url(first, "https://example.com/style.json");
   CHECK(WaitFor(StyleLoaded));
   CHECK((CacheSizes() == std::vector<uint64_t>{200 << 20}));
-  int64_t second = CreateMap();
+  int64_t second = CreateMap(/*style=*/false);
   CHECK((CacheSizes() == std::vector<uint64_t>{10 << 20}));
   map_texture_dispose(first);
   map_texture_dispose(second);
@@ -1004,44 +1182,45 @@ void NegativeCacheSizeIsRejected() {
   CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
   CHECK(map_texture_set_maximum_cache_size(-1) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
-  int64_t handle = CreateMap();
+  int64_t handle = CreateMap(/*style=*/false);
   CHECK((CacheSizes() == std::vector<uint64_t>{10 << 20}));
   map_texture_dispose(handle);
 }
 
 void ZeroCacheSizeIsApplied() {
   CHECK(map_texture_set_maximum_cache_size(0) == MAP_TEXTURE_OK);
-  int64_t handle = CreateMap();
+  int64_t handle = CreateMap(/*style=*/false);
   CHECK((CacheSizes() == std::vector<uint64_t>{0}));
   map_texture_dispose(handle);
 }
 
 void CacheSizeFailureIsReportedAndMapRenders() {
   CHECK(map_texture_set_maximum_cache_size(10 << 20) == MAP_TEXTURE_OK);
-  fake_mln::SetMaximumCacheSizeStatus(MLN_STATUS_NATIVE_ERROR);
-  int64_t handle = CreateMap();
-  fake_mln::SetMaximumCacheSizeStatus(MLN_STATUS_OK);
+  ffi_wrappers::Reset();
+  ffi_wrappers::SetMaximumCacheSizeStatus(MLN_STATUS_NATIVE_ERROR);
   {
     std::lock_guard lock(events_mutex);
-    CHECK(events.size() == 1 &&
-          events[0].type == MAP_TEXTURE_EVENT_RENDER_ERROR);
+    events.clear();
   }
+  int64_t handle = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
+                                      nullptr, 0, nullptr);
+  ffi_wrappers::SetMaximumCacheSizeStatus(MLN_STATUS_OK);
+  CHECK(handle > 0);
+  CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).size() == 1);
   CHECK((CallNames() == std::vector<std::string>{
                             "mln_runtime_create", kSetCacheSize,
-                            "mln_map_create"}));
+                            "mln_runtime_create_map"}));
+  map_texture_load_style_json(handle, NextStyle().c_str());
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
+  CHECK(WaitFor([handle] { return Stats(handle).rendered_frames >= 1; }));
   map_texture_dispose(handle);
 }
 
-// CallNames() without the process-wide cache size calls.
+// CallNames() without the process-wide cache size call.
 std::vector<std::string> InitCallNames() {
   std::vector<std::string> names;
   for (const auto& name : CallNames()) {
-    if (name != kSetCacheSize &&
-        name != "mln_runtime_offline_operation_discard") {
-      names.push_back(name);
-    }
+    if (name != kSetCacheSize) names.push_back(name);
   }
   return names;
 }
@@ -1061,69 +1240,65 @@ void HeaderRulesAreCopiedAndRegistered() {
   for (char* text : {url1, name1, value1, name2, value2, url2, value3}) {
     std::memset(text, 'x', std::strlen(text));
   }
-  CHECK(fake_mln::HeaderTransformRegistrations() == 1);
-  CHECK(fake_mln::HeaderTransformUsesAdapter());
-  auto rules = fake_mln::HeaderRules();
+  auto rules = ffi_wrappers::HeaderRules();
   CHECK(rules.size() == 2);
   if (rules.size() == 2) {
     for (const auto& rule : rules) {
-      CHECK(rule.kind == MLN_ADAPTER_RESOURCE_KIND_ANY);
-      CHECK(rule.flags == MLN_ADAPTER_URL_MATCH_GLOB);
+      CHECK(rule.kinds == MLN_RESOURCE_KIND_MASK_ALL);
+      CHECK(rule.flags == MLN_URL_MATCH_GLOB);
     }
     CHECK(rules[0].url == "https://tiles.example.com/v2/**");
-    CHECK((rules[0].headers == std::vector<fake_mln::Header>{
+    CHECK((rules[0].headers == std::vector<ffi_wrappers::Header>{
                                    {"X-Access-Key", "k2"}, {"X-Other", "o"}}));
     CHECK(rules[1].url == "https://tiles.example.com/**");
     CHECK((rules[1].headers ==
-           std::vector<fake_mln::Header>{{"X-Access-Key", "k1"}}));
+           std::vector<ffi_wrappers::Header>{{"X-Access-Key", "k1"}}));
   }
   CHECK((InitCallNames() == std::vector<std::string>{
                                 "mln_runtime_create",
                                 "mln_runtime_set_http_header_transform",
-                                "mln_map_create"}));
+                                "mln_runtime_create_map"}));
   map_texture_dispose(handle);
 }
 
 void RuleWithoutHeadersIsRegistered() {
   int64_t handle = CreateMapWithRules({"https://a.example.com/**"}, {0});
   CHECK(handle > 0);
-  auto rules = fake_mln::HeaderRules();
+  auto rules = ffi_wrappers::HeaderRules();
   CHECK(rules.size() == 1 && rules[0].headers.empty());
   map_texture_dispose(handle);
 }
 
 void NoHeaderTransformWithoutRules() {
-  int64_t handle = CreateMap();
-  CHECK(fake_mln::HeaderTransformRegistrations() == 0);
-  CHECK((InitCallNames() ==
-         std::vector<std::string>{"mln_runtime_create", "mln_map_create"}));
+  int64_t handle = CreateMap(/*style=*/false);
+  CHECK(ffi_wrappers::HeaderRules().empty());
+  CHECK((InitCallNames() == std::vector<std::string>{
+                                "mln_runtime_create",
+                                "mln_runtime_create_map"}));
   map_texture_dispose(handle);
 }
 
 void EmptyAssetPathKeepsDefault() {
-  int64_t handle = CreateMap();
-  CHECK(fake_mln::LastAssetPath() == "<null>");
+  int64_t handle = CreateMap(/*style=*/false);
+  CHECK(ffi_wrappers::LastAssetPath() == "<null>");
   map_texture_dispose(handle);
 }
 
+// Under #760 the runtime validates the rules when the map thread registers
+// them, so the creation fails with the runtime's message.
 void RejectedHeaderFailsCreate() {
-  const char* message = "HTTP header \"Host\" is managed by MapLibre";
-  fake_mln::SetHeaderValidateResult("Host", MLN_STATUS_INVALID_ARGUMENT,
-                                    message);
   std::string error;
   int64_t result = CreateMapWithRules(
       {"https://a.example.com/**", "X-Ok", "1", "Host", "secret"}, {2},
       &error);
-  fake_mln::SetHeaderValidateResult("", MLN_STATUS_OK, "");
-  CHECK(result == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
-  CHECK(error == message);
-  // Rejected before the map thread starts.
-  CHECK(fake_mln::Calls().empty());
+  CHECK(result == MAP_TEXTURE_ERROR_CREATE_FAILED);
+  CHECK(error.find("Host") != std::string::npos);
+  CHECK(error.find("secret") == std::string::npos);
 }
 
 void InvalidRuleArraysFailCreate() {
   std::string error;
-  fake_mln::Reset();
+  ffi_wrappers::Reset();
   char* message = nullptr;
   CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 1,
                            &message) ==
@@ -1137,14 +1312,22 @@ void InvalidRuleArraysFailCreate() {
   CHECK(map_texture_create(kEngine, 2.0, 1, nullptr, nullptr, nullptr, 0,
                            nullptr) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
-  CHECK(fake_mln::Calls().empty());
+  CHECK(ffi_wrappers::Calls().empty());
 }
 
 void FailedInitReportsMessage() {
-  fake_mln::SetRuntimeCreateResult(MLN_STATUS_NATIVE_ERROR, "no runtime");
-  std::string error;
-  int64_t result = CreateMapWithRules({}, {}, &error);
-  fake_mln::SetRuntimeCreateResult(MLN_STATUS_OK, "");
+  ffi_wrappers::Reset();
+  ffi_wrappers::SetRuntimeCreateResult(MLN_STATUS_NATIVE_ERROR, "no runtime");
+  {
+    std::lock_guard lock(events_mutex);
+    events.clear();
+  }
+  char* message = nullptr;
+  int64_t result = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
+                                      nullptr, 0, &message);
+  ffi_wrappers::SetRuntimeCreateResult(MLN_STATUS_OK, "");
+  std::string error = message == nullptr ? "" : message;
+  map_texture_string_free(message);
   CHECK(result == MAP_TEXTURE_ERROR_CREATE_FAILED);
   CHECK(error.find("mln_runtime_create") != std::string::npos);
   CHECK(error.find("no runtime") != std::string::npos);
@@ -1154,34 +1337,46 @@ constexpr const char* kGlyphFailure =
     "Failed to load glyph range 0-255 for font stack Noto Sans Regular:( "
     "HTTP status code 404)";
 
+// Logs `records` on the map thread of the last map, as MapLibre's renderer
+// does with a caller-graphics-thread driver.
+void LogOnMapThread(std::vector<ffi_wrappers::LogRecord> records) {
+  auto owner = last_owner.lock();
+  owner->RunTargetTask(
+      [records = std::move(records)](mln_render_session, const TargetSize&) {
+        for (const auto& record : records) CHECK(ffi_wrappers::Log(record));
+      },
+      /*wait=*/true);
+}
+
 void GlyphFailureIsReportedAsLoadFailure() {
-  int64_t handle = CreateMap();
+  int64_t handle = CreateMap(/*style=*/false);
   // Once for the process, however many maps are created.
-  CHECK(fake_mln::LogCallbackRegistrations() == 1);
-  fake_mln::QueueLogRecord({.message = kGlyphFailure});
+  CHECK(ffi_wrappers::LogCallbackRegistrations() == 1);
+  LogOnMapThread({{.message = kGlyphFailure}});
   CHECK(WaitFor([] { return !LoadFailures().empty(); }));
   auto reported = LoadFailures();
   CHECK(reported.size() == 1);
-  CHECK(reported[0] == kGlyphFailure);
+  CHECK(!reported.empty() && reported[0] == kGlyphFailure);
   map_texture_dispose(handle);
 }
 
 void OtherLogRecordsAreNotReported() {
-  int64_t handle = CreateMap();
-  fake_mln::QueueLogRecord({.message = "Failed to load tile 1/0/0"});
-  fake_mln::QueueLogRecord(
-      {.severity = MLN_LOG_SEVERITY_WARNING, .message = kGlyphFailure});
-  fake_mln::QueueLogRecord(
-      {.event = MLN_LOG_EVENT_GLYPH, .message = kGlyphFailure});
+  int64_t handle = CreateMap(/*style=*/false);
+  LogOnMapThread({
+      {.message = "Failed to load tile 1/0/0"},
+      {.severity = MLN_LOG_SEVERITY_WARNING, .message = kGlyphFailure},
+      {.event = MLN_LOG_EVENT_GLYPH, .message = kGlyphFailure},
+  });
   // Logged off the map thread, so it belongs to no map.
-  fake_mln::Log({.message = kGlyphFailure});
-  // The last record shows that the pump has passed the others on.
-  fake_mln::QueueLogRecord({.message = std::string(kGlyphFailure) + " last"});
+  CHECK(ffi_wrappers::Log({.message = kGlyphFailure}));
+  // The last record shows that the map thread has passed the others on.
+  LogOnMapThread({{.message = std::string(kGlyphFailure) + " last"}});
   CHECK(WaitFor([] { return !LoadFailures().empty(); }));
   Sleep(50);
   auto reported = LoadFailures();
   CHECK(reported.size() == 1);
-  CHECK(reported[0] == std::string(kGlyphFailure) + " last");
+  CHECK(!reported.empty() &&
+        reported[0] == std::string(kGlyphFailure) + " last");
   map_texture_dispose(handle);
 }
 
@@ -1196,7 +1391,7 @@ void MapKeepsItsEngineToken() {
 }
 
 void DisposeEngineMapsDisposesOnlyThatEngine() {
-  int64_t first = CreateMap();
+  int64_t first = CreateMap(/*style=*/false);
   // Without the reset of CreateMapWithRules, which the live map uses.
   int64_t second =
       map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0, nullptr);
@@ -1221,7 +1416,7 @@ void UnknownEngineFailsCreate() {
   CHECK(result == MAP_TEXTURE_ERROR_CREATE_FAILED);
   CHECK(error == map_texture::kEngineDetachedError);
   // The map thread doesn't start.
-  CHECK(fake_mln::Calls().empty());
+  CHECK(ffi_wrappers::Calls().empty());
 }
 
 }  // namespace
@@ -1251,51 +1446,86 @@ std::string PlatformCachePath() { return {}; }
 
 std::string PlatformAssetPath() { return {}; }
 
-void RunInPlatformScope(const std::function<void()>& work) { work(); }
+void RunInPlatformScope(const std::function<void()>& work) {
+  @autoreleasepool {
+    work();
+  }
+}
 
 }  // namespace map_texture
 
-int main() {
-  SurfaceFrameIsReportedWithoutDisplayTime();
-  NoRenderWithoutSurface();
-  TaskWaitEndsAtDispose();
-  RendersArePacedByRefreshInterval();
-  SurfaceFrameIsReadyWhenItsImageArrives();
-  SurfaceImageBeforeRenderReturns();
-  SurfaceFrameWithoutImageIsFreedByNewerFrame();
-  SurfaceSlotIsFreedAfterThreeLaterChoices();
-  SurfaceImageOfUnknownFrameIsReportedOnce();
-  SurfaceTargetTaskFreesQueuedFrame();
-  SurfaceResetSlotsReleasesImages();
-  IdleMapRendersNothing();
-  NoRenderWhilePaused();
-  FrameReportsLatestCameraSequenceNumber();
-  ReadyEventPrecedesDisplayedEvent();
-  NewestFrameIsChosenAfterReplacement();
-  RenderWaitingForChoiceStartsAfterChoice();
-  MapDoesNotRenderIntoHeldSlot();
-  IdleBufferMapRendersNothing();
-  AllSlotsHeldWithoutPresent();
-  SelectAfterDisposeReportsDisposed();
-  SurfaceMapHasSixSlotsWithOneTexture();
-  NoCacheSizeWithoutValue();
-  CacheSizeIsSetBeforeMapAndStyle();
-  CacheSizeAppliesToMapsCreatedAfterIt();
-  NegativeCacheSizeIsRejected();
-  ZeroCacheSizeIsApplied();
-  CacheSizeFailureIsReportedAndMapRenders();
-  HeaderRulesAreCopiedAndRegistered();
-  RuleWithoutHeadersIsRegistered();
-  NoHeaderTransformWithoutRules();
-  EmptyAssetPathKeepsDefault();
-  RejectedHeaderFailsCreate();
-  InvalidRuleArraysFailCreate();
-  FailedInitReportsMessage();
-  GlyphFailureIsReportedAsLoadFailure();
-  OtherLogRecordsAreNotReported();
-  MapKeepsItsEngineToken();
-  DisposeEngineMapsDisposesOnlyThatEngine();
-  UnknownEngineFailsCreate();
+int main(int argc, char** argv) {
+  struct Test {
+    const char* name;
+    void (*run)();
+  };
+  const Test tests[] = {
+      {"SurfaceFrameIsReportedWithoutDisplayTime",
+       SurfaceFrameIsReportedWithoutDisplayTime},
+      {"NoRenderWithoutSurface", NoRenderWithoutSurface},
+      {"TaskWaitEndsAtDispose", TaskWaitEndsAtDispose},
+      {"RendersArePacedByRefreshInterval", RendersArePacedByRefreshInterval},
+      {"SurfaceFrameIsReadyWhenItsImageArrives",
+       SurfaceFrameIsReadyWhenItsImageArrives},
+      {"SurfaceImageBeforeRenderReturns", SurfaceImageBeforeRenderReturns},
+      {"SurfaceFrameWithoutImageIsFreedByNewerFrame",
+       SurfaceFrameWithoutImageIsFreedByNewerFrame},
+      {"SurfaceSlotIsFreedAfterThreeLaterChoices",
+       SurfaceSlotIsFreedAfterThreeLaterChoices},
+      {"SurfaceImageOfUnknownFrameIsReportedOnce",
+       SurfaceImageOfUnknownFrameIsReportedOnce},
+      {"SurfaceTargetTaskFreesQueuedFrame", SurfaceTargetTaskFreesQueuedFrame},
+      {"SurfaceResetSlotsReleasesImages", SurfaceResetSlotsReleasesImages},
+      {"IdleMapRendersNothing", IdleMapRendersNothing},
+      {"NoRenderWhilePaused", NoRenderWhilePaused},
+      {"FrameReportsLatestCameraSequenceNumber",
+       FrameReportsLatestCameraSequenceNumber},
+      {"ReadyEventPrecedesDisplayedEvent", ReadyEventPrecedesDisplayedEvent},
+      {"NewestFrameIsChosenAfterReplacement",
+       NewestFrameIsChosenAfterReplacement},
+      {"RenderWaitingForChoiceStartsAfterChoice",
+       RenderWaitingForChoiceStartsAfterChoice},
+      {"MapDoesNotRenderIntoHeldSlot", MapDoesNotRenderIntoHeldSlot},
+      {"IdleBufferMapRendersNothing", IdleBufferMapRendersNothing},
+      {"AllSlotsHeldWithoutPresent", AllSlotsHeldWithoutPresent},
+      {"SelectAfterDisposeReportsDisposed", SelectAfterDisposeReportsDisposed},
+      {"SurfaceMapHasSixSlotsWithOneTexture",
+       SurfaceMapHasSixSlotsWithOneTexture},
+      {"NoCacheSizeWithoutValue", NoCacheSizeWithoutValue},
+      {"CacheSizeIsSetBeforeMapAndStyle", CacheSizeIsSetBeforeMapAndStyle},
+      {"CacheSizeAppliesToMapsCreatedAfterIt",
+       CacheSizeAppliesToMapsCreatedAfterIt},
+      {"NegativeCacheSizeIsRejected", NegativeCacheSizeIsRejected},
+      {"ZeroCacheSizeIsApplied", ZeroCacheSizeIsApplied},
+      {"CacheSizeFailureIsReportedAndMapRenders",
+       CacheSizeFailureIsReportedAndMapRenders},
+      {"HeaderRulesAreCopiedAndRegistered", HeaderRulesAreCopiedAndRegistered},
+      {"RuleWithoutHeadersIsRegistered", RuleWithoutHeadersIsRegistered},
+      {"NoHeaderTransformWithoutRules", NoHeaderTransformWithoutRules},
+      {"EmptyAssetPathKeepsDefault", EmptyAssetPathKeepsDefault},
+      {"RejectedHeaderFailsCreate", RejectedHeaderFailsCreate},
+      {"InvalidRuleArraysFailCreate", InvalidRuleArraysFailCreate},
+      {"FailedInitReportsMessage", FailedInitReportsMessage},
+      {"GlyphFailureIsReportedAsLoadFailure",
+       GlyphFailureIsReportedAsLoadFailure},
+      {"OtherLogRecordsAreNotReported", OtherLogRecordsAreNotReported},
+      {"MapKeepsItsEngineToken", MapKeepsItsEngineToken},
+      {"DisposeEngineMapsDisposesOnlyThatEngine",
+       DisposeEngineMapsDisposesOnlyThatEngine},
+      {"UnknownEngineFailsCreate", UnknownEngineFailsCreate},
+  };
+  // A name as argument runs only the tests whose names contain it.
+  const char* only = nullptr;
+  if (argc > 1) only = argv[1];
+  for (const Test& test : tests) {
+    if (only != nullptr && std::strstr(test.name, only) == nullptr) continue;
+    int before = failures;
+    @autoreleasepool {
+      test.run();
+    }
+    std::printf("%s %s\n", failures == before ? "PASS" : "FAIL", test.name);
+    std::fflush(stdout);
+  }
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

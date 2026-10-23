@@ -32,7 +32,7 @@ third_party/                             fetched FFI release, and the local FFI 
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | release 0.202610.1, commit `a2f332ec3b5d5f5cdda227acfea757dcf59970fd`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
+| MapLibre Native FFI | release 0.202610.2, commit `a27e607357aef2cc9c9c89d10ebba7b3bde26fe8`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.5 |
 | Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 29, ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
@@ -57,7 +57,10 @@ flutter run --release -d <Android id>     # Android device or emulator, API leve
 ## Tests
 
 ```sh
-# C++ unit tests for the core (no MapLibre)
+# C++ unit tests for the core, on the real FFI with headless Metal targets.
+# They link the pinned release's framework, which scripts/fetch_ffi_release.sh
+# unpacks, or a local FFI build if there is one.
+scripts/fetch_ffi_release.sh
 cd packages/flutter_mapigrade
 cmake -S test/native -B build/native-tests
 cmake --build build/native-tests
@@ -130,7 +133,7 @@ Output in `third_party/maplibre-native-ffi/` (gitignored):
 - `<preset>/lib/libmaplibre-native-c.dylib`, `<preset>/include/maplibre_native_c.h` and `<preset>/share/maplibre-native-c/` (the FFI license and third-party notices)
 - `android-arm64-egl/lib/libmaplibre-native-c.so` (16 KB segment alignment), with the same `include/` and `share/maplibre-native-c/` as the Apple presets; the plugin's Gradle build links it and packages it in the APK
 - `android-maven/org/maplibre/nativeffi/rustls-platform-verifier-android/<version>/`, the verifier's AAR and POM, where `<version>` is the first 12 characters of the FFI commit; the AAR's classes are in `org.maplibre.nativeffi.internal.rustlsplatformverifier`, where the FFI's patch moves them. The plugin's Gradle build adds the repository and depends on the AAR, and `mln_android_init` needs it at run time
-- `MaplibreNativeC.xcframework` with three slices: `macos-arm64` (a versioned framework, install name `@rpath/MaplibreNativeC.framework/Versions/A/MaplibreNativeC`, minimum macOS 14.3), `ios-arm64` and `ios-arm64-simulator` (flat frameworks, install name `@rpath/MaplibreNativeC.framework/MaplibreNativeC`, minimum iOS 15.5); each has the headers, a module map with the submodules `CallbackAdapter` and `Plugin`, `PrivacyInfo.xcprivacy` and the FFI's license notices, as the FFI's CMake install creates them
+- `MaplibreNativeC.xcframework` with three slices: `macos-arm64` (a versioned framework, install name `@rpath/MaplibreNativeC.framework/Versions/A/MaplibreNativeC`, minimum macOS 14.3), `ios-arm64` and `ios-arm64-simulator` (flat frameworks, install name `@rpath/MaplibreNativeC.framework/MaplibreNativeC`, minimum iOS 15.5); each has the headers, a module map with the submodule `Plugin`, `PrivacyInfo.xcprivacy` and the FFI's license notices, as the FFI's CMake install creates them
 
 Measured on an Apple M2 Max, macOS 26.6.2, Xcode 26.6, from a clean checkout:
 
@@ -154,9 +157,9 @@ The window shows a map of San Francisco.
 
 To update MapLibre Native FFI to a new upstream release:
 
-1. In `packages/flutter_mapigrade/maplibre_ffi.lock`, set `MAPLIBRE_FFI_VERSION` to the release's version, `MAPLIBRE_FFI_COMMIT` to the commit of its tag, `MAPLIBRE_FFI_XCFRAMEWORK_URL` to the URL of the release's `MaplibreNativeC.xcframework.zip`, and `MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM` to `swift package compute-checksum` of that zip.
+1. In `packages/flutter_mapigrade/maplibre_ffi.lock`, set `MAPLIBRE_FFI_VERSION` to the release's version, `MAPLIBRE_FFI_COMMIT` to the commit of its tag (`v<version>`; releases before 0.202610.2 were tagged `core/v<version>`), `MAPLIBRE_FFI_XCFRAMEWORK_URL` to the URL of the release's `MaplibreNativeC.xcframework.zip`, and `MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM` to `swift package compute-checksum` of that zip.
 2. Run `scripts/update_ffi_pins.sh`, which writes the URL and checksum into `Package.swift`.
-3. Run `scripts/fetch_ffi_release.sh`, which downloads the release's tarballs into `third_party/maplibre-native-ffi-release/<version>/`.
+3. Run `scripts/fetch_ffi_release.sh`, which downloads the release's tarballs and `MaplibreNativeC.xcframework.zip` into `third_party/maplibre-native-ffi-release/<version>/` and unpacks the framework there for the native tests.
 4. Run `scripts/copy_ffi_notices.sh`, which copies the notices of the tarballs into `packages/flutter_mapigrade/notices/`.
 5. Run the tests. If you keep a local build (below), run `scripts/build_maplibre_ffi.sh` to rebuild it at the new commit.
 

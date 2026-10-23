@@ -3,16 +3,16 @@
 # the other scripts source it, and android/build.gradle.kts reads it.
 #
 # The upstream release whose artifacts the package uses.
-MAPLIBRE_FFI_VERSION=0.202610.1
+MAPLIBRE_FFI_VERSION=0.202610.2
 # The xcframework zip of that release and its `swift package compute-checksum`
 # value. scripts/update_ffi_pins.sh writes both into
 # darwin/flutter_mapigrade/Package.swift.
-MAPLIBRE_FFI_XCFRAMEWORK_URL=https://github.com/maplibre/maplibre-native-ffi/releases/download/core/v0.202610.1/MaplibreNativeC.xcframework.zip
-MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=76c36bc70e83a78ee77f6d92970283714bcf860f8845c1de42fc8d59a9eb7ae6
+MAPLIBRE_FFI_XCFRAMEWORK_URL=https://github.com/maplibre/maplibre-native-ffi/releases/download/v0.202610.2/MaplibreNativeC.xcframework.zip
+MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=a4d2f8b2367842f41fddb9232d08c3af0b83d993d66661b0285e2620a9767746
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
 # The commit of the release's tag, which artifact.json in the release's
 # tarballs states as gitSha. scripts/build_maplibre_ffi.sh builds it locally.
-MAPLIBRE_FFI_COMMIT=a2f332ec3b5d5f5cdda227acfea757dcf59970fd
+MAPLIBRE_FFI_COMMIT=a27e607357aef2cc9c9c89d10ebba7b3bde26fe8
 # The presets that make up MaplibreNativeC.xcframework, one slice each.
 MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"
 # The Android presets. Each is installed on its own and is not part of the

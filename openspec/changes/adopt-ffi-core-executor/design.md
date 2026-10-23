@@ -6,7 +6,7 @@ On `main`, each map has a map thread that mapigrade owns (designs D1 and D2). It
 
 The experiment `experiment-maplibre-pr-760-port` (branch of the same name, draft PR greensopinion/mapigrade#5, findings in `docs/maplibre-pr-760-port-findings.md` on that branch at commit `a7be839`) ported mapigrade to #760 at FFI `main` (`6d9058bf6`) and passed `map_texture_test.dart` and `map_layer_test.dart` on macOS, the iOS simulator and the Pixel 4a (5G), and `engines_test.dart` on macOS. The decisions below are those of the experiment that held, restated as final ones; each cites the experiment's decision or finding. The experiment's code is the reference for the implementation, not its starting point (D179).
 
-The FFI C API changed only in comments and by one added field (`pixel_format`) between `6d9058bf6` and FFI `main` on 2026-10-22, so the snapshot that this change builds against (D186) serves the same API as the experiment's pin.
+The FFI C API changed only in comments and by one added field (`pixel_format`) between `6d9058bf6` and FFI `main` on 2026-10-22, and release 0.202610.2, which this change pins (D186), adds only three projection functions to that.
 
 ## Goals / Non-Goals
 
@@ -17,7 +17,7 @@ The FFI C API changed only in comments and by one added field (`pixel_format`) b
 **Non-Goals:**
 - The pacing of rendering ahead (designs D19 and D124). Renders that cost between 3/4 of and one refresh interval miss refreshes on `main` today, on the Mac at 120 Hz and on the iPhone 13 at 60 Hz; a separate change addresses it.
 - Placing the map thread on the performance cores on iOS (D188).
-- Pinning the FFI release; a follow-up change does it when the release exists.
+- The iOS 15.0 deployment target of `support-ios-15-0`, which follows this change.
 - Requests to #760 that the experiment drafted (CPU-only driver work, an explicit hook before a surface swap, recovery of a lost surface target). This change works with #760 as it is.
 
 ## Decisions
@@ -79,27 +79,22 @@ The session attaches to the EGL window surface and switches surfaces with `mln_r
 Alternatives:
 - Service the session while paused to run memory reduction at once. The service call would also run a queued render, which breaks "No rendering while the application is in the background".
 
-### D186. Snapshot mode for the FFI until its release
+### D186. The FFI pin moves to release 0.202610.2
 
-`maplibre_ffi.lock` states either a release, as today, or the snapshot (`MAPLIBRE_FFI_VERSION=snapshot`). In snapshot mode:
+FFI release 0.202610.2 (tag `v0.202610.2`, commit `a27e607`, 2026-10-22) includes #760, #905 and #906, and its C API differs from the snapshot that the experiment and this change were developed against (commit `14130bb18`) only by three added projection functions. `maplibre_ffi.lock` states 0.202610.2, its xcframework zip and checksum, and its commit, as for any FFI update (`CONTRIBUTING.md`, "Update the FFI"); `scripts/update_ffi_pins.sh` writes them into `Package.swift`, and the notices are copied from its tarballs. Its Android tarball adds three notice files, `kotlin.txt`, `kotlin-notice.txt` and `rustls-platform-verifier-notice.txt`, for the Kotlin code and the patched rustls-platform-verifier component of the FFI's Android runtime; the package lists them as the Android entries "Kotlin", "Kotlin NOTICE" and "rustls-platform-verifier" (the `third-party-notices` delta spec). The other notice files are unchanged. Android takes the release's runtime AAR from Maven Central, as before.
 
-- iOS and macOS: `scripts/fetch_ffi_snapshot.sh` downloads `MaplibreNativeC.xcframework.zip` of FFI's `unstable-native-snapshot` release into `third_party/` and makes `Frameworks/MaplibreNativeC.xcframework` resolve to it, so `Package.swift` uses its local-path binary target, which takes no checksum. The script prints the commit that the snapshot release states.
-- Android: `build.gradle.kts` depends on `org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android:0.1.0-SNAPSHOT` from `https://central.sonatype.com/repository/maven-snapshots/`, and states the snapshot in its output.
-- The package's `pubspec.yaml` sets `publish_to: none`, so `flutter pub publish` refuses. `scripts/consumer_build.sh` removes `publish_to` in a temporary copy before the dry run that lists the files, and runs the snapshot fetch into its copy of the package for the iOS and macOS builds.
-- `ffi_pins_test.dart` checks, in snapshot mode, that the lock, `Package.swift`'s remote target and `publish_to: none` agree, in place of the release pins.
-- The notices stay those of the last release, and their comparison test is skipped.
-- A local FFI build (`scripts/build_maplibre_ffi.sh`) still takes precedence on every platform it installed.
-
-The follow-up change that pins the release removes the snapshot from the lock, `publish_to: none` from the pubspec, and the snapshot repository from `build.gradle.kts`.
+The FFI dropped the `core/` prefix from its release tags with this release, so `scripts/fetch_ffi_release.sh` builds the release URL from `v<version>`. It also downloads the release's `MaplibreNativeC.xcframework.zip`, checks it against the release's `SHA256SUMS`, and unpacks it next to the tarballs, so that the native tests (D187) link the pinned release without a local build.
 
 Alternatives:
-- Build the FFI from source for `main` and in CI. Every build of `main` would need mise, the NDK and a cold MapLibre build.
-- Mirror one snapshot's artifacts at a fixed URL with a checksum. Reproducible, but mapigrade would host FFI binaries, and the pin is temporary.
-- Point `Package.swift` at the snapshot URL with a checksum. FFI republishes the snapshot about daily under the same URL, so the checksum breaks every build until a commit updates it.
+- A snapshot mode for `main` until the release (an earlier version of this decision): `main` would have built against FFI's daily snapshot without checksums, and its pubspec would have refused publishing until a follow-up change pinned the release. The release came out before the merge, so the pin is direct.
 
 ### D187. Native tests run against a headless FFI target, or a fake of the asynchronous API
 
 The native tests in `test/native/` fake the synchronous API (`fake_mln.*`) and test the core's map thread, commands and buffer states. They move to the real FFI with a headless target, if one runs on the macOS host and in CI: a session-owned Metal texture ring on macOS gives real completions, frame demands and frame results without a Flutter engine. If no headless target serves the tests (for example, CI has no GPU for it), the tests move to a fake of the asynchronous API: completions, frame demands, frame results and wakes. The first task decides, from a test of the map thread's create, render and dispose against the headless target.
+
+*Outcome (task 2.1, 2026-10-22):* the headless target serves the tests. `test/native/ffi_headless_test.mm` creates a runtime and a map, loads an inline style, attaches a session-owned Metal texture ring with the caller-graphics-thread driver, renders one frame demand and releases everything through their completions, against the snapshot's framework (commit `14130bb18`), in 0.7 s on the Mac. The native tests move to the real FFI; the fake isn't rewritten. The native tests run only on developers' Macs, as on `main`; CI doesn't run them.
+
+About 11 of the 45 tests of `map_texture_tests.cpp` check what the core passes to the FFI (the cache size before the map and the style, the header rules, the asset path) or how it handles an FFI failure (runtime creation, the cache size, a rejected header), which the real FFI can't show. For those, the test binary interposes the few `mln_*` functions they need with dyld interposing: an interposed function records its arguments or returns the failure that a test sets, and otherwise calls the real FFI. The other tests use the real FFI unchanged. (User decision, 2026-10-22, over dropping those tests, which the integration tests cover only end to end.)
 
 Alternatives:
 - Rewrite the fake first. It needs a model of #760's ordering of completions and frame results, which the real FFI provides.
@@ -114,15 +109,11 @@ The camera-to-frame latency that the experiment added to the internal statistics
 
 ## Risks / Trade-offs
 
-- [A daily snapshot breaks `main`'s build with an FFI API change] → FFI is prerelease and makes breaking changes on purpose. The snapshot fetch prints the snapshot's commit, so a break can be traced to an FFI commit; the follow-up change ends snapshot mode at the release.
-- [A failed snapshot run leaves the Apple and Android artifacts at different commits] → The build outputs state the snapshot; a mismatch shows as a difference between platforms that the commit lines explain.
-- [Snapshot mode leaves the notices of an older release in the package] → The package can't be published in snapshot mode, so no application ships them.
 - [A headless target doesn't run in CI] → D187 falls back to a fake; the first task decides before the tests are written.
 - [Older iOS devices than the iPhone 13 lose more frame rate to the map thread's placement] → Measured on two devices only; `docs/benchmarks.md` states the devices, and a later change can revisit D188 with data from another device.
-- [The FFI release changes the API from the snapshot] → The follow-up change ports the difference; the API changed only in comments between `6d9058bf6` and the snapshot of 2026-10-22.
 
 ## Migration Plan
 
-1. Merge this change to `main` in snapshot mode. `main` can't be published until step 2; version 0.0.1 is already published.
-2. When an FFI release includes #760, a follow-up change pins it, which ends snapshot mode, and `support-ios-15-0` follows it or joins it.
+1. Merge this change to `main` with the FFI pinned to 0.202610.2. `main` stays releasable.
+2. `support-ios-15-0` follows as a change of its own; 0.202610.2 has the iOS 15.0 deployment target that it needs.
 3. Rollback: revert the merge; `main` returns to the released FFI 0.202610.1 and the synchronous API.

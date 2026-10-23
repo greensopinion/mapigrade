@@ -65,13 +65,9 @@ bool ReadHeaderRules(const char* const* strings, const int32_t* counts,
         *error = "a header name or value is null";
         return false;
       }
-      if (mln_adapter_http_header_validate(name, value) != MLN_STATUS_OK) {
-        const char* message = mln_thread_last_error_message();
-        *error = message != nullptr && message[0] != '\0'
-                     ? message
-                     : "HTTP header rejected";
-        return false;
-      }
+      // #760 has no separate header check: the runtime validates the rules
+      // when the map thread registers them, and map creation fails with its
+      // diagnostic.
       rule.headers.push_back({name, value});
     }
     rules->push_back(std::move(rule));

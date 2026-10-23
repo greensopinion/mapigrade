@@ -611,6 +611,47 @@ void main() {
     expect(errors, isEmpty);
   });
 
+  // Memory reduction is driver work under #760, so while rendering is paused
+  // it waits and runs when rendering resumes (design D185 of the
+  // adopt-ffi-core-executor change).
+  testWidgets('memory reduction while paused runs after resume', (
+    tester,
+  ) async {
+    addTearDown(() => setRenderingPausedForTesting(false));
+    final controller = await showMap(tester);
+    final idle = waitFor<MapIdle>(controller.events, (_) => true);
+    controller.loadStyleUrl(demoStyleUrl);
+    await idle;
+    final errors = <RenderError>[];
+    final sub = controller.events
+        .where((e) => e is RenderError)
+        .cast<RenderError>()
+        .listen(errors.add);
+
+    setRenderingPausedForTesting(true);
+    final paused = controller.stats();
+    reduceMemoryUseForTesting();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    final whilePaused = controller.stats();
+
+    const camera = MapCamera(latitude: -20, longitude: 50, zoom: 3);
+    final frame = waitFor<FrameCamera>(
+      controller.frames,
+      (f) =>
+          near(f.camera.latitude, camera.latitude) &&
+          near(f.camera.longitude, camera.longitude),
+    );
+    setRenderingPausedForTesting(false);
+    controller.setCamera(camera);
+    await frame;
+    await sub.cancel();
+
+    expect(whilePaused.renderedFrames, paused.renderedFrames);
+    expect(whilePaused.memoryReductions, paused.memoryReductions);
+    expect(controller.stats().memoryReductions, paused.memoryReductions + 1);
+    expect(errors, isEmpty);
+  });
+
   // The plugin releases the image reader when the activity stops and creates
   // one when the activity starts (design D137). The test hook makes it do both
   // while the activity runs.

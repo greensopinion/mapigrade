@@ -76,7 +76,7 @@ void main() {
     expect(bundle.requestedKeys, everyElement(contains('/notices/common/')));
   });
 
-  test('applications on Android also list the two Android notices', () async {
+  test('applications on Android also list the Android notices', () async {
     final entries = await thirdPartyNotices(
       PackageFilesBundle(),
       android: true,
@@ -86,6 +86,9 @@ void main() {
       for (final notice in commonNotices) notice.packageName,
       'MapLibre Native FFI Rust crates',
       'Android NDK C++ runtime',
+      'Kotlin',
+      'Kotlin NOTICE',
+      'rustls-platform-verifier',
     ]);
     for (final (index, notice) in androidNotices.indexed) {
       expect(

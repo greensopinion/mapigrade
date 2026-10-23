@@ -114,6 +114,9 @@ MapTextureStats _statsOf(MapTextureStatsStruct s) => MapTextureStats(
   renderAheadFrames: s.renderAheadFrames,
   intervalWaits: s.intervalWaits,
   maxSlotsInUse: s.maxSlotsInUse,
+  cameraLatencyCount: s.cameraLatencyCount,
+  cameraLatencyTotal: Duration(microseconds: s.cameraLatencyTotalNs ~/ 1000),
+  cameraLatencyMax: Duration(microseconds: s.cameraLatencyMaxNs ~/ 1000),
 );
 
 class _FfiMapTextureController implements MapTextureController {

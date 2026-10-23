@@ -7,23 +7,25 @@ This document describes the implementation on macOS and iOS (Threads, Frame path
 ```
  Dart (main isolate, platform thread)          map thread (one per map)                 Flutter raster thread
  ───────────────────────────────────           ─────────────────────────                ─────────────────────
- MapTextureController                          owns mln_runtime, mln_map,
-   loadStyleUrl/Json, resize ──► ordered queue ──┐  mln_render_session
-   setCamera (with seq) ──────► camera slot  ──┤
-                  (both then mln_wake_source_signal)
+ MapTextureController                          creates mln_runtime and mln_map, and
+   loadStyleUrl/Json, resize ──► ordered queue ──┐  drives the map's mln_render_session
+   setCamera (with seq) ──────► camera slot  ──┤  (caller-graphics-thread driver)
+                  (both then wake the map thread)
                                                │ loop:
-                                               │   mln_runtime_pump (parks until a wake)
-                                               │   apply queued commands, then the latest camera
-                                               │   drain events ── style loaded, loading failed,
-   events stream ◄── NativeCallable.listener ◄─┤                   render error, idle
-                                               │   if a render update is pending, Dart has
-                                               │   chosen the latest ready frame, and a slot
-                                               │   is free:
-                                               │     set_target to the free slot's buffer
-                                               │     render_update into it
-                                               │     (copyFree: false: render_update into the
-                                               │      render texture, blit into the free slot)
-                                               │     publish it as ready
+                                               │   wait for a wake (Dart, the session's
+                                               │     wakes, completions)
+                                               │   apply queued commands, then submit the
+                                               │     latest camera as a command and wait
+                                               │     for its completion
+                                               │   if no frame demand is outstanding, Dart
+                                               │   has chosen the latest ready frame, and a
+                                               │   slot is free: request a frame
+                                               │   service the session's driver work, which
+                                               │     renders into a slot that no acquired
+                                               │     frame holds
+                                               │   drain the frame results: acquire the
+                                               │     frame, hold it in its slot, publish it
+                                               │     as ready
    readyFrames stream ◄─ NativeCallable.listener ◄┤ frame ready (slot, camera, seq)
    build: selectNewest() (newest ready frame) ────┤ slot held; wake
      textureFrameAvailable(slot's texture)          │
@@ -31,11 +33,14 @@ This document describes the implementation on macOS and iOS (Threads, Frame path
                                                │                                          return the slot's buffer,
    frames stream ◄── NativeCallable.listener ◄─┼──────────── frame displayed ◄─────────── free the slots chosen
                                                └◄──────── wake (slots freed) ◄───────────  before it
+
+ FFI runtime threads: run the map's commands, publish its render updates, run completions,
+ and deliver events (style loaded, loading failed, render error, idle) ──► events stream
 ```
 
-Each loop iteration runs in an autorelease pool (`RunInPlatformScope`), so that Objective-C objects created on the map thread, such as each frame's command buffer, are released after the iteration. On iOS, the plugin pauses the map thread's rendering when the app enters the background and resumes it before the app enters the foreground, and asks the renderer to release cached resources after a memory warning.
+Each loop iteration runs in an autorelease pool (`RunInPlatformScope`), so that Objective-C objects created on the map thread, such as each frame's command buffer, are released after the iteration. On iOS, the plugin pauses the map thread's rendering when the app enters the background and resumes it before the app enters the foreground, and asks the renderer to release cached resources after a memory warning. While rendering is paused, the map thread doesn't service the session, so the release runs when rendering resumes (design D185 of the adopt-ffi-core-executor change).
 
-Dart never calls MapLibre. It calls the plugin's C ABI (`src/core/map_texture_api.h`), whose functions only write to the command queue or camera slot, record Dart's choice of a frame, and wake the map thread. The map thread is the owner thread of the runtime, map and render session, as the FFI requires. Camera updates coalesce in the slot, so the map renders the latest camera only. Consecutive resizes also coalesce.
+Dart never calls MapLibre. It calls the plugin's C ABI (`src/core/map_texture_api.h`), whose functions only write to the command queue or camera slot, record Dart's choice of a frame, and wake the map thread. The FFI's runtime threads own the map and apply its commands; the map thread submits the commands, and renders on its own thread as the session's graphics thread, so that it can replace targets and prepare each frame there (design D180). Camera updates coalesce in the slot, so the map renders the latest camera only. Consecutive resizes also coalesce. The map thread waits for each camera command's completion before it services the session, so the next render includes the camera (design D181).
 
 ## Frame path
 
@@ -50,13 +55,13 @@ MapLibre (Metal) ──render──► private MTLTexture (BGRA8, one per size)
                  ──blit────► IOSurface-backed CVPixelBuffer, as above
 ```
 
-Maps are copy-free by default (design D20): before each render, `mln_metal_borrowed_texture_set_target()` makes the free slot's MTLTexture the session's target, and MapLibre renders directly into it. With `MapTextureController.create(copyFree: false)` or the internal layer widget `MapTextureLayer(copyFree: false)`, MapLibre renders into one private texture, and each frame is copied on the GPU into the free slot (design D3b). Measurements of both modes are in `benchmarks.md`.
+Maps are copy-free by default (design D20): the session's target is a borrowed ring of the four slots' MTLTextures, in slot order, and MapLibre renders directly into them (design D182). The session chooses the slot of each frame among those whose frames the map thread doesn't hold; the map thread acquires each rendered frame, publishes it into its slot, and releases it when the slot becomes free. A resize ends outstanding frame demands, releases the frames, and replaces the ring (design D183). With `MapTextureController.create(copyFree: false)` or the internal layer widget `MapTextureLayer(copyFree: false)`, MapLibre renders into one private texture, and each frame is copied on the GPU into the free slot (design D3b). Measurements of both modes are in `benchmarks.md`.
 
 Each map has four display slots, each with its own buffer and its own registered Flutter texture (design D122 of the layer-children-alignment change). A slot is free, rendering, ready (it holds a finished frame that Dart hasn't chosen), or held (design D124). When a frame has rendered, the map thread reports it to Dart with its slot, camera and camera sequence number (`MapTextureController.readyFrames`). In each build, `MapigradeLayer` calls `MapTextureController.selectNewest`, which calls `map_texture_select_newest` on the platform thread. Under the `BufferState` lock, the map chooses its ready frame, which is the newest finished frame, marks the slot's texture available before the Flutter frame is rasterized, and returns the frame's slot, camera and camera sequence number; the layer displays that slot's `Texture` widget and draws its children at that camera (design D123 of the layer-children-alignment change, D139 to D141 of the synchronous-frame-choice change). The chosen frame can be newer than the last frame reported in `readyFrames`. If no frame has finished since the last choice, `selectNewest` returns null and the layer keeps the frame it chose before. A `MapTextureView` without a slot does the same.
 
-A chosen slot stays held until Flutter presents a slot that Dart chose later, and the slot presented last stays held until Flutter presents another slot, so the map thread never renders into a buffer that Flutter may still display. A ready frame that Dart hasn't chosen is replaced by the next frame. During a resize, the buffer of the slot Dart chose last stays displayable until Dart chooses a frame of the new size (design D126). No pixels pass through CPU memory, and the copy, if any, stays on the GPU. The map renders only when MapLibre publishes a render update, and only after Dart has chosen the previous frame, unless it renders ahead (design D19), so it renders nothing while the map is idle.
+A chosen slot stays held until Flutter presents a slot that Dart chose later, and the slot presented last stays held until Flutter presents another slot, so the map thread never renders into a buffer that Flutter may still display. A ready frame that Dart hasn't chosen is replaced by the next frame. During a resize, the buffer of the slot Dart chose last stays displayable until Dart chooses a frame of the new size (design D126). No pixels pass through CPU memory, and the copy, if any, stays on the GPU. The map renders only when MapLibre publishes a render update (each frame demand waits for one), and only after Dart has chosen the previous frame, unless it renders ahead (design D19), so it renders nothing while the map is idle.
 
-Each displayed frame is reported to Dart with the camera and size it was rendered with and the sequence number of the camera update it was rendered with (`MapTextureController.frames`), taken from `mln_render_session_projection_create()` after the frame rendered. The layer keeps the `flutter_map` camera of each of the last 32 camera updates it sent, by sequence number, and draws its `children` under its own `MapInheritedModel` at the camera of the frame it chose (designs D125 and D127). The children therefore stay exactly on the displayed map, and lag the gesture as the map does.
+Each displayed frame is reported to Dart with the camera and size it was rendered with and the sequence number of the camera update it was rendered with (`MapTextureController.frames`), taken from `mln_map_projection_create()` on the frame result's view. The sequence number is that of the newest camera command whose completion's render update generation the frame includes (design D181). The layer keeps the `flutter_map` camera of each of the last 32 camera updates it sent, by sequence number, and draws its `children` under its own `MapInheritedModel` at the camera of the frame it chose (designs D125 and D127). The children therefore stay exactly on the displayed map, and lag the gesture as the map does.
 
 ## Flutter engines
 
@@ -82,12 +87,12 @@ Android uses the same core, C ABI and Dart API. The core has two kinds of render
    createImageTexture; a new ImageReader per size
    (MapSurface, JNI)
    ANativeWindow ─────────────── ordered queue ─────►  create the EGL window surface, or switch the
-                                                       session to it (mln_opengl_surface_set_target)
+                                                       session to it (mln_render_session_set_opengl_surface_target)
  setCamera, loadStyleUrl ───► camera slot, queue ──►   loop as on macOS and iOS; render at most once
                                                        per display refresh interval, into a free slot:
                                                          set the frame id as presentation time,
-                                                         render_update → eglSwapBuffers queues the
-                                                         frame in the ImageReader
+                                                         service the session → eglSwapBuffers queues
+                                                         the frame in the ImageReader
 
                          image listener thread (one per map)
                          ───────────────────────────────────
@@ -119,7 +124,7 @@ MapLibre (OpenGL ES) ──render──► EGL window surface on the ImageReader
 
 The session is dedicated (FFI preset `android-arm64-egl`): it owns the map thread's EGL context and renders directly into the `ImageReader`'s `HardwareBuffer`s, so the plugin makes no copy and no pixels pass through CPU memory. `copyFree: false` has no effect on Android.
 
-Android has six display slots, which share the one image texture, so `MapTextureController.textureIds` has six equal ids (designs D133 and D135). Before each render, the map thread records the frame id in the slot and sets it as the frame's presentation time. The listener matches each image to its slot by that timestamp. The image can arrive before `render_update` returns; the map thread then publishes the frame when the render returns (design D131). When a frame is published, Dart receives the frame-ready report, which starts a build of the layer; in each build the layer chooses the newest ready frame, as on macOS and iOS. `map_texture_select_newest` gives the frame's image to the texture on the main thread, before the Flutter frame is rasterized, and sends the frame-displayed report, which has no display time (design D132).
+Android has six display slots, which share the one image texture, so `MapTextureController.textureIds` has six equal ids (designs D133 and D135). Before each render, the map thread records the frame id in the slot, and before every service call it sets the next frame's id as the presentation time, because any service call can present the frame (design D184). The listener matches each image to its slot by that timestamp. The image can arrive before the service call returns; the map thread then publishes the frame when the frame result arrives (design D131). When the session loses its surface target, the map thread attaches a new session to the current surface (design D184). When a frame is published, Dart receives the frame-ready report, which starts a build of the layer; in each build the layer chooses the newest ready frame, as on macOS and iOS. `map_texture_select_newest` gives the frame's image to the texture on the main thread, before the Flutter frame is rasterized, and sends the frame-displayed report, which has no display time (design D132).
 
 Flutter gives the plugin no call when it has finished with an image, so a chosen slot becomes free when Dart has chosen three later frames; its image is then closed (design D133). The map thread starts a render no earlier than one display refresh interval after the previous one, and doesn't wait for Dart's choice; a ready frame that Dart hasn't chosen is replaced by the next one (design D134). Deferred renders are counted in `interval_waits`.
 

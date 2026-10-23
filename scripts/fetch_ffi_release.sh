@@ -15,11 +15,18 @@
 # assets upstream replaces: delete the directory to fetch a newer snapshot.
 #
 # The tarballs are maplibre-native-c-<preset>.tar.gz for the presets in
-# MAPLIBRE_FFI_PRESETS and MAPLIBRE_FFI_ANDROID_PRESETS. The script fails and
-# names the tarball when one doesn't match SHA256SUMS; delete the file and run
-# the script again to download it again.
+# MAPLIBRE_FFI_PRESETS and MAPLIBRE_FFI_ANDROID_PRESETS. The script also
+# downloads the release's MaplibreNativeC.xcframework.zip and unpacks it into
+# MaplibreNativeC.xcframework/ next to the tarballs, for the native tests in
+# packages/flutter_mapigrade/test/native/ (design D186 of the
+# adopt-ffi-core-executor change). The script fails and names the file when one
+# doesn't match SHA256SUMS; delete the file and run the script again to
+# download it again.
 #
-# Requires: curl and shasum.
+# Release tags are v<version> since 0.202610.2; earlier ones were
+# core/v<version>.
+#
+# Requires: curl, shasum and unzip.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,7 +37,7 @@ if [[ $# -gt 0 ]]; then
   release_tag=$1
   release_name=$1
 else
-  release_tag="core/v$MAPLIBRE_FFI_VERSION"
+  release_tag="v$MAPLIBRE_FFI_VERSION"
   release_name=$MAPLIBRE_FFI_VERSION
 fi
 release_url="https://github.com/maplibre/maplibre-native-ffi/releases/download/$release_tag"
@@ -80,3 +87,18 @@ for preset in "${presets[@]}"; do
   fi
   echo "Checked $name"
 done
+
+# The release's framework, unpacked for the native tests.
+name=MaplibreNativeC.xcframework.zip
+expected=$(expected_sum "$name")
+if [[ ! -f "$release_dir/$name" ]]; then
+  download "$name"
+fi
+if [[ "$(actual_sum "$name")" != "$expected" ]]; then
+  echo "$release_dir/$name doesn't match SHA256SUMS of $release_name" >&2
+  exit 1
+fi
+echo "Checked $name"
+rm -rf "$release_dir/MaplibreNativeC.xcframework"
+unzip -q "$release_dir/$name" -d "$release_dir"
+echo "Unpacked MaplibreNativeC.xcframework into $release_dir"

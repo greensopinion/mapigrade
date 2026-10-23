@@ -663,6 +663,43 @@ Conditions: the Setup's iPhone, OS, Xcode and Flutter versions and style; copy-f
 
 Procedure: as for the alignment benchmark above, with `--dart-define=ALIGNMENT_CHILDREN=1 --dart-define=ALIGNMENT_MODE=<mode> --dart-define=ALIGNMENT_PHASES=pan100,pan500,pan1000,stop,fling,reverse`.
 
+## The port to the FFI core executor (adopt-ffi-core-executor change, task 8.2)
+
+Measured 2026-10-22: `main` at `d71c9bc` (MapLibre Native FFI 0.202610.1) against the change (FFI 0.202610.2, maplibre-native-ffi#760), 3 runs each, alternating, release builds, copy-free, rendering ahead with the hysteresis (the default). Mac: MacBook Pro (M2 Max), window 1600x1000 on the built-in display at 120 Hz, AC power. iPhone 15 Pro Max over Wi-Fi on battery; iPhone 13 and Pixel 4a (5G) on cable. The thermal state was nominal throughout, except on the iPhone 15 Pro Max, where it was fair at the end of some alignment runs of both builds. `main`'s harness got two changes that don't touch the map: the window placement of `MLT_WINDOW_SCREEN=builtin` on the Mac, and the short `BENCHMARK_KEY` line on Android, whose log truncates the full result line. `main` has no camera latency statistic (design D189).
+
+Frame-rate benchmark (30 s pan):
+
+| Device | Displayed map fps, `main` | change | Service call or `render_update` (ms), `main` | change | Camera latency avg (ms), change |
+| --- | --- | --- | --- | --- | --- |
+| Mac | 108.5–112.0 | 113.3–116.8 | 7.24–7.42 | 6.21–6.43 | 6.38–6.54 |
+| iPhone 15 Pro Max | 109.9–110.8 | 107.5–108.4 | 7.83–7.93 | 8.18–8.21 | 10.89–10.94 |
+| iPhone 13 (60 Hz) | 55.3–55.5 | 54.4–54.9 | 13.85–14.04 | 13.49–13.65 | 15.5–16.0 |
+| Pixel 4a (5G) (60 Hz) | 51.9–53.4 | 51.9–52.6 | 7.72–7.95 | 7.68–7.86 | 30.1–30.4 |
+
+Alignment benchmark with children (`ALIGNMENT_CHILDREN=1`, mode `predict1`, the phases of the camera-prediction change, 20 s per phase). The drawn error was 0 px at max in every phase of every run on all three devices and both builds. Ranges over 3 runs:
+
+| Phase | Mac: service (ms), `main` | change | Mac: lag p50 / p95 (px), `main` | change |
+| --- | --- | --- | --- | --- |
+| pan100 | 7.47–7.49 | 6.88–7.02 | 0 / 1.29–1.67 | 0 / 0.83–0.84 |
+| pan500 | 7.30–7.39 | 6.67–6.77 | 0 / 4.17–8.33 | 0 / 4.17 |
+| pan1000 | 7.29–7.46 | 6.74–6.84 | 0 / 8.34–16.67 | 0 / 8.33–8.34 |
+| stop | 7.57–7.67 | 7.06–7.19 | 0 / 8.34–16.66 | 0 / 8.33–16.56 |
+| fling | 7.53–7.63 | 7.07–7.16 | 0.06–0.13 / 16.67 | 0.03–0.05 / 11.48–15.04 |
+| reverse | 7.57–7.61 | 7.12–7.23 | 0–8.33 / 16.67 | 0 / 16.55–16.67 |
+
+| Phase | iPhone 15 Pro Max: service (ms), `main` | change | lag p50 (px), `main` | change | iPhone 13: service (ms), `main` | change | lag p50 (px), `main` | change |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| pan100 | 7.26–8.51 | 8.38–8.57 | 0.83 | 0.83 | 15.06–15.23 | 15.00–15.27 | 1.66 | 1.66–1.67 |
+| pan500 | 7.80–7.88 | 8.30–8.50 | 4.17 | 4.17 | 14.15–14.24 | 13.77–13.95 | 0.02–0.03 | 0.02 |
+| pan1000 | 8.10–8.19 | 8.36–8.62 | 8.33 | 8.34 | 14.67–14.76 | 14.20–14.27 | 0.18–16.54 | 0.05–0.06 |
+| stop | 9.05–9.35 | 9.24–9.63 | 0.01–0.02 | 0.04–1.35 | 15.57–15.79 | 15.23–15.41 | 0.01–0.02 | 0.01 |
+| fling | 8.42–8.77 | 8.65–8.89 | 1.74–1.96 | 1.98–2.07 | 16.03–16.19 | 15.57–15.91 | 1.40–1.97 | 0.25–0.91 |
+| reverse | 8.63–8.98 | 8.86–9.31 | 8.34 | 8.34 | 15.94–16.03 | 15.72–15.74 | 16.71 | 16.71–16.72 |
+
+The change's camera latency in the alignment benchmark was 6.8–8.5 ms on the Mac, 11.5–14.0 ms on the iPhone 15 Pro Max and 15.6–23.3 ms on the iPhone 13.
+
+On the Mac and the iPhone 13 a frame renders faster with the change than with the FFI before #760, and the lag is the same or lower. On the iPhone 15 Pro Max a frame renders 0.1 to 0.6 ms slower and the displayed map frame rate is about 2% lower, because iOS runs the map thread mostly on the efficiency cores once no per-frame allocation happens (design D188, `maplibre-pr-760-port-findings.md`); the lag is the same in every phase but stop and fling, where its median is up to 1.3 px larger. On the Pixel the change and `main` don't differ beyond the variation between runs.
+
 ## No CPU readback on the frame path
 
 ### macOS (Stage 1, task 7.3)

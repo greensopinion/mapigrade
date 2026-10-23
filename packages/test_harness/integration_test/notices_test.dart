@@ -39,6 +39,11 @@ const androidNotices = {
   'MapLibre Native FFI Rust crates': '# Rust dependency notices',
   'Android NDK C++ runtime':
       'Copyright (c) 2015, The Android Open Source Project',
+  'Kotlin': 'Apache License',
+  'Kotlin NOTICE':
+      '=========================================================================',
+  'rustls-platform-verifier':
+      'This product includes software from the rustls-platform-verifier project',
 };
 
 void main() {
