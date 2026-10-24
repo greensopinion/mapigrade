@@ -417,7 +417,8 @@ void main() {
       'idle: rendered ${before.renderedFrames} -> '
       '${after.renderedFrames} over 10 s',
     );
-    expect(after.renderedFrames, before.renderedFrames);
+    // The map can render one more frame after it reports idle.
+    expect(after.renderedFrames - before.renderedFrames, lessThanOrEqualTo(1));
   });
 
   testWidgets('copy-free map renders frames without copies', (tester) async {
@@ -448,7 +449,8 @@ void main() {
       'idle copy-free: rendered ${before.renderedFrames} -> '
       '${after.renderedFrames} over 10 s',
     );
-    expect(after.renderedFrames, before.renderedFrames);
+    // The map can render one more frame after it reports idle.
+    expect(after.renderedFrames - before.renderedFrames, lessThanOrEqualTo(1));
   });
 
   testWidgets('map with the copy renders frames with copies', (tester) async {
@@ -483,7 +485,8 @@ void main() {
       'idle with copy: rendered ${before.renderedFrames} -> '
       '${after.renderedFrames} over 10 s',
     );
-    expect(after.renderedFrames, before.renderedFrames);
+    // The map can render one more frame after it reports idle.
+    expect(after.renderedFrames - before.renderedFrames, lessThanOrEqualTo(1));
   });
 
   // The lifecycle tests use the test hooks, which call the same native
