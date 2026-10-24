@@ -12,10 +12,12 @@ import 'package:latlong2/latlong.dart';
 void main() {
   test('exported names resolve without hiding names of other libraries', () {
     final metrics = LayerMetrics();
+    final controller = LayerController();
     final layer = MapigradeLayer(
       styleUrl: 'https://example.com/style.json',
       alignment: LayerAlignment.none,
       metrics: metrics,
+      controller: controller,
     );
     final map = FlutterMap(
       options: const MapOptions(initialCenter: LatLng(0, 0)),
@@ -29,8 +31,11 @@ void main() {
     final LayerException exception = switch (map.children.length) {
       0 => const LayerLoadException('load'),
       1 => const LayerRenderException('render'),
+      2 => const LayerQueryException('query'),
       _ => const LayerCreateException('create'),
     };
+    const feature = QueriedFeature(sourceId: 'roads', id: 1);
+    expect(feature.sourceLayerId, isNull);
     expect(exception, isA<LayerRenderException>());
     final LayerMetricsSnapshot snapshot = metrics.snapshot();
     expect(snapshot.renderedFrames, 0);
@@ -41,8 +46,11 @@ void main() {
       LayerLoadException,
       LayerRenderException,
       LayerCreateException,
+      LayerQueryException,
+      LayerController,
+      QueriedFeature,
       MaterialApp,
       HttpHeaderRule,
-    ], hasLength(8));
+    ], hasLength(11));
   });
 }

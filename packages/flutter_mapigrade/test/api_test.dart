@@ -24,9 +24,12 @@ const expectedNames = {
   'LayerLoadException',
   'LayerRenderException',
   'LayerCreateException',
+  'LayerQueryException',
   'HttpHeaderRule',
   'LayerMetrics',
   'LayerMetricsSnapshot',
+  'LayerController',
+  'QueriedFeature',
 };
 
 /// Names that `flutter_map` uses for its own types. Exported names don't

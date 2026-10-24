@@ -1,5 +1,6 @@
-/// A failure of a `MapigradeLayer`'s map, passed to its `onError`. Later
-/// versions may add subclasses.
+/// A failure of a `MapigradeLayer`'s map, passed to its `onError`, or for a
+/// [LayerQueryException], to the `Future` of the failed query. Later versions
+/// may add subclasses.
 abstract final class LayerException implements Exception {
   /// A failure with [message].
   const LayerException(this.message);
@@ -47,4 +48,14 @@ final class LayerCreateException extends LayerException {
 
   @override
   String get _typeName => 'LayerCreateException';
+}
+
+/// A query of a `LayerController` failed, for example because MapLibre
+/// rejected its filter.
+final class LayerQueryException extends LayerException {
+  /// A query failure with [message].
+  const LayerQueryException(super.message);
+
+  @override
+  String get _typeName => 'LayerQueryException';
 }

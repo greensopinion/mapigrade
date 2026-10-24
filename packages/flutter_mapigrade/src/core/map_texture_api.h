@@ -33,6 +33,8 @@ enum {
   // A frame has finished rendering into a display slot, and Dart may choose
   // it with map_texture_select_newest().
   MAP_TEXTURE_EVENT_FRAME_READY = 5,
+  // The result of map_texture_query_rendered_features().
+  MAP_TEXTURE_EVENT_QUERY_RESULT = 6,
 };
 
 // An event for Dart. The receiver frees it with map_texture_event_free().
@@ -60,9 +62,18 @@ typedef struct map_texture_event {
   // map_texture_set_camera(), or 0 before the first).
   int32_t slot;
   int64_t seq;
-  // Set for MAP_TEXTURE_EVENT_LOADING_FAILED and MAP_TEXTURE_EVENT_RENDER_ERROR;
-  // otherwise null. UTF-8, null-terminated.
+  // Set for MAP_TEXTURE_EVENT_LOADING_FAILED, MAP_TEXTURE_EVENT_RENDER_ERROR
+  // and MAP_TEXTURE_EVENT_QUERY_RESULT; otherwise null. UTF-8,
+  // null-terminated.
   char* message;
+  // Set for MAP_TEXTURE_EVENT_QUERY_RESULT: the query's `request_id`, and its
+  // status. With status 0, `message` is a JSON array with one object per
+  // feature: {"feature": <GeoJSON Feature>, "source": <source ID>,
+  // "sourceLayer": <source-layer ID or null>, "state": <feature state>}.
+  // Otherwise status is the failing mln_status, and `message` describes the
+  // failure.
+  int64_t request_id;
+  int32_t status;
 } map_texture_event;
 
 typedef void (*map_texture_event_callback)(map_texture_event* event);
@@ -204,6 +215,35 @@ MAP_TEXTURE_EXPORT int32_t map_texture_resize(int64_t handle,
 // Sets the refresh rate in Hz of the display that shows the map.
 MAP_TEXTURE_EXPORT int32_t map_texture_set_display_refresh_rate(int64_t handle,
                                                                 double hz);
+// Queries the features that the map renders in the quadrilateral with the
+// corners `world_corners`: four points, each an x and a y in normalized Web
+// Mercator coordinates (the world is [0, 1) in both directions, y increasing
+// southwards). The map thread converts the corners with the camera of the last
+// frame it rendered, and queries the smallest screen-aligned box that contains
+// them. With `layer_ids` null, the query covers every style layer; otherwise
+// only the `layer_id_count` layers it lists. `filter_json`, if non-null, is a
+// MapLibre style-spec filter expression. The result is delivered as one
+// MAP_TEXTURE_EVENT_QUERY_RESULT event with `request_id`; the results of a
+// map's queries arrive in the order of the calls. Before the map has rendered
+// a frame, the result is an empty array.
+MAP_TEXTURE_EXPORT int32_t map_texture_query_rendered_features(
+    int64_t handle, int64_t request_id, const double* world_corners,
+    const char* const* layer_ids, int32_t layer_id_count,
+    const char* filter_json);
+// Sets the keys of the JSON object `state_json` in the feature state of the
+// feature `feature_id` of the source `source_id`, and of its source layer
+// `source_layer_id` if non-null. A numeric feature ID is given as its decimal
+// text. The map reports a failure as MAP_TEXTURE_EVENT_RENDER_ERROR.
+MAP_TEXTURE_EXPORT int32_t map_texture_set_feature_state(
+    int64_t handle, const char* source_id, const char* source_layer_id,
+    const char* feature_id, const char* state_json);
+// Removes feature state of the source `source_id`, and of its source layer
+// `source_layer_id` if non-null: the key `key` of the feature `feature_id`,
+// every key of that feature with `key` null, or the state of every feature
+// with both null. A key without a feature ID is invalid.
+MAP_TEXTURE_EXPORT int32_t map_texture_remove_feature_state(
+    int64_t handle, const char* source_id, const char* source_layer_id,
+    const char* feature_id, const char* key);
 MAP_TEXTURE_EXPORT int32_t map_texture_get_stats(int64_t handle,
                                                  map_texture_stats* out_stats);
 // Stops the map thread, releases the map and its resources, and unregisters

@@ -18,6 +18,7 @@ import 'camera_prediction.dart';
 import 'camera_projection.dart';
 import 'http_header_rule.dart';
 import 'layer_alignment.dart';
+import 'layer_controller.dart';
 import 'layer_exception.dart';
 import 'layer_metrics.dart';
 
@@ -45,6 +46,7 @@ class MapTextureLayer extends StatefulWidget {
     this.copyFree = true,
     this.metrics,
     this.children = const [],
+    this.controller,
     this.onController,
     this.createController,
     this.onChildCamera,
@@ -84,6 +86,10 @@ class MapTextureLayer extends StatefulWidget {
   /// Drawn above the map at the `flutter_map` camera of the displayed map
   /// frame.
   final List<Widget> children;
+
+  /// Queries the layer's map and sets its feature state while the layer is
+  /// in the tree.
+  final LayerController? controller;
 
   /// Called with the layer's controller after it is created, for tests and
   /// measurements.
@@ -129,6 +135,25 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   // The flutter_map camera of each of the last sent cameras, by sequence
   // number, oldest first.
   final _sentCameras = <int, fm.MapCamera>{};
+  // The live flutter_map camera of the last build.
+  fm.MapCamera? _live;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller case final controller?) {
+      bindLayerController(controller, this, _displayedCamera);
+    }
+  }
+
+  // The camera of the map frame that the last build displayed, which
+  // queries convert positions with.
+  ViewCamera _displayedCamera() {
+    if (_controller?.selectedFrame case final frame?) {
+      return ViewCamera.ofFrame(frame);
+    }
+    return viewCameraOf(_live ?? fm.MapCamera.of(context));
+  }
 
   @override
   void didChangeDependencies() {
@@ -171,6 +196,9 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       _creating = false;
       _controller = controller;
     });
+    if (widget.controller case final layerController?) {
+      setLayerControllerMap(layerController, this, controller);
+    }
     if (widget.metrics case final metrics?) bindMetrics(metrics, controller);
     _events = controller.events.listen(_onEvent);
     // With camera prediction, the rebuild after a new displayed frame, once
@@ -194,6 +222,17 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     }
     if (widget.alignment != oldWidget.alignment) {
       _predictor = CameraPredictor();
+    }
+    if (!identical(widget.controller, oldWidget.controller)) {
+      if (oldWidget.controller case final old?) {
+        releaseLayerController(old, this);
+      }
+      if (widget.controller case final controller?) {
+        bindLayerController(controller, this, _displayedCamera);
+        if (_controller case final map?) {
+          setLayerControllerMap(controller, this, map);
+        }
+      }
     }
     if (_controller case final controller?
         when !identical(widget.metrics, oldWidget.metrics)) {
@@ -245,6 +284,9 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
 
   @override
   void dispose() {
+    if (widget.controller case final controller?) {
+      releaseLayerController(controller, this);
+    }
     _events?.cancel();
     _frames?.cancel();
     _readyFrames?.cancel();
@@ -267,6 +309,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       return const SizedBox.shrink();
     }
     final live = fm.MapCamera.of(context);
+    _live = live;
     final target = viewCameraOf(live);
     final lead = widget.alignment.lead;
     var camera = target;

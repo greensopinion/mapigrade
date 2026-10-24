@@ -310,6 +310,25 @@ void MapTexture::ReduceMemoryUse() {
   Signal();
 }
 
+void MapTexture::SetFeatureState(FeatureStateTarget feature,
+                                 std::string state) {
+  commands_.Push(Command::SetFeatureState(std::move(feature), std::move(state)));
+  Signal();
+}
+
+void MapTexture::RemoveFeatureState(FeatureStateTarget feature) {
+  commands_.Push(Command::RemoveFeatureState(std::move(feature)));
+  Signal();
+}
+
+void MapTexture::QueryRenderedFeatures(RenderedQuery query) {
+  {
+    std::lock_guard lock(queries_mutex_);
+    queries_.push_back(std::move(query));
+  }
+  Signal();
+}
+
 void MapTexture::SetPaused(bool paused) {
   gate_.SetPaused(paused);
   if (!paused) Signal();
@@ -497,6 +516,11 @@ void MapTexture::RecordCameraLatency(const FrameInfo& info) {
       std::max(stats_.camera_latency_max_ns, latency);
 }
 
+std::optional<RenderedView> MapTexture::LastRenderedViewForTesting() {
+  std::lock_guard lock(rendered_view_mutex_);
+  return rendered_view_;
+}
+
 map_texture_stats MapTexture::stats() {
   int max_in_use = buffers_.max_in_use();
   std::lock_guard lock(stats_mutex_);
@@ -566,6 +590,7 @@ bool MapTexture::RunOnce() {
   ApplyCamera();
   WaitForCamera();
   ServiceDriver();
+  RunQueries();
   MaybeRender();
   // A newly armed demand renders at once if the map has an update.
   ServiceDriver();
@@ -832,6 +857,10 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kReduceMemoryUse:
         ApplyReduceMemoryUse();
         break;
+      case Command::Kind::kSetFeatureState:
+      case Command::Kind::kRemoveFeatureState:
+        ApplyFeatureState(command);
+        break;
       case Command::Kind::kTargetTask:
         command.task();
         break;
@@ -840,6 +869,53 @@ void MapTexture::ApplyCommands(bool* stop) {
         return;
     }
   }
+}
+
+void MapTexture::ApplyFeatureState(const Command& command) {
+  const FeatureStateTarget& feature = command.feature;
+  mln_feature_state_selector selector{};
+  selector.size = sizeof(selector);
+  selector.source_id = View(feature.source_id);
+  if (feature.source_layer_id) {
+    selector.fields |= MLN_FEATURE_STATE_SELECTOR_SOURCE_LAYER_ID;
+    selector.source_layer_id = View(*feature.source_layer_id);
+  }
+  if (feature.feature_id) {
+    selector.fields |= MLN_FEATURE_STATE_SELECTOR_FEATURE_ID;
+    selector.feature_id = View(*feature.feature_id);
+  }
+  if (feature.key) {
+    selector.fields |= MLN_FEATURE_STATE_SELECTOR_STATE_KEY;
+    selector.state_key = View(*feature.key);
+  }
+  bool set = command.kind == Command::Kind::kSetFeatureState;
+  const char* what =
+      set ? "mln_map_set_feature_state" : "mln_map_remove_feature_state";
+  mln_completion done = ReportingCompletion(
+      what,
+      [this](const mln_completion_result& result) {
+        uint64_t generation = result.render_update_generation;
+        uint64_t newest = feature_state_generation_.load();
+        while (generation > newest &&
+               !feature_state_generation_.compare_exchange_weak(newest,
+                                                                generation)) {
+        }
+      },
+      [this] {
+        feature_state_completed_.fetch_add(1);
+        Signal();
+      });
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      set ? mln_map_set_feature_state(map_, &selector, View(command.text),
+                                      &done, &diagnostic)
+          : mln_map_remove_feature_state(map_, &selector, &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus(what, status, &diagnostic);
+    return;
+  }
+  ++feature_state_submitted_;
 }
 
 void MapTexture::ApplyReduceMemoryUse() {
@@ -1274,9 +1350,14 @@ void MapTexture::ServiceDriver() {
   if (status != MLN_STATUS_OK && status != MLN_STATUS_BUSY) {
     ReportStatus("mln_render_session_service_driver_work", status, &diagnostic);
   }
+  DrainFrameResults(start, elapsed);
+}
 
+void MapTexture::DrainFrameResults(int64_t service_start, int64_t service_ns) {
+  mln_diagnostic diagnostic = NewDiagnostic();
   mln_render_frame_batch batch = MLN_HANDLE_NULL;
-  status = mln_render_session_drain_frame_results(session_, &batch, &diagnostic);
+  mln_status status =
+      mln_render_session_drain_frame_results(session_, &batch, &diagnostic);
   if (status == MLN_STATUS_NOT_READY) return;
   if (status != MLN_STATUS_OK) {
     ReportStatus("mln_render_session_drain_frame_results", status, &diagnostic);
@@ -1289,14 +1370,242 @@ void MapTexture::ServiceDriver() {
     for (size_t i = 0; i < view.result_count; ++i) {
       HandleFrameResult(*reinterpret_cast<const mln_render_frame_result*>(
                             base + i * view.result_size),
-                        start, elapsed);
+                        service_start, service_ns);
     }
   }
   mln_render_frame_batch_release(batch);
 }
 
+namespace {
+
+// Appends `text` to `out` as a JSON string.
+void AppendJsonString(std::string& out, std::string_view text) {
+  out += '"';
+  for (char c : text) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char escaped[7];
+          std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
+          out += escaped;
+        } else {
+          out += c;
+        }
+    }
+  }
+  out += '"';
+}
+
+std::string_view ViewOf(const mln_buffer_view& view) {
+  return {static_cast<const char*>(view.data), view.size};
+}
+
+// The JSON array that MAP_TEXTURE_EVENT_QUERY_RESULT carries, from the
+// features of a query's completion. The FFI's feature and state are JSON
+// already, so nothing is parsed.
+std::string QueryResultJson(const mln_completion_result& result) {
+  std::string json = "[";
+  const auto* base = static_cast<const char*>(result.value);
+  for (size_t i = 0; i < result.value_count; ++i) {
+    const auto& feature = *reinterpret_cast<const mln_queried_feature*>(
+        base + i * result.value_size);
+    if (i > 0) json += ',';
+    json += "{\"feature\":";
+    json += ViewOf(feature.feature);
+    json += ",\"source\":";
+    if (feature.fields & MLN_QUERIED_FEATURE_SOURCE_ID) {
+      AppendJsonString(json, ViewOf(feature.source_id));
+    } else {
+      json += "null";
+    }
+    json += ",\"sourceLayer\":";
+    if (feature.fields & MLN_QUERIED_FEATURE_SOURCE_LAYER_ID) {
+      AppendJsonString(json, ViewOf(feature.source_layer_id));
+    } else {
+      json += "null";
+    }
+    json += ",\"state\":";
+    if (feature.fields & MLN_QUERIED_FEATURE_STATE) {
+      json += ViewOf(feature.state);
+    } else {
+      json += "{}";
+    }
+    json += '}';
+  }
+  json += ']';
+  return json;
+}
+
+// The outcome of one query of a batch, written by its completion.
+struct QueryOutcome {
+  std::mutex mutex;
+  bool done = false;
+  int32_t status = MLN_STATUS_OK;
+  std::string message;
+
+  void Set(int32_t result_status, std::string result_message) {
+    std::lock_guard lock(mutex);
+    status = result_status;
+    message = std::move(result_message);
+    done = true;
+  }
+
+  bool Done() {
+    std::lock_guard lock(mutex);
+    return done;
+  }
+};
+
+}  // namespace
+
+// A query reads the last frame the session rendered when its driver work runs
+// in a later service call, and any service call can render the armed demand's
+// frame first. Ending the demand before converting keeps the converted
+// geometry and the frame the query reads the same.
+void MapTexture::RunQueries() {
+  std::vector<RenderedQuery> queries;
+  {
+    std::lock_guard lock(queries_mutex_);
+    if (queries_.empty()) return;
+    // While paused, queries wait like renders, because a service call may
+    // render.
+    if (session_ != MLN_HANDLE_NULL && gate_.paused()) return;
+    // The frame that includes the feature state comes after the commands'
+    // repaint.
+    if (session_ != MLN_HANDLE_NULL &&
+        (feature_state_completed_.load() < feature_state_submitted_ ||
+         rendered_update_generation_ < feature_state_generation_.load())) {
+      return;
+    }
+    queries.swap(queries_);
+  }
+  auto last_view = [this] {
+    std::lock_guard lock(rendered_view_mutex_);
+    return rendered_view_;
+  };
+  if (session_ == MLN_HANDLE_NULL || !last_view()) {
+    for (const RenderedQuery& query : queries) {
+      EmitQueryResult(query.request_id, MLN_STATUS_OK, "[]");
+    }
+    return;
+  }
+  if (!gate_.TryBeginRender()) {
+    std::lock_guard lock(queries_mutex_);
+    queries_.insert(queries_.begin(), std::make_move_iterator(queries.begin()),
+                    std::make_move_iterator(queries.end()));
+    return;
+  }
+  RenderGateScope gate_scope(gate_);
+
+  if (demand_outstanding_) {
+    uint64_t rendered = rendered_results_;
+    bool repaint = repaint_wanted_;
+    int64_t start = NowNs();
+    EndDemands();
+    DrainFrameResults(start, NowNs() - start);
+    // The demand armed next renders as the ended one would have.
+    if (rendered_results_ == rendered) repaint_wanted_ = repaint;
+  }
+  const RenderedView view = *last_view();
+
+  std::vector<std::shared_ptr<QueryOutcome>> outcomes;
+  for (const RenderedQuery& query : queries) {
+    auto outcome = std::make_shared<QueryOutcome>();
+    outcomes.push_back(outcome);
+    if (query.layer_ids && query.layer_ids->empty()) {
+      outcome->Set(MLN_STATUS_OK, "[]");
+      continue;
+    }
+    ScreenBox box =
+        ScreenBounds(view.camera, view.width, view.height, query.corners);
+    mln_rendered_query_geometry geometry{};
+    geometry.size = sizeof(geometry);
+    geometry.type = MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX;
+    geometry.data.box = {{box.min.x, box.min.y}, {box.max.x, box.max.y}};
+    mln_rendered_feature_query_options options =
+        mln_rendered_feature_query_options_default();
+    std::vector<mln_buffer_view> layer_ids;
+    if (query.layer_ids) {
+      for (const std::string& id : *query.layer_ids) layer_ids.push_back(View(id));
+      options.fields |= MLN_RENDERED_FEATURE_QUERY_OPTION_LAYER_IDS;
+      options.layer_ids = layer_ids.data();
+      options.layer_id_count = layer_ids.size();
+    }
+    if (query.filter) {
+      options.fields |= MLN_RENDERED_FEATURE_QUERY_OPTION_FILTER;
+      options.filter = View(*query.filter);
+    }
+    mln_completion done =
+        FunctionCompletion([outcome](const mln_completion_result& result) {
+          if (result.status == MLN_STATUS_OK) {
+            outcome->Set(MLN_STATUS_OK, QueryResultJson(result));
+          } else if (result.status == MLN_STATUS_TARGET_LOST) {
+            outcome->Set(MLN_STATUS_OK, "[]");
+          } else {
+            outcome->Set(result.status, std::string(ViewOf(result.diagnostic)));
+          }
+        });
+    mln_diagnostic diagnostic = NewDiagnostic();
+    mln_status status = mln_render_session_query_rendered_features(
+        session_, &geometry, &options, &done, &diagnostic);
+    if (status != MLN_STATUS_OK) {
+      DiscardFunctionCompletion(done);
+      if (status == MLN_STATUS_INVALID_STATE) {
+        outcome->Set(MLN_STATUS_OK, "[]");
+      } else {
+        outcome->Set(status, diagnostic.message);
+      }
+    }
+  }
+  ServiceUntil([&outcomes] {
+    return std::all_of(outcomes.begin(), outcomes.end(),
+                       [](const auto& outcome) { return outcome->Done(); });
+  });
+  for (size_t i = 0; i < queries.size(); ++i) {
+    QueryOutcome& outcome = *outcomes[i];
+    std::lock_guard lock(outcome.mutex);
+    if (outcome.done) {
+      EmitQueryResult(queries[i].request_id, outcome.status, outcome.message);
+    } else {
+      EmitQueryResult(queries[i].request_id, MLN_STATUS_NATIVE_ERROR,
+                      "the query did not complete");
+    }
+  }
+}
+
+void MapTexture::EmitQueryResult(int64_t request_id, int32_t status,
+                                 const std::string& message) {
+  std::lock_guard lock(callback_mutex_);
+  if (callback_ == nullptr) return;
+  auto* event =
+      static_cast<map_texture_event*>(std::calloc(1, sizeof(map_texture_event)));
+  event->handle = handle_;
+  event->type = MAP_TEXTURE_EVENT_QUERY_RESULT;
+  event->request_id = request_id;
+  event->status = status;
+  event->message = strdup(message.c_str());
+  callback_(event);
+}
+
 void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
                                    int64_t service_start, int64_t service_ns) {
+  if (result.disposition == MLN_RENDER_RESULT_RENDERED) {
+    ++rendered_results_;
+    rendered_update_generation_ = result.map_update_generation;
+    const mln_map_view& view = result.view;
+    std::lock_guard lock(rendered_view_mutex_);
+    rendered_view_ = RenderedView{
+        {view.camera.center.latitude, view.camera.center.longitude,
+         view.camera.zoom, view.camera.bearing},
+        static_cast<double>(view.extent.width),
+        static_cast<double>(view.extent.height)};
+  }
   if (!demand_outstanding_ || result.token != demand_token_) return;
   demand_outstanding_ = false;
   int index = demand_slot_;
@@ -1619,12 +1928,14 @@ void MapTexture::ReportInitStatus(const char* what, mln_status status,
 
 mln_completion MapTexture::ReportingCompletion(
     const char* what,
-    std::function<void(const mln_completion_result&)> on_success) {
+    std::function<void(const mln_completion_result&)> on_success,
+    std::function<void()> on_done) {
   return FunctionCompletion(
-      [this, what, on_success = std::move(on_success)](
-          const mln_completion_result& result) {
+      [this, what, on_success = std::move(on_success),
+       on_done = std::move(on_done)](const mln_completion_result& result) {
         if (result.status == MLN_STATUS_OK) {
           if (on_success) on_success(result);
+          if (on_done) on_done();
           return;
         }
         std::string detail;
@@ -1636,6 +1947,7 @@ mln_completion MapTexture::ReportingCompletion(
              StatusMessage(what, static_cast<mln_status>(result.status),
                            detail.c_str())
                  .c_str());
+        if (on_done) on_done();
       });
 }
 

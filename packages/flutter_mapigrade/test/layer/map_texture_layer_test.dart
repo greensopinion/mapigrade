@@ -16,6 +16,7 @@ import 'package:flutter_map/flutter_map.dart' as fm show MapCamera;
 import 'package:flutter_map/src/map/inherited_model.dart';
 import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
 import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
+import 'package:flutter_mapigrade/src/layer/layer_controller.dart';
 import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
 import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
@@ -101,6 +102,58 @@ class _FakeController implements MapTextureController {
     cameras.add(camera);
     return cameras.length;
   }
+
+  /// The corners and options of each query, in order.
+  final List<({List<Offset> corners, List<String>? layerIds, String? filter})>
+  queries = [];
+
+  /// The result of the next queries.
+  Future<List<Map<String, Object?>>> Function() queryResult = () async => [];
+
+  /// The arguments of each feature-state call, in order.
+  final List<Map<String, Object?>> featureStateCalls = [];
+
+  @override
+  Future<List<Map<String, Object?>>> queryRenderedFeatures(
+    List<Offset> worldCorners, {
+    List<String>? layerIds,
+    String? filterJson,
+  }) {
+    queries.add((
+      corners: worldCorners,
+      layerIds: layerIds,
+      filter: filterJson,
+    ));
+    return queryResult();
+  }
+
+  @override
+  void setFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    required String featureId,
+    required String stateJson,
+  }) => featureStateCalls.add({
+    'call': 'set',
+    'sourceId': sourceId,
+    'sourceLayerId': sourceLayerId,
+    'featureId': featureId,
+    'state': stateJson,
+  });
+
+  @override
+  void removeFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    String? featureId,
+    String? key,
+  }) => featureStateCalls.add({
+    'call': 'remove',
+    'sourceId': sourceId,
+    'sourceLayerId': sourceLayerId,
+    'featureId': featureId,
+    'key': key,
+  });
 
   @override
   void resize(Size logicalSize, double pixelRatio) {}
@@ -798,6 +851,352 @@ void main() {
       await tester.pumpWidget(model);
       expect(seen['model'], same(camera));
       expect(model.data.options, same(options));
+    });
+  });
+
+  group('controller', () {
+    const center = LatLng(49.25, -123.1);
+    const style = 'https://example.com/style.json';
+    late MapController mapController;
+
+    setUp(() => mapController = MapController());
+
+    MapTextureControllerFactory create(MapTextureController map) =>
+        ({
+          required double pixelRatio,
+          required bool copyFree,
+          required List<HttpHeaderRule> httpHeaders,
+        }) async => map;
+
+    Widget map(List<MapTextureLayer> layers) => MediaQuery(
+      data: const MediaQueryData(size: Size(800, 600)),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: FlutterMap(
+          mapController: mapController,
+          options: const MapOptions(initialCenter: center, initialZoom: 10),
+          children: layers,
+        ),
+      ),
+    );
+
+    MapTextureLayer layer(
+      LayerController? controller,
+      MapTextureController fake, {
+      Key? key,
+    }) => MapTextureLayer(
+      key: key,
+      styleUrl: style,
+      controller: controller,
+      createController: create(fake),
+    );
+
+    // Builds [widget], and then the frame in which the layer has its map.
+    Future<void> show(WidgetTester tester, Widget widget) async {
+      await tester.pumpWidget(widget);
+      await tester.pump();
+    }
+
+    testWidgets('queries the map of the layer it was given to', (tester) async {
+      final controller = LayerController();
+      final fake = _FakeController()
+        ..queryResult = () async => [
+          {
+            'feature': {
+              'type': 'Feature',
+              'id': 7,
+              'properties': {'name': 'Trail'},
+              'geometry': {
+                'type': 'Point',
+                'coordinates': [-123.1, 49.25],
+              },
+            },
+            'source': 'trails',
+            'sourceLayer': 'paths',
+            'state': <String, Object?>{},
+          },
+        ];
+      await show(tester, map([layer(controller, fake)]));
+
+      final features = await controller.queryRenderedFeatures(
+        const Offset(400, 300),
+        layerIds: ['trail'],
+        filter: [
+          '==',
+          ['get', 'class'],
+          'path',
+        ],
+      );
+      expect(features.single.id, 7);
+      expect(features.single.properties, {'name': 'Trail'});
+      expect(features.single.sourceId, 'trails');
+      expect(features.single.sourceLayerId, 'paths');
+      expect(fake.queries.single.layerIds, ['trail']);
+      expect(fake.queries.single.filter, '["==",["get","class"],"path"]');
+    });
+
+    testWidgets('converts the query square with the camera of the displayed '
+        'frame', (tester) async {
+      final controller = LayerController();
+      final fake = _FakeController();
+      await show(tester, map([layer(controller, fake)]));
+      // The first frame is rendered with the first camera, and displayed.
+      final rendered = fake.cameras.single;
+      fake.addReadyFrame(
+        FrameCamera(
+          frameId: 1,
+          camera: rendered,
+          physicalSize: const Size(800, 600),
+          scaleFactor: 1,
+          displayTime: null,
+          seq: 1,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      // The live camera moves, and no frame of it is ready yet.
+      mapController.move(const LatLng(49.3, -123.0), 10.5);
+      await tester.pump();
+      expect(fake.selectedFrame?.frameId, 1);
+
+      await controller.queryRenderedFeatures(const Offset(100, 200), radius: 4);
+      final displayed = ViewCamera(rendered, const Size(800, 600));
+      final expected = [
+        for (final corner in const [
+          Offset(96, 196),
+          Offset(104, 196),
+          Offset(104, 204),
+          Offset(96, 204),
+        ])
+          worldPosition(displayed, corner),
+      ];
+      final corners = fake.queries.single.corners;
+      for (var i = 0; i < 4; ++i) {
+        expect(corners[i].dx, closeTo(expected[i].dx, 1e-15));
+        expect(corners[i].dy, closeTo(expected[i].dy, 1e-15));
+      }
+      final live = viewCameraOf(mapController.camera);
+      expect(
+        (corners[0] - worldPosition(live, const Offset(96, 196))).distance,
+        greaterThan(1e-6),
+      );
+    });
+
+    testWidgets('a controller that is not attached fails with a StateError', (
+      tester,
+    ) async {
+      final controller = LayerController();
+      await expectLater(
+        controller.queryRenderedFeatures(Offset.zero),
+        throwsStateError,
+      );
+      expect(
+        () => controller.setFeatureState(
+          sourceId: 's',
+          id: 1,
+          state: {'selected': true},
+        ),
+        throwsStateError,
+      );
+    });
+
+    testWidgets('a layer without a map fails queries with a StateError', (
+      tester,
+    ) async {
+      final controller = LayerController();
+      final creation = Completer<MapTextureController>();
+      await tester.pumpWidget(
+        map([
+          MapTextureLayer(
+            styleUrl: style,
+            controller: controller,
+            createController: ({
+              required double pixelRatio,
+              required bool copyFree,
+              required List<HttpHeaderRule> httpHeaders,
+            }) => creation.future,
+          ),
+        ]),
+      );
+      await expectLater(
+        controller.queryRenderedFeatures(Offset.zero),
+        throwsStateError,
+      );
+
+      final failed = LayerController();
+      await show(
+        tester,
+        map([
+          MapTextureLayer(
+            styleUrl: style,
+            controller: failed,
+            createController: _failingCreate,
+            onError: (_) {},
+          ),
+        ]),
+      );
+      await expectLater(
+        failed.queryRenderedFeatures(Offset.zero),
+        throwsStateError,
+      );
+    });
+
+    testWidgets('detaches when the layer is removed, and attaches to the next '
+        'layer', (tester) async {
+      final controller = LayerController();
+      final first = _FakeController();
+      await show(tester, map([layer(controller, first)]));
+      await show(tester, map([]));
+      expect(
+        () => controller.removeFeatureState(sourceId: 's'),
+        throwsStateError,
+      );
+
+      final second = _FakeController();
+      await show(tester, map([layer(controller, second)]));
+      await controller.queryRenderedFeatures(Offset.zero);
+      expect(first.queries, isEmpty);
+      expect(second.queries, hasLength(1));
+    });
+
+    testWidgets('detaches when the layer is rebuilt with another controller', (
+      tester,
+    ) async {
+      final a = LayerController();
+      final b = LayerController();
+      final fake = _FakeController();
+      await show(tester, map([layer(a, fake, key: const Key('layer'))]));
+      await show(tester, map([layer(b, fake, key: const Key('layer'))]));
+      await expectLater(a.queryRenderedFeatures(Offset.zero), throwsStateError);
+      await b.queryRenderedFeatures(Offset.zero);
+      expect(fake.queries, hasLength(1));
+    });
+
+    test('fails an assertion when given to a second layer', () {
+      final controller = LayerController();
+      ViewCamera camera() => throw UnimplementedError();
+      final first = Object();
+      bindLayerController(controller, first, camera);
+      expect(
+        () => bindLayerController(controller, Object(), camera),
+        throwsAssertionError,
+      );
+      // The layer that has it may bind it again, and another may after the
+      // release.
+      bindLayerController(controller, first, camera);
+      releaseLayerController(controller, first);
+      bindLayerController(controller, Object(), camera);
+    });
+
+    testWidgets('a failed query completes with a LayerQueryException', (
+      tester,
+    ) async {
+      final controller = LayerController();
+      final fake = _FakeController()
+        ..queryResult = () async =>
+            throw const MapTextureException('invalid filter');
+      await show(tester, map([layer(controller, fake)]));
+      await expectLater(
+        controller.queryRenderedFeaturesInRect(
+          const Rect.fromLTWH(0, 0, 10, 10),
+          filter: ['no-such-operator'],
+        ),
+        throwsA(const LayerQueryException('invalid filter')),
+      );
+    });
+
+    testWidgets('checks arguments and converts feature IDs', (tester) async {
+      final controller = LayerController();
+      final fake = _FakeController();
+      await show(tester, map([layer(controller, fake)]));
+
+      expect(
+        () => controller.queryRenderedFeatures(Offset.zero, radius: -1),
+        throwsArgumentError,
+      );
+      expect(
+        () => controller.setFeatureState(sourceId: 's', id: null, state: {}),
+        throwsA(
+          isA<ArgumentError>().having(
+            (e) => e.message,
+            'message',
+            contains('promoteId'),
+          ),
+        ),
+      );
+      expect(
+        () => controller.setFeatureState(sourceId: 's', id: 1.5, state: {}),
+        throwsArgumentError,
+      );
+      expect(
+        () => controller.setFeatureState(sourceId: '', id: 1, state: {}),
+        throwsArgumentError,
+      );
+      expect(
+        () => controller.removeFeatureState(sourceId: 's', key: 'selected'),
+        throwsArgumentError,
+      );
+      expect(
+        () => controller.setFeatureState(
+          sourceId: 's',
+          id: 1,
+          state: {'when': DateTime(2026)},
+        ),
+        throwsArgumentError,
+      );
+      expect(fake.featureStateCalls, isEmpty);
+
+      controller
+        ..setFeatureState(
+          sourceId: 'roads',
+          sourceLayerId: 'transportation',
+          id: 42,
+          state: {'selected': true},
+        )
+        ..setFeatureState(sourceId: 'roads', id: 42.0, state: {})
+        ..setFeatureState(sourceId: 'roads', id: 'a-7', state: {})
+        ..removeFeatureState(sourceId: 'roads', id: 42, key: 'selected')
+        ..removeFeatureState(
+          sourceId: 'roads',
+          sourceLayerId: 'transportation',
+        );
+      expect(fake.featureStateCalls, [
+        {
+          'call': 'set',
+          'sourceId': 'roads',
+          'sourceLayerId': 'transportation',
+          'featureId': '42',
+          'state': '{"selected":true}',
+        },
+        {
+          'call': 'set',
+          'sourceId': 'roads',
+          'sourceLayerId': null,
+          'featureId': '42',
+          'state': '{}',
+        },
+        {
+          'call': 'set',
+          'sourceId': 'roads',
+          'sourceLayerId': null,
+          'featureId': 'a-7',
+          'state': '{}',
+        },
+        {
+          'call': 'remove',
+          'sourceId': 'roads',
+          'sourceLayerId': null,
+          'featureId': '42',
+          'key': 'selected',
+        },
+        {
+          'call': 'remove',
+          'sourceId': 'roads',
+          'sourceLayerId': 'transportation',
+          'featureId': null,
+          'key': null,
+        },
+      ]);
     });
   });
 }
