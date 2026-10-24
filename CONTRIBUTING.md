@@ -7,8 +7,9 @@ This guide is for developers who build, test and measure Mapigrade. The [README]
 ```
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
   maplibre_ffi.lock                      the pinned FFI release, commit and presets
-packages/demo/                           demo app: styles, frame rates and a Tour de France Femmes
-                                         flyover on your devices (Android, iOS, macOS)
+packages/demo/                           demo app: a gallery of showcases on your devices (Android,
+                                         iOS, macOS): a Tour de France Femmes flyover with styles
+                                         and frame rates, and a feature inspector
 packages/test_harness/                   test harness app: integration tests, benchmarks, color check
 docs/                                    architecture, packaging, measurements, limitations, concept
                                          and follow-up documents

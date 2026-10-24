@@ -1,5 +1,5 @@
 name: mapigrade_demo
-description: "A demo app for trying flutter_mapigrade: styles, gestures, overlays, frame rates and a flyover."
+description: "A demo app for trying flutter_mapigrade: a gallery of showcases with a flyover, frame rates and a feature inspector."
 publish_to: 'none'
 
 resolution: workspace

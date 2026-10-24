@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mapigrade_demo/src/rates.dart';
+import 'package:mapigrade_demo/src/flyover/rates.dart';
 
 Counts _counts(int ms, int displayed, int rendered, int renderMs) => (
   time: Duration(milliseconds: ms),
