@@ -16,7 +16,7 @@ The usual way to show a native map in Flutter is a platform view, which Flutter 
 
 The plugin doesn't use a platform view, so it avoids these defects.
 
-The plugin is experimental: we haven't yet validated it for production use. A recording and a demo app are in the [repository](https://github.com/greensopinion/mapigrade).
+The plugin is pre-1.0: the API can change between 0.x releases. We tested it on a MacBook Pro (M2 Max), an iPhone 15 Pro Max, an iPhone 13 and one Android device (Pixel 4a (5G)); see [limitations](https://github.com/greensopinion/mapigrade/blob/main/docs/limitations.md) for what isn't covered yet. A recording and a demo app are in the [repository](https://github.com/greensopinion/mapigrade).
 
 ## Installation
 

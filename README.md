@@ -4,7 +4,7 @@
 
 # Mapigrade
 
-Mapigrade is an experimental Flutter plugin that renders MapLibre Native maps into a Flutter `Texture` widget, for use as the base layer of a `flutter_map` map.
+Mapigrade is a Flutter plugin that renders MapLibre Native maps into a Flutter `Texture` widget, for use as the base layer of a `flutter_map` map.
 
 Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. Mapigrade also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
 
@@ -20,7 +20,9 @@ https://github.com/user-attachments/assets/fe764361-10ca-4e47-acc8-d8824cf6dbdf
 
 ## Status
 
-Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later, in apps with a `minSdk` of 24 or later; `arm64-v8a`, `armeabi-v7a` and `x86_64`). We haven't yet validated it for production use.
+Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later, in apps with a `minSdk` of 24 or later; `arm64-v8a`, `armeabi-v7a` and `x86_64`).
+
+Mapigrade is pre-1.0: the API can change between 0.x releases. We tested it on a MacBook Pro (M2 Max), an iPhone 15 Pro Max, an iPhone 13 and one Android device (Pixel 4a (5G)); see [docs/limitations.md](docs/limitations.md) for what isn't covered yet.
 
 Use Mapigrade in your app: [packages/flutter_mapigrade](packages/flutter_mapigrade/)
 
