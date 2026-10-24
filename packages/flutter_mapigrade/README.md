@@ -89,18 +89,22 @@ final controller = LayerController();
 FlutterMap(
   options: MapOptions(
     onTap: (position, _) async {
-      final features = await controller.queryRenderedFeatures(
-        position.relative!,
-        layerIds: ['poi', 'road'],
-      );
-      if (features.isEmpty) return;
-      final tapped = features.first;
-      controller.setFeatureState(
-        sourceId: tapped.sourceId,
-        sourceLayerId: tapped.sourceLayerId,
-        id: tapped.id,
-        state: {'selected': true},
-      );
+      // Topmost style layer first; see the limits below.
+      for (final layerId in ['poi', 'road']) {
+        final features = await controller.queryRenderedFeatures(
+          position.relative!,
+          layerIds: [layerId],
+        );
+        if (features.isEmpty) continue;
+        final tapped = features.first;
+        controller.setFeatureState(
+          sourceId: tapped.sourceId,
+          sourceLayerId: tapped.sourceLayerId,
+          id: tapped.id,
+          state: {'selected': true},
+        );
+        return;
+      }
     },
   ),
   children: [MapigradeLayer(styleUrl: styleUrl, controller: controller)],
@@ -108,6 +112,12 @@ FlutterMap(
 ```
 
 A query looks where the map frame on screen draws the features, also while the camera moves. `queryRenderedFeaturesInRect` queries a rectangle instead of a point. Results don't name the style layer that drew a feature; query once per group of `layerIds` to tell layers apart.
+
+Defects in MapLibre Native limit queries and feature state:
+
+- The features of several layers aren't returned in style order, so the first result of a query with several `layerIds` isn't the topmost feature ([maplibre-native#4833](https://github.com/maplibre/maplibre-native/pull/4833)). To find the topmost feature, query one layer at a time, topmost first, as in the example.
+- Features of symbol layers (labels and icons) are returned with empty feature state, even when their state is set and the map draws it ([maplibre-native#4834](https://github.com/maplibre/maplibre-native/pull/4834)).
+- When a removal and a change of feature state in one source layer are sent before the same render, the map doesn't draw the change ([maplibre-native#4835](https://github.com/maplibre/maplibre-native/pull/4835)). To move a selection from one feature to another, set `selected: false` on the first feature instead of removing its state.
 
 Feature state changes how the style draws a feature, but only where a paint property reads it, for example `"line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#e00", "#888"]`. A feature needs an ID to take state; the source's `promoteId` in the style gives features IDs from one of their properties. Feature state is kept when the layer gets a different style, so a selection survives a switch between a light and a dark style.
 
