@@ -163,11 +163,15 @@ The layer SHALL resolve URLs with the `asset://` scheme against the application'
 - **THEN** the application's failure handler receives a load failure
 
 ### Requirement: Unsupported platforms and architectures
-An application that depends on the package SHALL build, start and run where the package's native library isn't available: on an Android device whose process can't load the native library, for example because the device has none of the ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64`, and on web, for which the package has no native library. An application built for web SHALL build with the package with both web compilers, to JavaScript and to WebAssembly. The package SHALL then not call native code for the life of the process. The layer SHALL offer a static property, `MapigradeLayer.isSupported`, that is true when the native library is available in the process and false otherwise, and that an application can read before it places the layer. When the native library isn't available and an application places the layer, the layer SHALL report a creation failure whose message states that the native library isn't available, as the requirement "Failure reporting" describes, and SHALL NOT throw into the application's code.
+An application that depends on the package SHALL build, start and run where the package's native library isn't available: on an Android device whose process can't load the native library, for example because the device has none of the ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64`, on Android below API level 29, and on web, for which the package has no native library. An Android application with a `minSdk` of 24 or later SHALL build with the package. An application built for web SHALL build with the package with both web compilers, to JavaScript and to WebAssembly. The package SHALL then not call native code for the life of the process. The layer SHALL offer a static property, `MapigradeLayer.isSupported`, that is true when the native library is available in the process and false otherwise, and that an application can read before it places the layer. When the native library isn't available and an application places the layer, the layer SHALL report a creation failure whose message states that the native library isn't available, as the requirement "Failure reporting" describes, and SHALL NOT throw into the application's code.
 
 #### Scenario: App starts without the native library
 - **WHEN** an application that depends on the package starts on an Android device whose process can't load the native library
 - **THEN** the application starts and runs, and the package logs a warning that names the device's ABIs
+
+#### Scenario: Android application with Flutter's default minSdk
+- **WHEN** an Android application with `minSdk` 24 that depends on the package and places `MapigradeLayer` is built, and runs on Android below API level 29
+- **THEN** the build succeeds, and the application starts and runs with `MapigradeLayer.isSupported` false
 
 #### Scenario: Application built for web
 - **WHEN** an application that depends on the package and places `MapigradeLayer` is built for web, once compiled to JavaScript and once to WebAssembly

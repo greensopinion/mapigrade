@@ -20,7 +20,7 @@ android {
         applicationId = "com.greensopinion.mapigrade_test_harness"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // flutter_mapigrade needs API level 29.
+        // MapigradeLayer draws a map from API level 29.
         minSdk = 29
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION

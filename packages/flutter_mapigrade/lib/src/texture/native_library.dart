@@ -6,8 +6,9 @@ import 'native_library_ffi.dart'
 bool? nativeLibraryAvailableOverride;
 
 /// Whether the native library is available in this process, so that the
-/// bindings resolve. On Android the plugin loads the library unless the APK
-/// lacks it for the device's ABIs; on macOS and iOS it is linked into the app.
+/// bindings resolve. On Android the plugin loads and initializes the library
+/// from API level 29 when the APK has it for the device's ABIs; on macOS and
+/// iOS it is linked into the app.
 /// Always false on web.
 bool get nativeLibraryAvailable =>
     nativeLibraryAvailableOverride ?? platform.nativeLibraryAvailable;

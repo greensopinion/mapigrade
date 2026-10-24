@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/fe764361-10ca-4e47-acc8-d8824cf6dbdf
 
 ## Status
 
-Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later; `arm64-v8a`, `armeabi-v7a` and `x86_64`). We haven't yet validated it for production use.
+Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later, in apps with a `minSdk` of 24 or later; `arm64-v8a`, `armeabi-v7a` and `x86_64`). We haven't yet validated it for production use.
 
 Use Mapigrade in your app: [packages/flutter_mapigrade](packages/flutter_mapigrade/)
 

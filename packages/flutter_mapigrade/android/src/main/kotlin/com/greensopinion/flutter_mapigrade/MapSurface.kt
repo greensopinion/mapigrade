@@ -4,10 +4,12 @@ import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
 import android.media.Image
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
+import androidx.annotation.RequiresApi
 import io.flutter.view.TextureRegistry
 import java.util.IdentityHashMap
 
@@ -19,6 +21,7 @@ import java.util.IdentityHashMap
  *
  * Native code creates, resizes and releases this object on the main thread.
  */
+@RequiresApi(Build.VERSION_CODES.Q)
 internal class MapSurface(registry: TextureRegistry, private val target: Long) {
     private val entry = registry.createImageTexture()
     private val thread = HandlerThread("flutter_mapigrade images").apply { start() }

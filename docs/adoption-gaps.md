@@ -1,6 +1,6 @@
 # Adoption gaps
 
-What app developers need from the package that the publish-readiness change doesn't cover. The publish-readiness change covers distribution, CI, notices and the FFI release pin. This list was written on 2026-10-20 against commit 7b2ebc6, ordered by importance within each section.
+What app developers need from the package that it doesn't provide yet. This list was written on 2026-10-20 against commit 7b2ebc6, after the publish-readiness change, which covered distribution, CI, notices and the FFI release pin. It was revised on 2026-10-24 against commit 7a599fe, when 0.0.2 was the published version. Items are ordered by importance within each section.
 
 ## Gaps that prevent adoption
 
@@ -19,9 +19,9 @@ Options:
 
 ### The application settings are long
 
-An app needs `minSdk = 29`, the iOS and macOS deployment targets, `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`, `ARCHS = arm64`, `STRIP_STYLE = non-global`, the macOS network client entitlement, and Swift Package Manager on iOS and macOS. Each setting is a step where a developer can fail. For every setting that the plugin can't apply itself, provide a checklist or a script that checks an app.
+An app needs the iOS 15.0 and macOS 14.3 deployment targets, `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`, `ARCHS = arm64`, `STRIP_STYLE = non-global`, the macOS network client entitlement, and Swift Package Manager on iOS and macOS. Each setting is a step where a developer can fail. For every setting that the plugin can't apply itself, provide a checklist or a script that checks an app.
 
-The package doesn't support Intel Macs, including the iOS simulator on Intel Macs, because the FFI's xcframework has arm64 slices only. State this in the plugin README's installation section.
+The package doesn't support Intel Macs, including the iOS simulator on Intel Macs, because the FFI's xcframework has arm64 slices only. The README's Supported platforms table lists arm64 only; state it in the installation section too, where a developer on an Intel Mac reads first.
 
 ### The minimum Flutter version is high
 
@@ -31,18 +31,18 @@ The package requires Flutter 3.47.0 and Dart 3.13.4. Many production apps use ol
 
 ### No attribution
 
-`limitations.md` states that a product must show the OpenStreetMap attribution. The layer doesn't expose the attribution of the style's sources. Expose it, so that an app can show it with `flutter_map`'s `RichAttributionWidget`, or add an example that does.
+`limitations.md` states that a product must show the OpenStreetMap attribution. The layer doesn't expose the attribution of the style's sources. The demo shows attribution with `flutter_map`'s `RichAttributionWidget`, but it hard-codes the text for each style, and the example shows none. Expose the attribution of the style's sources, so that an app can show it without knowing the style, or add the demo's approach to the example and the README.
 
 ### Device coverage
 
-- Android ran on one GPU, the Adreno 620 of the Pixel 4a (5G). Mali and PowerVR GPUs, Samsung devices and devices with little memory weren't tested. A Firebase Test Lab matrix that runs the integration tests would cover them.
-- The `armeabi-v7a` and `x86_64` builds haven't run on a device or emulator (tasks 8.2 and 9.2 of the publish-readiness change).
-- The iPhone checks of the publish-readiness change are deferred (tasks 12.1 and 12.2).
+- Android ran on one GPU, the Adreno 620 of the Pixel 4a (5G), and on emulators. Mali and PowerVR GPUs, Samsung devices and devices with little memory weren't tested. A Firebase Test Lab matrix that runs the integration tests would cover them.
 - The thermal behavior with rendering ahead and the battery use weren't measured.
 
 ### Map features
 
-The package has no API to show or hide style layers, set filters, add a GeoJSON source, query the features at a point, or download offline regions. `flutter_map` overlays cover markers and polylines, but apps that move from `maplibre_gl` need querying and runtime style changes. Feature queries at a tapped point would make the package usable for more apps than any of the other features.
+`LayerController` queries the features rendered at a point or in a rectangle, and sets and removes feature state. The package has no API to show or hide style layers, set filters, add a GeoJSON source, or download offline regions. `flutter_map` overlays cover markers and polylines, but apps that move from `maplibre_gl` need runtime style changes.
+
+Query results don't name the style layer that drew a feature. Three defects in MapLibre Native limit the queries further: results of several layers aren't in style order, features of symbol layers have no feature state, and a removal and a change of feature state in one source layer before the same render lose a change. `docs/upstream-fixes/` describes the defects, with the upstream PRs where they exist. The `feature-query` spec and the `LayerController` documentation don't state these limits yet.
 
 ### No guidance on choosing between this package and vector_map_tiles
 
@@ -50,7 +50,7 @@ The package has no API to show or hide style layers, set filters, add a GeoJSON 
 
 ## Smaller items
 
-- Run `pana` before publishing 0.0.1, to see the pub points (documentation coverage, example, platform tags) before pub.dev scores the package.
 - Add GitHub issue templates that ask for the device, GPU, Flutter version and FFI version.
 - State in the README what "experimental" means: whether 0.x versions can change the API without notice, and how soon the package adopts new FFI releases.
 - Document in the plugin README that the release APK is 86.1 MB with all three ABIs, and how to build for fewer ABIs (`abiFilters` with `disable-abi-filtering=true`). This is in `limitations.md` only.
+

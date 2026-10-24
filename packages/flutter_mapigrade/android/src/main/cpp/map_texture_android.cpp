@@ -61,6 +61,9 @@ jmethodID map_surface_close_image = nullptr;
 jmethodID map_surface_release_readers = nullptr;
 std::mutex cache_dir_mutex;
 std::string cache_dir;
+// Dart can load this library without the plugin, which skips it where maps
+// can't be created; map_texture_android_initialized reports this flag.
+std::atomic<bool> initialized{false};
 
 // The TextureRegistry of each engine that attached the plugin, as a global
 // reference, by token. nativeInit adds an engine's registry and nativeDetach
@@ -708,7 +711,12 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
   std::lock_guard lock(registries_mutex);
   int64_t token = next_token++;
   Registries()[token] = env->NewGlobalRef(registry);
+  initialized = true;
   return static_cast<jlong>(token);
+}
+
+MAP_TEXTURE_EXPORT int32_t map_texture_android_initialized() {
+  return map_texture::initialized ? 1 : 0;
 }
 
 // The engine of `token` detached the plugin: removes its registry and releases
