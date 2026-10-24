@@ -119,10 +119,8 @@ rm -f "$app_dir/test/widget_test.dart"
   flutter pub add flutter_mapigrade --path ../flutter_mapigrade
   flutter pub add flutter_map:8.3.2 latlong2:^0.10.1
 )
-# The minimum versions of the package: Android API level 29, iOS 15.0 and
-# macOS 14.3.
-sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 29/' \
-  "$app_dir/android/app/build.gradle.kts"
+# The minimum versions of the package: iOS 15.0 and macOS 14.3. On Android the
+# app keeps Flutter's default minSdk.
 sed -i.bak 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/' \
   "$app_dir/ios/Runner.xcodeproj/project.pbxproj"
 sed -i.bak 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 14.3;/' \

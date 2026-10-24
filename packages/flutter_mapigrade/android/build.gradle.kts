@@ -122,7 +122,7 @@ android {
     }
 
     defaultConfig {
-        minSdk = 29
+        minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
         ndk {
             abiFilters += abis

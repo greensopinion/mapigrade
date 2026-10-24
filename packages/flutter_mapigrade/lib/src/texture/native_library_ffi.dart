@@ -5,9 +5,13 @@ import 'dart:io';
 final bool nativeLibraryAvailable = () {
   try {
     if (Platform.isAndroid) {
-      // Returns the copy that the plugin loaded, if it loaded it.
-      DynamicLibrary.open('libflutter_mapigrade.so');
-      return true;
+      // Opening the library succeeds even where the plugin skipped it, so ask
+      // whether the plugin initialized it.
+      final initialized = DynamicLibrary.open('libflutter_mapigrade.so')
+          .lookupFunction<Int32 Function(), int Function()>(
+            'map_texture_android_initialized',
+          );
+      return initialized() != 0;
     }
     if (Platform.isMacOS || Platform.isIOS) {
       return DynamicLibrary.process().providesSymbol('map_texture_create');

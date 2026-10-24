@@ -162,7 +162,7 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
 
         private fun loadLibrary(): Boolean {
             loadResult?.let { return it }
-            // An app can override the plugin's minSdk; the native code requires API level 29.
+            // Flutter's image texture requires API level 29, above the plugin's minSdk.
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 loadResult = false
                 return false

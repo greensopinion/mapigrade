@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Lowered the plugin's Android `minSdk` from 29 to 24, so that apps with Flutter's default `minSdk` build without an override. The map still needs API level 29; below it `MapigradeLayer.isSupported` is false.
 - Added `LayerController`, which `MapigradeLayer` takes as `controller`, to query the features that the map renders at a point or in a rectangle (`QueriedFeature`), and to set and remove their feature state, for example to identify and highlight the feature the user tapped.
 
 ## 0.0.2

@@ -37,7 +37,6 @@ Gradle and Swift Package Manager cache the downloads for later builds.
 
 An application created with `flutter create` needs these changes before it builds with the package:
 
-- Android: set `minSdk = 29` in `android/app/build.gradle.kts`.
 - iOS: set the deployment target to 15.0 (`IPHONEOS_DEPLOYMENT_TARGET` of the Runner target), and exclude `x86_64` from simulator builds, because the FFI's xcframework has no `x86_64` slice. Add this line to `ios/Flutter/Debug.xcconfig` and `ios/Flutter/Release.xcconfig`:
 
   ```
@@ -125,7 +124,7 @@ Feature state changes how the style draws a feature, but only where a paint prop
 
 | Platform | Minimum version | Architecture |
 | --- | --- | --- |
-| Android | API level 29 | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+| Android | API level 29 (apps build from API level 24) | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
 | iOS | 15.0 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
@@ -141,7 +140,9 @@ STRIP_STYLE = "non-global";
 
 Swift Package Manager links the plugin's native code into the app executable, and Dart looks up its functions in the process. When Xcode archives an app, the default strip style removes every global symbol from the executable, so in an archived build, such as one installed from TestFlight or the App Store, `MapigradeLayer.isSupported` is false and the layer reports a `LayerCreateException`: "the native library of flutter_mapigrade is not available in this process". Debug builds and `flutter run --release` don't strip the executable, so they don't show the failure. To check an archive, run `nm -gU` on the app executable; the output must include `_map_texture_create`.
 
-An app that also runs on web, or on Android devices with other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
+On Android, an app can keep Flutter's default `minSdk`. Below API level 29 the layer draws no map: `MapigradeLayer.isSupported` is false, and a placed layer reports a `LayerCreateException`.
+
+An app that also runs on web, on Android below API level 29, or on Android devices with other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
 
 ```dart
 FlutterMap(

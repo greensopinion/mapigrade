@@ -36,7 +36,7 @@ third_party/                             fetched FFI release, and the local FFI 
 | MapLibre Native FFI | release 0.202610.2, commit `a27e607357aef2cc9c9c89d10ebba7b3bde26fe8`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.0 |
-| Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 29, ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
+| Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 24 (the map needs API level 29), ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
 
 The plugin uses Swift Package Manager, the native build integration that the Flutter 3.47.5 plugin template uses by default. It has no podspec, so CocoaPods builds are not supported.
 
