@@ -2,6 +2,8 @@
 
 This document describes a defect in MapLibre Native (github.com/maplibre/maplibre-native) that affects Mapigrade. It is the input for an upstream fix, which is separate from the OpenSpec change `add-demo-showcases`; that change found the defect and works around it in the demo. Related defects in the same project are described in [maplibre-feature-state-coalescing.md](maplibre-feature-state-coalescing.md) and [maplibre-symbol-query-feature-state.md](maplibre-symbol-query-feature-state.md).
 
+PR: https://github.com/maplibre/maplibre-native/pull/4833
+
 ## Summary
 
 `Renderer::queryRenderedFeatures` in MapLibre Native returns features grouped by style layer, but the groups are in the iteration order of a `std::unordered_map` keyed by layer ID, not in style order. A caller that takes the first feature as the feature drawn on top gets a feature of an arbitrary layer.
