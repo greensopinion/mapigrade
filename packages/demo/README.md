@@ -1,21 +1,17 @@
 # mapigrade_demo
 
-An app for trying `flutter_mapigrade` on your devices. It shows a MapLibre map as the base layer of a `FlutterMap`, with overlays above it, frame rates, and a flyover over three stages of the Tour de France Femmes avec Zwift 2026. It runs on Android, iOS and macOS, and uses only the public library `package:flutter_mapigrade/flutter_mapigrade.dart`, so its code shows what an application can use.
+An app for trying `flutter_mapigrade` on your devices. It opens at a gallery of showcases, each a screen with its own map. It runs on Android, iOS and macOS, and uses only the public library `package:flutter_mapigrade/flutter_mapigrade.dart`, so its code shows what an application can use.
 
 The demo isn't published, and there are no built apps to download: build it from source.
 
 ## What it shows
 
-- The map with the `flutter_map` gestures: drag to pan, pinch or scroll to zoom, and rotate with two fingers (on macOS, with the trackpad, or with Ctrl and drag).
-- A choice of four styles that need no API key: OpenFreeMap Liberty (at launch), Bright and Positron, and the MapLibre demo tiles. A style change keeps the camera, the overlays and the metrics.
-- The map's center (latitude and longitude) and zoom, updated as the camera moves.
-- Frame rates, updated once per second: the map frames displayed and rendered per second, the map's average render time per rendered frame, and the Flutter UI frames per second. The map values come from `LayerMetrics`. At rest the map renders no frames, so its rates are 0 and the render time is shown as "–". The UI rate lags the others by about 2 s, because Flutter reports frame timings in batches.
-- Stages 9, 7 and 4, in that order: a magenta route, a green start pin with a bubble (race, stage, start and finish, distance, type, winner), and a red finish pin. Stage 9 starts and finishes in Nice, so one pin, half green and half red, marks both. The pins and bubbles stay upright when the map rotates. The "Stage overlays" switch hides and shows them.
-- A flyover (the play button). For each stage it holds at the start, then follows the route at zoom 16, with the camera ahead of a rider: a yellow rider marker moves along the route, and the map turns so that the rider's direction of travel points up. At the finish it turns back to north up, then zooms out and flies to the next stage. It ends at the finish of stage 4 in Dijon, after about 5 min 45 s. The camera depends only on the time since the start and the window size, so two runs in the same window show the same view at the same time.
-- "Warm-up pass before the flyover" plays the flyover once to load tiles, then starts again from stage 9, for a recording without tiles loading. The panel states "Warming up" during the first pass.
-- A touch, click, scroll or key press on the map, or the stop button, stops the flyover and leaves the camera where it is.
+- **Flyover**: a drone's-eye flight along three stages of the Tour de France Femmes avec Zwift 2026, with route and pin overlays that stay on the map while it moves, and the map's and Flutter's frame rates. The video in the repository's README is a recording of it.
+- **Inspect features**: tap the map to highlight the feature on top with feature state, and see its style layer, source, ID and properties, and the other features at the tap.
 
-The routes are approximate, and the demo says so. The attribution button at the bottom right of the map lists the style's sources and OpenStreetMap.
+Each screen offers four styles that need no API key: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles. The routes are approximate.
+
+Some of what the inspect screen shows comes from the data, not from the demo: OpenFreeMap's tiles merge buildings of the same height into one feature, so one tap can highlight many buildings. The screen also works around three MapLibre Native defects, described in [docs/maplibre-query-result-order.md](../../docs/maplibre-query-result-order.md), [docs/maplibre-feature-state-coalescing.md](../../docs/maplibre-feature-state-coalescing.md) and [docs/maplibre-symbol-query-feature-state.md](../../docs/maplibre-symbol-query-feature-state.md).
 
 ## Run it
 
@@ -38,7 +34,7 @@ The styles and tiles come from OpenFreeMap and demotiles.maplibre.org, so the de
 
 ## Recording mode
 
-On macOS, the environment variable `MAPIGRADE_DEMO_RECORDING_SECONDS=<L>` starts the demo in the recording mode that `tool/record_readme.sh` uses for the video in the repository's README. In this mode the window has no title bar and a content area of 1280 × 720 points, the settings are collapsed, and when the style and the stages have loaded, the demo plays the first L + 1 s of the flyover as a warm-up pass and moves the camera back to the start. When the map is at rest there, the demo writes `ready` to standard output, and it starts the flyover when it reads `go` on standard input. It exits with an error when the map isn't at rest within 30 s, when `go` doesn't arrive within 30 s, or when the map reports a failure.
+On macOS, the environment variable `MAPIGRADE_DEMO_RECORDING_SECONDS=<L>` starts the demo in the recording mode that `tool/record_readme.sh` uses for the video in the repository's README. In this mode the demo opens the flyover without the gallery, the window has no title bar and a content area of 1280 × 720 points, the settings are collapsed, and when the style and the stages have loaded, the demo plays the first L + 1 s of the flyover as a warm-up pass and moves the camera back to the start. When the map is at rest there, the demo writes `ready` to standard output, and it starts the flyover when it reads `go` on standard input. It exits with an error when the map isn't at rest within 30 s, when `go` doesn't arrive within 30 s, or when the map reports a failure.
 
 To try it, start the binary in the app bundle from a shell, and type `go` after `ready`:
 

@@ -6,9 +6,9 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:mapigrade_demo/src/flyover.dart';
-import 'package:mapigrade_demo/src/flyover_player.dart';
-import 'package:mapigrade_demo/src/stages.dart';
+import 'package:mapigrade_demo/src/flyover/flyover.dart';
+import 'package:mapigrade_demo/src/flyover/flyover_player.dart';
+import 'package:mapigrade_demo/src/flyover/stages.dart';
 
 void main() {
   final stages = parseStages(File(stagesAsset).readAsStringSync());

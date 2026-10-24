@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:mapigrade_demo/src/stages.dart';
+import 'package:mapigrade_demo/src/flyover/stages.dart';
 
 void main() {
   final stages = parseStages(File(stagesAsset).readAsStringSync());

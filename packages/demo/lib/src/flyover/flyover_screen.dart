@@ -5,13 +5,15 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../common/panel.dart';
+import '../common/style_picker.dart';
+import '../common/styles.dart';
 import 'flyover.dart';
 import 'flyover_player.dart';
 import 'metrics_panel.dart';
 import 'recording.dart';
 import 'stage_layers.dart';
 import 'stages.dart';
-import 'styles.dart';
 
 /// The start of stage 9 in Nice.
 const _initialCenter = LatLng(43.6975, 7.2700);
@@ -20,16 +22,19 @@ const _initialZoom = 12.0;
 /// The center and zoom of the map's camera.
 typedef _Position = ({LatLng center, double zoom});
 
-/// The demo's map: `MapigradeLayer` as the base layer of a `FlutterMap`, with
-/// the stage overlays, the attribution and the controls above it.
-class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+/// The flyover showcase: `MapigradeLayer` as the base layer of a `FlutterMap`,
+/// with the stage overlays, the attribution and the controls above it.
+class FlyoverScreen extends StatefulWidget {
+  const FlyoverScreen({super.key, this.recording});
+
+  /// The recording mode, or null (design D144 of readme-demo-recording).
+  final Recording? recording;
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  State<FlyoverScreen> createState() => _FlyoverScreenState();
 }
 
-class _MapScreenState extends State<MapScreen>
+class _FlyoverScreenState extends State<FlyoverScreen>
     with SingleTickerProviderStateMixin {
   final _mapController = MapController();
 
@@ -50,8 +55,7 @@ class _MapScreenState extends State<MapScreen>
   bool _showStages = true;
   bool _warmUp = false;
 
-  /// The recording mode, or null (design D144 of readme-demo-recording).
-  final _recording = Recording.fromEnvironment();
+  late final _recording = widget.recording;
   late bool _settingsOpen = _recording == null;
   bool _styleLoaded = false;
   bool _recordingStarted = false;
@@ -190,16 +194,7 @@ class _MapScreenState extends State<MapScreen>
               attributionOf(_style),
             ],
           ),
-          Positioned(
-            top: 0,
-            left: 0,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: _panel(context),
-              ),
-            ),
-          ),
+          _panel(context),
         ],
       ),
     );
@@ -208,93 +203,58 @@ class _MapScreenState extends State<MapScreen>
   Widget _panel(BuildContext context) {
     final theme = Theme.of(context);
     final player = _player;
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxWidth: 300,
-        maxHeight: MediaQuery.sizeOf(context).height - 96,
-      ),
-      child: Card(
-        color: theme.colorScheme.surface.withValues(alpha: 0.92),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Mapigrade demo',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: player.isActive ? 'Stop flyover' : 'Play flyover',
-                    icon: Icon(player.isActive ? Icons.stop : Icons.play_arrow),
-                    onPressed: _stages == null ? null : _playOrStop,
-                  ),
-                  IconButton(
-                    tooltip: _settingsOpen ? 'Hide settings' : 'Show settings',
-                    icon: Icon(_settingsOpen ? Icons.expand_less : Icons.tune),
-                    onPressed: () =>
-                        setState(() => _settingsOpen = !_settingsOpen),
-                  ),
-                ],
-              ),
-              if (player.isActive)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    switch (player.phase) {
-                      FlyoverPhase.warmingUp =>
-                        'Warming up: loading tiles'
-                            '${player.stage == null ? '' : ' (stage ${player.stage})'}',
-                      FlyoverPhase.waiting => 'Waiting to start',
-                      _ => 'Flyover: stage ${player.stage ?? ''}',
-                    },
-                    style: theme.textTheme.bodySmall!.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              _PositionReadout(_position),
-              const SizedBox(height: 4),
-              MetricsPanel(metrics: _metrics),
-              if (_showStages)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Tour de France Femmes 2026 routes are approximate.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-              if (_settingsOpen) ..._settings(theme),
-            ],
-          ),
+    return DemoPanel(
+      title: 'Mapigrade demo',
+      actions: [
+        IconButton(
+          tooltip: player.isActive ? 'Stop flyover' : 'Play flyover',
+          icon: Icon(player.isActive ? Icons.stop : Icons.play_arrow),
+          onPressed: _stages == null ? null : _playOrStop,
         ),
-      ),
+        IconButton(
+          tooltip: _settingsOpen ? 'Hide settings' : 'Show settings',
+          icon: Icon(_settingsOpen ? Icons.expand_less : Icons.tune),
+          onPressed: () => setState(() => _settingsOpen = !_settingsOpen),
+        ),
+      ],
+      children: [
+        if (player.isActive)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              switch (player.phase) {
+                FlyoverPhase.warmingUp =>
+                  'Warming up: loading tiles'
+                      '${player.stage == null ? '' : ' (stage ${player.stage})'}',
+                FlyoverPhase.waiting => 'Waiting to start',
+                _ => 'Flyover: stage ${player.stage ?? ''}',
+              },
+              style: theme.textTheme.bodySmall!.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        _PositionReadout(_position),
+        const SizedBox(height: 4),
+        MetricsPanel(metrics: _metrics),
+        if (_showStages)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Tour de France Femmes 2026 routes are approximate.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        if (_settingsOpen) ..._settings(theme),
+      ],
     );
   }
 
   List<Widget> _settings(ThemeData theme) => [
     const Divider(),
-    Row(
-      children: [
-        const Text('Style'),
-        const SizedBox(width: 12),
-        Expanded(
-          child: DropdownButton<DemoStyle>(
-            isExpanded: true,
-            value: _style,
-            items: [
-              for (final style in demoStyles)
-                DropdownMenuItem(value: style, child: Text(style.name)),
-            ],
-            onChanged: (style) => setState(() => _style = style!),
-          ),
-        ),
-      ],
+    StylePicker(
+      value: _style,
+      onChanged: (style) => setState(() => _style = style),
     ),
     SwitchListTile(
       contentPadding: EdgeInsets.zero,
