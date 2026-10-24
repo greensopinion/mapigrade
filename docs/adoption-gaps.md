@@ -51,6 +51,5 @@ Query results don't name the style layer that drew a feature. Three defects in M
 ## Smaller items
 
 - Add GitHub issue templates that ask for the device, GPU, Flutter version and FFI version.
-- State in the README what "experimental" means: whether 0.x versions can change the API without notice, and how soon the package adopts new FFI releases.
 - Document in the plugin README that the release APK is 86.1 MB with all three ABIs, and how to build for fewer ABIs (`abiFilters` with `disable-abi-filtering=true`). This is in `limitations.md` only.
 
