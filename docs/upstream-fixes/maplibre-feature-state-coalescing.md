@@ -2,6 +2,8 @@
 
 This document describes a defect in MapLibre Native (github.com/maplibre/maplibre-native) that affects Mapigrade. It is the input for an upstream fix, which is separate from the OpenSpec change `add-demo-showcases`; that change found the defect and works around it in the demo. Related defects in the same project are described in [maplibre-query-result-order.md](maplibre-query-result-order.md) and [maplibre-symbol-query-feature-state.md](maplibre-symbol-query-feature-state.md).
 
+PR: https://github.com/maplibre/maplibre-native/pull/4835
+
 ## Summary
 
 MapLibre Native queues feature state changes and removals per source and applies them to the tiles when it next prepares the source for a render. When a removal and a change of feature state in one source layer are queued before the same render, the change isn't applied to the tiles. When a removal and a change of one key of one feature's state are queued before the same render, the removal takes effect, even when the change was called after it.
