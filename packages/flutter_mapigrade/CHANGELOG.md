@@ -1,3 +1,7 @@
+## Unreleased
+
+- Added `LayerController`, which `MapigradeLayer` takes as `controller`, to query the features that the map renders at a point or in a rectangle (`QueriedFeature`), and to set and remove their feature state, for example to identify and highlight the feature the user tapped.
+
 ## 0.0.2
 
 - Lowered the minimum iOS version from 15.5 to 15.0.

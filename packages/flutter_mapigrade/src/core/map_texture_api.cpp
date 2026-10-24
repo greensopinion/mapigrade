@@ -1,5 +1,6 @@
 #include "map_texture_api.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -12,6 +13,11 @@
 #include "map_texture.h"
 
 namespace {
+
+std::optional<std::string> Optional(const char* text) {
+  if (text == nullptr) return std::nullopt;
+  return std::string(text);
+}
 
 using map_texture::MapTexture;
 
@@ -219,6 +225,72 @@ int32_t map_texture_set_camera(int64_t handle, double latitude,
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
   texture->SetCamera({latitude, longitude, zoom, bearing}, seq);
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_query_rendered_features(int64_t handle,
+                                            int64_t request_id,
+                                            const double* world_corners,
+                                            const char* const* layer_ids,
+                                            int32_t layer_id_count,
+                                            const char* filter_json) {
+  if (world_corners == nullptr || layer_id_count < 0 ||
+      (layer_ids == nullptr && layer_id_count > 0)) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  map_texture::RenderedQuery query;
+  query.request_id = request_id;
+  for (int i = 0; i < 4; ++i) {
+    double x = world_corners[2 * i];
+    double y = world_corners[2 * i + 1];
+    if (!std::isfinite(x) || !std::isfinite(y)) {
+      return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+    }
+    query.corners[i] = {x, y};
+  }
+  if (layer_ids != nullptr) {
+    std::vector<std::string> ids;
+    for (int32_t i = 0; i < layer_id_count; ++i) {
+      if (layer_ids[i] == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+      ids.emplace_back(layer_ids[i]);
+    }
+    query.layer_ids = std::move(ids);
+  }
+  if (filter_json != nullptr) query.filter = filter_json;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->QueryRenderedFeatures(std::move(query));
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_set_feature_state(int64_t handle, const char* source_id,
+                                      const char* source_layer_id,
+                                      const char* feature_id,
+                                      const char* state_json) {
+  if (source_id == nullptr || source_id[0] == '\0' || feature_id == nullptr ||
+      state_json == nullptr) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->SetFeatureState(
+      {source_id, Optional(source_layer_id), feature_id, std::nullopt},
+      state_json);
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_remove_feature_state(int64_t handle, const char* source_id,
+                                         const char* source_layer_id,
+                                         const char* feature_id,
+                                         const char* key) {
+  if (source_id == nullptr || source_id[0] == '\0' ||
+      (key != nullptr && feature_id == nullptr)) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->RemoveFeatureState({source_id, Optional(source_layer_id),
+                               Optional(feature_id), Optional(key)});
   return MAP_TEXTURE_OK;
 }
 

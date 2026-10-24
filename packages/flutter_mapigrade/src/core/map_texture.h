@@ -19,6 +19,7 @@
 #include "command_queue.h"
 #include "map_texture_api.h"
 #include "mln.h"
+#include "projection.h"
 #include "render_gate.h"
 #include "render_target.h"
 
@@ -29,6 +30,15 @@ struct HttpHeaderRule {
   std::string url;
   // Names and values.
   std::vector<std::pair<std::string, std::string>> headers;
+};
+
+// A rendered feature query: the corners of the queried area, and the options.
+struct RenderedQuery {
+  int64_t request_id = 0;
+  WorldPoint corners[4];
+  // Nothing for every style layer.
+  std::optional<std::vector<std::string>> layer_ids;
+  std::optional<std::string> filter;
 };
 
 class MapTexture : public std::enable_shared_from_this<MapTexture> {
@@ -65,6 +75,12 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void SetDisplayRefreshRate(double hz);
   // Asks the renderer to release cached resources it can rebuild.
   void ReduceMemoryUse();
+  // Queues `query` for the map thread, which reports its result as a
+  // MAP_TEXTURE_EVENT_QUERY_RESULT event.
+  void QueryRenderedFeatures(RenderedQuery query);
+  // `state` is a JSON object whose keys are set on the feature.
+  void SetFeatureState(FeatureStateTarget feature, std::string state);
+  void RemoveFeatureState(FeatureStateTarget feature);
 
   // Any thread except the map thread. While paused, the map thread submits no
   // GPU work; pausing returns after a render in progress has ended. Resuming
@@ -122,6 +138,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   map_texture_stats stats();
 
+  // For tests: the view of the last frame the session rendered, or nothing
+  // before the first.
+  std::optional<RenderedView> LastRenderedViewForTesting();
+
  private:
   MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
              std::optional<uint64_t> maximum_cache_size,
@@ -140,6 +160,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // completions of attach, detach and target replacement.
   void ServiceUntil(const std::function<bool()>& done);
   void ApplyReduceMemoryUse();
+  // Map thread: submits the set or remove of a kSetFeatureState or
+  // kRemoveFeatureState command, and reports a failure as a render error.
+  void ApplyFeatureState(const Command& command);
   void DestroySession();
   // Map thread: attaches a render session to the map at size_; returns
   // whether the attachment completed.
@@ -177,8 +200,16 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Map thread: services the session's driver work, which renders the
   // armed demand's frame, and handles the frame results.
   void ServiceDriver();
+  // Map thread: drains and handles the session's frame results, for a service
+  // call that started at `service_start` and took `service_ns`.
+  void DrainFrameResults(int64_t service_start, int64_t service_ns);
   void HandleFrameResult(const mln_render_frame_result& result,
                          int64_t service_start, int64_t service_ns);
+  // Map thread: runs the queued queries against the last rendered frame, with
+  // no frame demand armed, and reports their results in order.
+  void RunQueries();
+  void EmitQueryResult(int64_t request_id, int32_t status,
+                       const std::string& message);
   // Map thread: acquires and releases the rendered frames, so that their GPU
   // writes have completed.
   void AcquireAndReleaseFrame();
@@ -236,9 +267,11 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
                         const mln_diagnostic* diagnostic = nullptr);
   // A completion that reports a failure of `what` as a render error, and
   // otherwise runs `on_success` with the result, on the completing thread.
+  // Then it runs `on_done` either way.
   mln_completion ReportingCompletion(
       const char* what,
-      std::function<void(const mln_completion_result&)> on_success = nullptr);
+      std::function<void(const mln_completion_result&)> on_success = nullptr,
+      std::function<void()> on_done = nullptr);
 
   const int64_t handle_;
   const int64_t engine_;
@@ -284,6 +317,25 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   TargetSize size_{};
   Viewport viewport_{};
   uint64_t next_frame_id_ = 1;
+  // The view of the last frame the session rendered, published or not: the
+  // view that a rendered query reads. Written on the map thread; the mutex is
+  // for LastRenderedViewForTesting().
+  std::mutex rendered_view_mutex_;
+  std::optional<RenderedView> rendered_view_;
+  // Map thread: frame results with the disposition RENDERED.
+  uint64_t rendered_results_ = 0;
+  // Queries that the map thread hasn't run yet, in the order of the calls.
+  std::mutex queries_mutex_;
+  std::vector<RenderedQuery> queries_;
+  // A query returns the feature state of the last rendered frame, so queries
+  // wait until a frame includes every feature-state command submitted before
+  // them: the commands submitted (map thread) and completed (any thread), the
+  // newest render update generation that a completed one is part of, and the
+  // map update generation of the last rendered frame (map thread).
+  int64_t feature_state_submitted_ = 0;
+  std::atomic<int64_t> feature_state_completed_{0};
+  std::atomic<uint64_t> feature_state_generation_{0};
+  uint64_t rendered_update_generation_ = 0;
   // The sequence number of the newest camera that a rendered frame includes,
   // and when Dart set it.
   int64_t applied_seq_ = 0;

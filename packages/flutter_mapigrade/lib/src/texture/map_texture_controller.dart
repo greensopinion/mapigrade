@@ -398,6 +398,47 @@ abstract interface class MapTextureController {
   /// displaying [selectedFrame], the frame chosen before.
   FrameCamera? selectNewest();
 
+  /// Queries the features that the map renders in the quadrilateral with the
+  /// four [worldCorners], in normalized Web Mercator coordinates: the world is
+  /// [0, 1) in both directions, with y increasing southwards. The map converts
+  /// the corners with the camera of the last frame it rendered. With
+  /// [layerIds], only those style layers are queried; [filterJson] is a
+  /// style-spec filter expression as JSON.
+  ///
+  /// Completes with one entry per feature: `feature` (a GeoJSON Feature),
+  /// `source`, `sourceLayer` and `state`, in the order MapLibre returns them,
+  /// and with an empty list before the map has rendered a frame. Queries
+  /// complete in the order of the calls. Completes with a
+  /// [MapTextureException] when the query fails, and with a [StateError] when
+  /// the controller is disposed before the result arrives.
+  Future<List<Map<String, Object?>>> queryRenderedFeatures(
+    List<Offset> worldCorners, {
+    List<String>? layerIds,
+    String? filterJson,
+  });
+
+  /// Sets the keys of the JSON object [stateJson] in the feature state of the
+  /// feature [featureId] of the source [sourceId] and, for a source with
+  /// layers, its source layer [sourceLayerId]. A numeric feature id is given
+  /// as its decimal text. The map reports a failure as a [RenderError].
+  void setFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    required String featureId,
+    required String stateJson,
+  });
+
+  /// Removes feature state of the source [sourceId] and, for a source with
+  /// layers, its source layer [sourceLayerId]: the key [key] of the feature
+  /// [featureId], every key of that feature without [key], or the state of
+  /// every feature without either.
+  void removeFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    String? featureId,
+    String? key,
+  });
+
   /// Sets the viewport's logical size and device pixel ratio. Repeated calls
   /// with the same values do nothing.
   void resize(Size logicalSize, double pixelRatio);

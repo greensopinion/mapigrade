@@ -63,6 +63,25 @@ A chosen slot stays held until Flutter presents a slot that Dart chose later, an
 
 Each displayed frame is reported to Dart with the camera and size it was rendered with and the sequence number of the camera update it was rendered with (`MapTextureController.frames`), taken from `mln_map_projection_create()` on the frame result's view. The sequence number is that of the newest camera command whose completion's render update generation the frame includes (design D181). The layer keeps the `flutter_map` camera of each of the last 32 camera updates it sent, by sequence number, and draws its `children` under its own `MapInheritedModel` at the camera of the frame it chose (designs D125 and D127). The children therefore stay exactly on the displayed map, and lag the gesture as the map does.
 
+## Feature queries
+
+A rendered feature query (`LayerController.queryRenderedFeatures`) runs against the render session's last rendered frame, not against the camera Dart set last. While the camera moves, three cameras differ: the live `flutter_map` camera, the camera of the displayed frame, and the camera of the last rendered frame, which can be ahead of the displayed one with camera prediction or while the map renders ahead. The query position is converted in two steps:
+
+```
+ tap position (logical px, flutter_map widget)
+   │ Dart: worldPosition(camera of the displayed frame) per corner of the query square
+   ▼
+ normalized Mercator corners ──► map_texture_query_rendered_features (request id)
+   │ map thread: screen position with the camera of the last rendered frame,
+   │   bounds of the four corners ──► mln_render_session_query_rendered_features
+   ▼
+ MAP_TEXTURE_EVENT_QUERY_RESULT (request id, JSON array) ──► PendingQueries ──► Future
+```
+
+Queries wait in their own queue. Each loop iteration runs them after the frame results are handled and before the next frame demand is armed (`RunQueries`). The FFI runs a query in a later service call, and a service call can render the armed demand first, so the map thread ends the armed demand with a barrier before it converts and submits a batch, and services the session until every query of the batch has completed. The map thread records the view of each rendered frame from its frame result, including frames it doesn't publish. Results are sent in request order, and `PendingQueries` decodes a result of 64 KiB or more in another isolate and still completes queries in call order.
+
+Feature state is set and removed with commands in the ordered queue. Because a query returns the state of the last rendered frame, the map thread holds queries until a frame has rendered with every feature-state command submitted before them. The FFI keeps feature state on the map, so it survives a style change.
+
 ## Flutter engines
 
 A process can run more than one Flutter engine, for example a background engine that a messaging plugin starts. Each engine registers the plugin, and texture ids are only valid in the engine that issued them, so each map registers its textures with the engine whose Dart code created it (design D153 to D157 of the multiple-flutter-engines change).

@@ -4,6 +4,7 @@ import '../texture/map_texture_controller.dart';
 import '../texture/native_library.dart';
 import 'http_header_rule.dart';
 import 'layer_alignment.dart';
+import 'layer_controller.dart';
 import 'layer_exception.dart';
 import 'layer_metrics.dart';
 import 'map_texture_layer.dart';
@@ -31,6 +32,7 @@ final class MapigradeLayer extends StatelessWidget {
     this.onError,
     this.metrics,
     this.children = const [],
+    this.controller,
   }) : assert(
          (styleUrl == null) != (styleJson == null),
          'give exactly one of styleUrl and styleJson',
@@ -106,6 +108,12 @@ final class MapigradeLayer extends StatelessWidget {
   /// the children read the camera of the displayed frame.
   final List<Widget> children;
 
+  /// Queries the features that the layer's map renders and sets their feature
+  /// state, for example to identify and highlight the feature the user
+  /// tapped; see [LayerController]. Give each controller to one layer at a
+  /// time.
+  final LayerController? controller;
+
   @override
   Widget build(BuildContext context) => MapTextureLayer(
     styleUrl: styleUrl,
@@ -115,6 +123,7 @@ final class MapigradeLayer extends StatelessWidget {
     onStyleLoaded: onStyleLoaded,
     onError: onError,
     metrics: metrics,
+    controller: controller,
     children: children,
   );
 }

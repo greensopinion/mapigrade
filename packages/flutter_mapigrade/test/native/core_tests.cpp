@@ -1,5 +1,6 @@
-// Unit tests for CommandQueue, BufferState and RenderGate.
+// Unit tests for CommandQueue, BufferState, RenderGate and the projection.
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 
 #include "buffer_state.h"
 #include "command_queue.h"
+#include "projection.h"
 #include "render_gate.h"
 
 using map_texture::BufferState;
@@ -20,6 +22,7 @@ using map_texture::FrameInfo;
 using map_texture::RenderGate;
 using Slot = map_texture::BufferState::Slot;
 using map_texture::Viewport;
+using map_texture::WorldPoint;
 
 namespace {
 
@@ -541,6 +544,82 @@ void PauseWithoutRenderReturnsAtOnce() {
   CHECK(!gate.TryBeginRender());
 }
 
+// Expected values are those of `mercator` and `screenPosition` in
+// lib/src/layer/camera_projection.dart for the same inputs.
+struct ProjectionCase {
+  Camera camera;
+  double width;
+  double height;
+  double latitude;
+  double longitude;
+  WorldPoint world;
+  double x;
+  double y;
+};
+
+constexpr double kTolerance = 1e-6;
+
+void CheckProjection(const ProjectionCase& c, WorldPoint world) {
+  auto p = map_texture::ScreenPosition(c.camera, c.width, c.height, world);
+  CHECK(std::abs(p.x - c.x) < kTolerance);
+  CHECK(std::abs(p.y - c.y) < kTolerance);
+}
+
+const ProjectionCase kProjectionCases[] = {
+    {{48.2, 16.37, 12.5, 0}, 400, 800, 48.21, 16.35,
+     {0.54541666666666666, 0.34674085655246356},
+     35.232177735582752, 276.38718722981423},
+    {{48.2, 16.37, 14, 30}, 390, 844, 48.205, 16.375,
+     {0.54548611111111112, 0.34676169713161131},
+     208.49608082320015, 212.35900880028581},
+    {{80, -20, 9.25, -45}, 1024, 768, 80.02, -19.9,
+     {0.44472222222222219, 0.11193914916789455},
+     643.82655564601578, 374.63786095412877},
+    {{-17, 179.9, 10, 0}, 800, 600, -17.01, 179.95,
+     {0.99986111111111109, 0.54795978365423492},
+     472.81777777778916, 315.22939639136894},
+};
+
+void MercatorMatchesDart() {
+  for (const ProjectionCase& c : kProjectionCases) {
+    WorldPoint w = map_texture::Mercator(c.latitude, c.longitude);
+    CHECK(std::abs(w.x - c.world.x) < 1e-15);
+    CHECK(std::abs(w.y - c.world.y) < 1e-15);
+  }
+}
+
+void ScreenPositionMatchesDart() {
+  for (const ProjectionCase& c : kProjectionCases) CheckProjection(c, c.world);
+}
+
+void ScreenPositionWrapsAcrossTheAntimeridian() {
+  // 180.05 degrees east of the camera at 179.9 is -179.95: Dart places the
+  // unwrapped x 1.000138..., the native side must place either copy there.
+  const ProjectionCase east = {{-17, 179.9, 10, 0}, 800, 600, -17.01, 180.05,
+                               {1.0001388888888889, 0.54795978365423492},
+                               618.45333333336748, 315.22939639136894};
+  CheckProjection(east, east.world);
+  CheckProjection(east, {east.world.x - 1, east.world.y});
+  CheckProjection(east, {east.world.x + 1, east.world.y});
+}
+
+void ScreenBoundsContainRotatedCorners() {
+  // At a bearing of 45 degrees, a square of side 2 around the center spans
+  // 2 * sqrt(2) on each axis.
+  Camera camera{0, 0, 3, 45};
+  double half = 1 / map_texture::WorldSize(3);
+  WorldPoint center = map_texture::Mercator(0, 0);
+  WorldPoint corners[4] = {{center.x - half, center.y - half},
+                           {center.x + half, center.y - half},
+                           {center.x + half, center.y + half},
+                           {center.x - half, center.y + half}};
+  auto box = map_texture::ScreenBounds(camera, 100, 100, corners);
+  CHECK(std::abs(box.min.x - (50 - std::sqrt(2.0))) < kTolerance);
+  CHECK(std::abs(box.max.x - (50 + std::sqrt(2.0))) < kTolerance);
+  CHECK(std::abs(box.min.y - (50 - std::sqrt(2.0))) < kTolerance);
+  CHECK(std::abs(box.max.y - (50 + std::sqrt(2.0))) < kTolerance);
+}
+
 }  // namespace
 
 int main() {
@@ -580,6 +659,10 @@ int main() {
       {"GateAllowsRendersUntilPaused", GateAllowsRendersUntilPaused},
       {"PauseWaitsForRenderInProgress", PauseWaitsForRenderInProgress},
       {"PauseWithoutRenderReturnsAtOnce", PauseWithoutRenderReturnsAtOnce},
+      {"MercatorMatchesDart", MercatorMatchesDart},
+      {"ScreenPositionMatchesDart", ScreenPositionMatchesDart},
+      {"ScreenPositionWrapsAcrossTheAntimeridian", ScreenPositionWrapsAcrossTheAntimeridian},
+      {"ScreenBoundsContainRotatedCorners", ScreenBoundsContainRotatedCorners},
   };
   for (const auto& [name, test] : tests) {
     int before = failures;

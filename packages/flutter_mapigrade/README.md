@@ -79,6 +79,38 @@ Place widgets that don't move with the map, such as zoom buttons or a scale bar,
 
 Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a different one.
 
+## Identifying and highlighting features
+
+The features that the map draws, such as POIs, trails and roads, are in the map's tiles, not in Dart. To find the feature the user tapped, give the layer a `LayerController` and query it with the tap position:
+
+```dart
+final controller = LayerController();
+
+FlutterMap(
+  options: MapOptions(
+    onTap: (position, _) async {
+      final features = await controller.queryRenderedFeatures(
+        position.relative!,
+        layerIds: ['poi', 'road'],
+      );
+      if (features.isEmpty) return;
+      final tapped = features.first;
+      controller.setFeatureState(
+        sourceId: tapped.sourceId,
+        sourceLayerId: tapped.sourceLayerId,
+        id: tapped.id,
+        state: {'selected': true},
+      );
+    },
+  ),
+  children: [MapigradeLayer(styleUrl: styleUrl, controller: controller)],
+)
+```
+
+A query looks where the map frame on screen draws the features, also while the camera moves. `queryRenderedFeaturesInRect` queries a rectangle instead of a point. Results don't name the style layer that drew a feature; query once per group of `layerIds` to tell layers apart.
+
+Feature state changes how the style draws a feature, but only where a paint property reads it, for example `"line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#e00", "#888"]`. A feature needs an ID to take state; the source's `promoteId` in the style gives features IDs from one of their properties. Feature state is kept when the layer gets a different style, so a selection survives a switch between a light and a dark style.
+
 ## Supported platforms
 
 | Platform | Minimum version | Architecture |
@@ -152,7 +184,8 @@ android {
 
 ## Limitations
 
-- No API for style layers, sources, queries or pitch.
+- No API for style layers, sources or pitch. Feature queries cover rendered features at a point or in a rectangle; there are no line-string or source feature queries.
+- While the camera moves, labels and icons are matched where MapLibre placed them last, which can be behind the map on screen.
 - Sprite and glyph density is fixed when the map is created.
 
 More in [docs/limitations.md](https://github.com/greensopinion/mapigrade/blob/main/docs/limitations.md).

@@ -25,6 +25,7 @@ const int mapTextureEventRenderError = 2;
 const int mapTextureEventIdle = 3;
 const int mapTextureEventFrameDisplayed = 4;
 const int mapTextureEventFrameReady = 5;
+const int mapTextureEventQueryResult = 6;
 
 final class MapTextureEventStruct extends Struct {
   @Int64()
@@ -54,6 +55,10 @@ final class MapTextureEventStruct extends Struct {
   @Int64()
   external int seq;
   external Pointer<Utf8> message;
+  @Int64()
+  external int requestId;
+  @Int32()
+  external int status;
 }
 
 final class MapTextureFrameStruct extends Struct {
@@ -204,6 +209,59 @@ external int mapTextureSetCamera(
   double zoom,
   double bearing,
   int seq,
+);
+
+@Native<
+  Int32 Function(
+    Int64,
+    Int64,
+    Pointer<Double>,
+    Pointer<Pointer<Utf8>>,
+    Int32,
+    Pointer<Utf8>,
+  )
+>(symbol: 'map_texture_query_rendered_features')
+external int mapTextureQueryRenderedFeatures(
+  int handle,
+  int requestId,
+  Pointer<Double> worldCorners,
+  Pointer<Pointer<Utf8>> layerIds,
+  int layerIdCount,
+  Pointer<Utf8> filterJson,
+);
+
+@Native<
+  Int32 Function(
+    Int64,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+  )
+>(symbol: 'map_texture_set_feature_state')
+external int mapTextureSetFeatureState(
+  int handle,
+  Pointer<Utf8> sourceId,
+  Pointer<Utf8> sourceLayerId,
+  Pointer<Utf8> featureId,
+  Pointer<Utf8> stateJson,
+);
+
+@Native<
+  Int32 Function(
+    Int64,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+  )
+>(symbol: 'map_texture_remove_feature_state')
+external int mapTextureRemoveFeatureState(
+  int handle,
+  Pointer<Utf8> sourceId,
+  Pointer<Utf8> sourceLayerId,
+  Pointer<Utf8> featureId,
+  Pointer<Utf8> key,
 );
 
 @Native<Int32 Function(Int64, Double, Double, Double)>(

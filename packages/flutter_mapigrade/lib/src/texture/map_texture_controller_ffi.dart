@@ -10,6 +10,7 @@ import 'package:ffi/ffi.dart';
 import 'bindings.dart';
 import 'engine_token.dart';
 import 'map_texture_controller.dart';
+import 'pending_queries.dart';
 
 // kMaxBufferCount in src/core/buffer_state.h.
 const _maxSlots = 6;
@@ -143,6 +144,7 @@ class _FfiMapTextureController implements MapTextureController {
   bool _disposed = false;
   double? _width, _height, _pixelRatio, _refreshRate;
   int _seq = 0;
+  final _queries = PendingQueries();
 
   @override
   Stream<MapEvent> get events => _events.stream;
@@ -223,6 +225,92 @@ class _FfiMapTextureController implements MapTextureController {
   }
 
   @override
+  Future<List<Map<String, Object?>>> queryRenderedFeatures(
+    List<Offset> worldCorners, {
+    List<String>? layerIds,
+    String? filterJson,
+  }) {
+    if (_disposed) return Future.error(const MapTextureDisposedException());
+    if (worldCorners.length != 4) {
+      throw ArgumentError.value(worldCorners, 'worldCorners', 'needs 4 points');
+    }
+    final (id, result) = _queries.add();
+    // The native side reads an empty array of layer ids as no array.
+    if (layerIds != null && layerIds.isEmpty) {
+      _queries.complete(id, 0, '[]');
+      return result;
+    }
+    final status = using((arena) {
+      final corners = arena<Double>(8);
+      for (var i = 0; i < 4; ++i) {
+        corners[2 * i] = worldCorners[i].dx;
+        corners[2 * i + 1] = worldCorners[i].dy;
+      }
+      Pointer<Pointer<Utf8>> ids = nullptr;
+      if (layerIds != null) {
+        ids = arena<Pointer<Utf8>>(layerIds.length);
+        for (var i = 0; i < layerIds.length; ++i) {
+          ids[i] = layerIds[i].toNativeUtf8(allocator: arena);
+        }
+      }
+      return mapTextureQueryRenderedFeatures(
+        _handle,
+        id,
+        corners,
+        ids,
+        layerIds?.length ?? 0,
+        filterJson?.toNativeUtf8(allocator: arena) ?? nullptr,
+      );
+    });
+    if (status != mapTextureOk) {
+      _queries.complete(id, status, 'native call failed with status $status');
+    }
+    return result;
+  }
+
+  @override
+  void setFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    required String featureId,
+    required String stateJson,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      _check(
+        mapTextureSetFeatureState(
+          _handle,
+          sourceId.toNativeUtf8(allocator: arena),
+          sourceLayerId?.toNativeUtf8(allocator: arena) ?? nullptr,
+          featureId.toNativeUtf8(allocator: arena),
+          stateJson.toNativeUtf8(allocator: arena),
+        ),
+      );
+    });
+  }
+
+  @override
+  void removeFeatureState({
+    required String sourceId,
+    String? sourceLayerId,
+    String? featureId,
+    String? key,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      _check(
+        mapTextureRemoveFeatureState(
+          _handle,
+          sourceId.toNativeUtf8(allocator: arena),
+          sourceLayerId?.toNativeUtf8(allocator: arena) ?? nullptr,
+          featureId?.toNativeUtf8(allocator: arena) ?? nullptr,
+          key?.toNativeUtf8(allocator: arena) ?? nullptr,
+        ),
+      );
+    });
+  }
+
+  @override
   void resize(Size logicalSize, double pixelRatio) {
     if (_disposed) throw const MapTextureDisposedException();
     if (logicalSize.width == _width &&
@@ -267,6 +355,7 @@ class _FfiMapTextureController implements MapTextureController {
     if (_disposed) return;
     _disposed = true;
     mapTextureDispose(_handle);
+    _queries.failAll(StateError('the map was disposed'));
     // No event is sent after dispose returns, so the callable can close.
     _callable.close();
     calloc.free(_chosen);
@@ -297,6 +386,8 @@ class _FfiMapTextureController implements MapTextureController {
     final e = pointer.ref;
     final type = e.type;
     final message = e.message == nullptr ? '' : e.message.toDartString();
+    final requestId = e.requestId;
+    final status = e.status;
     FrameCamera? frame;
     if (type == mapTextureEventFrameDisplayed ||
         type == mapTextureEventFrameReady) {
@@ -338,6 +429,8 @@ class _FfiMapTextureController implements MapTextureController {
       case mapTextureEventFrameReady:
         _readyFrame = frame;
         _readyFrames.add(frame!);
+      case mapTextureEventQueryResult:
+        _queries.complete(requestId, status, message);
     }
   }
 }

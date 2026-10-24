@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -30,6 +31,7 @@
 #include "ffi_wrappers.h"
 #include "map_texture.h"
 #include "map_texture_api.h"
+#include "projection.h"
 #include "render_target.h"
 
 using map_texture::AsyncCall;
@@ -290,6 +292,8 @@ struct Event {
   std::string message;
   int32_t slot;
   int64_t seq;
+  int64_t request_id;
+  int32_t status;
 };
 std::mutex events_mutex;
 std::vector<Event> events;
@@ -300,7 +304,8 @@ void OnEvent(map_texture_event* event) {
     events.push_back({event->type, event->frame_id, event->zoom,
                       event->physical_width, event->display_time_us,
                       event->message == nullptr ? "" : event->message,
-                      event->slot, event->seq});
+                      event->slot, event->seq, event->request_id,
+                      event->status});
   }
   map_texture_event_free(event);
 }
@@ -858,6 +863,278 @@ void FrameReportsLatestCameraSequenceNumber() {
   CHECK(WaitFor([frames] { return FrameEvents().size() > frames; }));
   CHECK(FrameEvents().back().seq == 3);
   map_texture_dispose(handle);
+}
+
+// The view that a rendered query reads is the camera and logical size of the
+// last frame rendered.
+void LastRenderedViewIsNewestFrame() {
+  int64_t handle = CreateMap();
+  auto owner = last_owner.lock();
+  SurfaceDart dart(handle);
+  CHECK(!owner->LastRenderedViewForTesting().has_value());
+  map_texture_resize(handle, 120, 90, 2.0);
+  const double cameras[][4] = {
+      {48.2, 16.37, 12, 0}, {48.21, 16.4, 12.5, 15}, {-33.9, 151.2, 9.75, -40}};
+  int64_t seq = 0;
+  for (const auto& c : cameras) {
+    map_texture_set_camera(handle, c[0], c[1], c[2], c[3], ++seq);
+    CHECK(WaitFor([seq] {
+      auto ready = ReadyEvents();
+      return !ready.empty() && ready.back().seq == seq;
+    }));
+  }
+  CHECK(Settled(handle, 1));
+  auto view = owner->LastRenderedViewForTesting();
+  CHECK(view.has_value());
+  if (view) {
+    CHECK(std::abs(view->camera.latitude - -33.9) < 1e-9);
+    CHECK(std::abs(view->camera.longitude - 151.2) < 1e-9);
+    CHECK(view->camera.zoom == ReadyEvents().back().zoom);
+    CHECK(std::abs(view->camera.bearing - -40) < 1e-9);
+    CHECK(view->width == 120);
+    CHECK(view->height == 90);
+  }
+  map_texture_dispose(handle);
+}
+
+// A style with one GeoJSON line along the meridian from 20 degrees south to
+// 20 degrees north, 1 logical pixel wide, so that the map renders it without
+// network access. The source ID, `lines "a\b"`, needs escaping in JSON.
+constexpr char kLineStyle[] = R"({"version": 8,
+  "sources": {"lines \"a\\b\"": {"type": "geojson", "data": {
+    "type": "Feature", "id": 1, "properties": {"class": "primary"},
+    "geometry": {"type": "LineString", "coordinates": [[0, -20], [0, 20]]}}}},
+  "layers": [{"id": "line", "type": "line", "source": "lines \"a\\b\"",
+    "paint": {"line-width": 1, "line-color": "#ff0000"}}]})";
+
+constexpr double kQueryZoom = 4;
+
+// The corners of the square of side 2 * `half` logical pixels at zoom
+// kQueryZoom, centered `offset` logical pixels east of the line at the
+// equator.
+std::array<double, 8> QuerySquare(double half, double offset = 0) {
+  double unit = 1 / map_texture::WorldSize(kQueryZoom);
+  map_texture::WorldPoint c = map_texture::Mercator(0, 0);
+  double x = c.x + offset * unit;
+  double h = half * unit;
+  return {x - h, c.y - h, x + h, c.y - h, x + h, c.y + h, x - h, c.y + h};
+}
+
+std::atomic<int64_t> next_request_id{0};
+
+// Queries and waits for the result event.
+Event Query(int64_t handle, const std::array<double, 8>& corners,
+            const std::vector<const char*>* layer_ids = nullptr,
+            const char* filter = nullptr) {
+  int64_t id = ++next_request_id;
+  CHECK(map_texture_query_rendered_features(
+            handle, id, corners.data(),
+            layer_ids == nullptr ? nullptr : layer_ids->data(),
+            layer_ids == nullptr ? 0 : static_cast<int32_t>(layer_ids->size()),
+            filter) == MAP_TEXTURE_OK);
+  Event result{};
+  result.status = -1;
+  CHECK(WaitFor([&] {
+    for (const Event& event : EventsOfType(MAP_TEXTURE_EVENT_QUERY_RESULT)) {
+      if (event.request_id == id) {
+        result = event;
+        return true;
+      }
+    }
+    return false;
+  }));
+  return result;
+}
+
+bool FindsLine(const Event& result) {
+  return result.status == 0 &&
+         result.message.find(R"("id":1)") != std::string::npos;
+}
+
+bool WaitForStyleLoaded() {
+  return WaitFor(
+      [] { return !EventsOfType(MAP_TEXTURE_EVENT_STYLE_LOADED).empty(); });
+}
+
+// A surface map at kQueryZoom that shows the line.
+int64_t CreateLineMap() {
+  int64_t handle = CreateMap(false);
+  map_texture_load_style_json(handle, kLineStyle);
+  map_texture_resize(handle, 120, 90, 2.0);
+  map_texture_set_camera(handle, 0, 0, kQueryZoom, 0, 1);
+  return handle;
+}
+
+void QueryBeforeFirstRenderIsEmpty() {
+  int64_t handle = CreateMap();
+  Event result = Query(handle, QuerySquare(2));
+  CHECK(result.status == 0);
+  CHECK(result.message == "[]");
+  map_texture_dispose(handle);
+}
+
+void QueryFindsLineAtRest() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
+
+  Event hit = Query(handle, QuerySquare(2));
+  CHECK(FindsLine(hit));
+  CHECK(hit.message.find(R"("source":"lines \"a\\b\"")") != std::string::npos);
+  CHECK(hit.message.find(R"("sourceLayer":null)") != std::string::npos);
+  CHECK(hit.message.find(R"("class":"primary")") != std::string::npos);
+  CHECK(Query(handle, QuerySquare(2, 6)).message == "[]");
+
+  std::vector<const char*> line = {"line"};
+  std::vector<const char*> missing = {"missing"};
+  CHECK(FindsLine(Query(handle, QuerySquare(2), &line)));
+  CHECK(Query(handle, QuerySquare(2), &missing).message == "[]");
+  CHECK(FindsLine(Query(handle, QuerySquare(2), nullptr,
+                        R"(["==", ["get", "class"], "primary"])")));
+  CHECK(Query(handle, QuerySquare(2), nullptr,
+              R"(["==", ["get", "class"], "minor"])")
+            .message == "[]");
+
+  // Queries at rest end the waiting demand, but render no frame.
+  Sleep(300);
+  CHECK(Stats(handle).rendered_frames == rendered);
+  map_texture_dispose(handle);
+}
+
+// The camera jumps 45 logical pixels between renders, so a query converted
+// with a camera other than that of the frame it reads misses the line.
+void QueryReadsLastRenderedFrameWhileCameraMoves() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  int misses = 0;
+  int false_hits = 0;
+  for (int i = 0; i < 40; ++i) {
+    map_texture_set_camera(handle, 0, i % 2 == 0 ? -1 : 1, kQueryZoom, 0,
+                           2 + i);
+    if (i % 4 == 0) Sleep(5);
+    if (!FindsLine(Query(handle, QuerySquare(2)))) ++misses;
+    if (Query(handle, QuerySquare(2, 6)).message != "[]") ++false_hits;
+  }
+  CHECK(misses == 0);
+  CHECK(false_hits == 0);
+  map_texture_dispose(handle);
+}
+
+void InvalidFilterFailsQuery() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  Event result = Query(handle, QuerySquare(2), nullptr, R"(["no-such-operator"])");
+  CHECK(result.status != 0);
+  CHECK(!result.message.empty());
+  map_texture_dispose(handle);
+}
+
+constexpr char kLineSource[] = "lines \"a\\b\"";
+
+bool HasState(const Event& result, const std::string& state) {
+  return result.status == 0 &&
+         result.message.find(R"("state":)" + state) != std::string::npos;
+}
+
+void FeatureStateIsReturnedByQuery() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  CHECK(HasState(Query(handle, QuerySquare(2)), "{}"));
+
+  // A query right after the set returns the new state: it waits for the
+  // frame that includes the set.
+  CHECK(map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                      R"({"selected":true})") == MAP_TEXTURE_OK);
+  CHECK(HasState(Query(handle, QuerySquare(2)), R"({"selected":true})"));
+
+  CHECK(map_texture_remove_feature_state(handle, kLineSource, nullptr, "1",
+                                         "selected") == MAP_TEXTURE_OK);
+  CHECK(HasState(Query(handle, QuerySquare(2)), "{}"));
+
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                R"({"selected":true})");
+  CHECK(HasState(Query(handle, QuerySquare(2)), R"({"selected":true})"));
+  map_texture_remove_feature_state(handle, kLineSource, nullptr, nullptr,
+                                   nullptr);
+  CHECK(HasState(Query(handle, QuerySquare(2)), "{}"));
+
+  // A failed command doesn't hold back later queries.
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "1", "not json");
+  CHECK(Query(handle, QuerySquare(2)).status == 0);
+  map_texture_dispose(handle);
+}
+
+void FeatureStateFailureIsReported() {
+  int64_t handle = CreateLineMap();
+  CHECK(map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                      "not json") == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] {
+    for (const Event& e : EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR)) {
+      if (e.message.find("mln_map_set_feature_state") != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }));
+  CHECK(map_texture_set_feature_state(handle, kLineSource, nullptr, nullptr,
+                                      "{}") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_set_feature_state(handle, "", nullptr, "1", "{}") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_remove_feature_state(handle, kLineSource, nullptr, nullptr,
+                                         "selected") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  map_texture_dispose(handle);
+}
+
+void QueryResultsArriveInRequestOrder() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  auto corners = QuerySquare(2);
+  std::vector<int64_t> ids;
+  for (int i = 0; i < 5; ++i) {
+    ids.push_back(++next_request_id);
+    map_texture_query_rendered_features(handle, ids.back(), corners.data(),
+                                        nullptr, 0, nullptr);
+  }
+  CHECK(WaitFor([] {
+    return EventsOfType(MAP_TEXTURE_EVENT_QUERY_RESULT).size() >= 5;
+  }));
+  auto results = EventsOfType(MAP_TEXTURE_EVENT_QUERY_RESULT);
+  CHECK(results.size() == 5);
+  for (size_t i = 0; i < results.size() && i < ids.size(); ++i) {
+    CHECK(results[i].request_id == ids[i]);
+  }
+  map_texture_dispose(handle);
+}
+
+void InvalidQueryArgumentsAreRejected() {
+  int64_t handle = CreateMap();
+  auto corners = QuerySquare(2);
+  CHECK(map_texture_query_rendered_features(handle, 1, nullptr, nullptr, 0,
+                                            nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_query_rendered_features(handle, 1, corners.data(), nullptr,
+                                            1, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  corners[3] = std::nan("");
+  CHECK(map_texture_query_rendered_features(handle, 1, corners.data(), nullptr,
+                                            0, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  map_texture_dispose(handle);
+  CHECK(map_texture_query_rendered_features(handle, 1, QuerySquare(2).data(),
+                                            nullptr, 0, nullptr) ==
+        MAP_TEXTURE_ERROR_DISPOSED);
 }
 
 int64_t CreateBufferMap() {
@@ -1480,6 +1757,16 @@ int main(int argc, char** argv) {
       {"NoRenderWhilePaused", NoRenderWhilePaused},
       {"FrameReportsLatestCameraSequenceNumber",
        FrameReportsLatestCameraSequenceNumber},
+      {"LastRenderedViewIsNewestFrame", LastRenderedViewIsNewestFrame},
+      {"QueryBeforeFirstRenderIsEmpty", QueryBeforeFirstRenderIsEmpty},
+      {"QueryFindsLineAtRest", QueryFindsLineAtRest},
+      {"QueryReadsLastRenderedFrameWhileCameraMoves",
+       QueryReadsLastRenderedFrameWhileCameraMoves},
+      {"InvalidFilterFailsQuery", InvalidFilterFailsQuery},
+      {"QueryResultsArriveInRequestOrder", QueryResultsArriveInRequestOrder},
+      {"FeatureStateIsReturnedByQuery", FeatureStateIsReturnedByQuery},
+      {"FeatureStateFailureIsReported", FeatureStateFailureIsReported},
+      {"InvalidQueryArgumentsAreRejected", InvalidQueryArgumentsAreRejected},
       {"ReadyEventPrecedesDisplayedEvent", ReadyEventPrecedesDisplayedEvent},
       {"NewestFrameIsChosenAfterReplacement",
        NewestFrameIsChosenAfterReplacement},
