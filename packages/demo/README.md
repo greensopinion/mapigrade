@@ -11,7 +11,7 @@ The demo isn't published, and there are no built apps to download: build it from
 
 Each screen offers four styles that need no API key: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles. The routes are approximate.
 
-Some of what the inspect screen shows comes from the data, not from the demo: OpenFreeMap's tiles merge buildings of the same height into one feature, so one tap can highlight many buildings. The screen also works around three MapLibre Native defects, described in [docs/maplibre-query-result-order.md](../../docs/maplibre-query-result-order.md), [docs/maplibre-feature-state-coalescing.md](../../docs/maplibre-feature-state-coalescing.md) and [docs/maplibre-symbol-query-feature-state.md](../../docs/maplibre-symbol-query-feature-state.md).
+Some of what the inspect screen shows comes from the data, not from the demo: OpenFreeMap's tiles merge buildings of the same height into one feature, so one tap can highlight many buildings. The screen also works around three MapLibre Native defects, described in [docs/upstream-fixes/maplibre-query-result-order.md](../../docs/upstream-fixes/maplibre-query-result-order.md), [docs/upstream-fixes/maplibre-feature-state-coalescing.md](../../docs/upstream-fixes/maplibre-feature-state-coalescing.md) and [docs/upstream-fixes/maplibre-symbol-query-feature-state.md](../../docs/upstream-fixes/maplibre-symbol-query-feature-state.md).
 
 ## Run it
 
