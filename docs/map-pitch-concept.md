@@ -1,6 +1,6 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; changes 1, 2 and 3 done
+**Status:** Concept and decisions; changes 1 to 4 done
 **Updated:** 2026-10-25
 
 ## Current state
@@ -9,7 +9,8 @@
 - Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and archived, with its specs synced. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
 - The demo's README video was made again with the pitched flyover (`packages/demo/build/readme_demo.mp4`) and is not uploaded.
 - Change 3 (`add-flutter-map-pitch-gestures`) is done and archived. Its code is commit `66b72e5` on the fork's local branch `map-pitch`, which is not pushed. In Chrome on macOS, Ctrl-click opens the browser's context menu; the fork documents that web applications that enable pitch disable it.
-- Next: change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
+- Change 4 (`pitch-camera-fit-and-constraints`) is done and archived. Its code is commit `a581ef2` on the fork's local branch `map-pitch`, which is not pushed. It also fixed the contain constraints, which change 1 had broken on pitched maps.
+- Next: decide how to approach the upstream PR (section 12), then change 5 (tile level of detail). Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 
@@ -153,9 +154,9 @@ Change 5 is planned before the upstream PR is accepted, because the maintainers 
 
 ### Change 4: `pitch-camera-fit-and-constraints` (fork)
 
-- `CameraFit.bounds` and its variants choose a zoom so that the projected bounds lie in the viewport at the current pitch. This takes a short iteration, not a closed form, as in MapLibre's `cameraForLatLngBounds`.
+- `CameraFit.bounds` and its variants choose a zoom so that the projected bounds lie in the viewport at the current pitch. This takes a short iteration, not a closed form. MapLibre Native's `cameraForLatLngs` does one step of the same estimate, which is only approximate when pitched.
 - Only the built-in implementations change; `CameraFit` and `CameraConstraint` gain no abstract members (section 11).
-- `CameraConstraint.contain` keeps the footprint inside the bounds. At low zoom the far edge can extend past the edge of the world, which interacts with `minZoom` and `maxPitch`.
+- `CameraConstraint.contain` and `containLatitude` keep the same box inside their bounds at every pitch as at pitch 0, and ignore pitch, as MapLibre GL JS's `maxBounds` constraint does (decision 20). Ground beyond the bounds can be visible toward the far edge of a pitched map.
 
 ### Change 5: `add-flutter-map-tile-level-of-detail` (fork)
 
@@ -189,6 +190,7 @@ The tile layer chooses the tile zoom for each tile from its size on screen, so t
 | 17 | Pitch-0 compatibility is checked by geometry assertions in the fork's tests, and by golden tests kept out of the upstream PR | Decided | Upstream has no golden tests, and golden images differ between platforms |
 | 18 | MapLibre reference positions are generated through the FFI's `mln_map_pixel_for_lat_lng` | Decided | Uses the FFI build we already have, instead of C++ against `TransformState` |
 | 19 | While `maxPitch` is above 0, Ctrl-drag rotates with horizontal movement and pitches with vertical movement; no keyboard pitch keys | Decided (change 3) | Same as MapLibre GL JS; applications that keep `maxPitch` at 0 don't change |
+| 20 | The contain constraints ignore pitch and keep the unpitched viewport box inside their bounds | Decided (change 4) | Same as MapLibre GL JS; keeping the footprint inside would refuse pitch changes whenever the bounds are smaller than about 2.5 W × 3 H at 60° |
 
 ## 10. Risks
 
