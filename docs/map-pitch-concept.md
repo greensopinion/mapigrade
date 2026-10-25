@@ -1,14 +1,15 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; changes 1 and 2 done
+**Status:** Concept and decisions; changes 1 and 2 done; change 3 proposed
 **Updated:** 2026-10-24
 
 ## Current state
 
 - Change 1 (`add-flutter-map-pitch-camera`) is done and archived. Its code is commit `04c3e14` on the fork's local branch `map-pitch` in `~/git/flutter_map`, which is not pushed.
-- Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and not yet archived. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
+- Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and archived, with its specs synced; the archive isn't committed. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
 - The demo's README video was made again with the pitched flyover (`packages/demo/build/readme_demo.mp4`) and is not uploaded.
-- Next: archive change 2, then change 3 (pitch gesture) or change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
+- Change 3 (`add-flutter-map-pitch-gestures`) is proposed: its proposal, spec, design and tasks are complete, and it isn't implemented.
+- Next: implement change 3, then change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 
@@ -147,7 +148,7 @@ Change 5 is planned before the upstream PR is accepted, because the maintainers 
 - The pitch changes by 0.5° per px of vertical movement, as on iOS and in GL JS, and moving up increases it. The pitch pivots on the viewport center, so the center and the zoom don't change, as with `MapController.pitch`.
 - A threshold for the pitch gesture, alongside `rotationThreshold`, `pinchZoomThreshold` and `pinchMoveThreshold`.
 - While `maxPitch` is above 0, a two-finger gesture holds back zoom, rotate and move until the pitch gesture is recognized or ruled out, with or without `enableMultiFingerGestureRace`. A recognized pitch gesture locks them out for the rest of the gesture (decision 13).
-- Ctrl-drag (cursor/keyboard rotation) while `maxPitch` is above 0: horizontal movement rotates and vertical movement pitches, as in GL JS. `CursorRotationBehaviour` and `setNorthOnClick` have no effect in this mode. At `maxPitch` 0, Ctrl-drag is unchanged. The rates are taken from GL JS's source; from memory, 0.8° per px for rotation and 0.5° per px for pitch.
+- Ctrl-drag (cursor/keyboard rotation) while `maxPitch` is above 0: horizontal movement rotates and vertical movement pitches, as in GL JS's default mouse handlers. Vertical movement changes the pitch by 0.5° per px. Horizontal movement rotates the map about the viewport center: more than 100 px above or below the center, by the angle that the horizontal movement makes at the center; otherwise by 0.8° per px. `CursorRotationBehaviour` and `setNorthOnClick` have no effect in this mode. At `maxPitch` 0, Ctrl-drag is unchanged.
 - No keyboard pitch keys. A trackpad gives Flutter no per-finger positions, only a combined pan, scale and rotation, so it has no pitch gesture; on macOS, Ctrl-drag pitches.
 
 ### Change 4: `pitch-camera-fit-and-constraints` (fork)
