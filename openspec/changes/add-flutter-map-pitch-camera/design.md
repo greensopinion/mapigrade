@@ -39,6 +39,8 @@ d = 0.5 · nonRotatedSize.height / tan(fov / 2),  fov = 0.6435011087932844
 
 `P(d)` sets the matrix entry that divides by `1 - z / d`, so points at z = 0 (the ground at the center point) keep scale 1. The inverse for screen to ground casts the ray from the camera through the screen point and intersects z = 0; when the ray doesn't reach the ground in front of the camera, the result is null.
 
+The public getter is `MapCamera.pixelToScreenTransform`, which returns a copy; internal callers use the cached matrix. Flutter passes layer transforms to the engine as 32-bit floats, and the translation `T(-project(center))` can be around 10⁷ px at high zoom, so a caller combines it with other transforms in 64-bit arithmetic first (`MobileLayerTransformer` with `T(pixelOrigin)`, decision 3), where the large translations cancel.
+
 `latLngToScreenOffset` and `screenOffsetToLatLng` use the transform. `screenOffsetToLatLng` stays non-nullable to avoid a breaking change; above the horizon it returns the coordinate at the maximum ground distance along the ray's bearing. A new nullable method returns null there, and the gesture code uses it. The constants match MapLibre Native's `DEFAULT_FOV` and `getCameraToCenterDistance`.
 
 Alternative: keep the 2D formulas and add pitch as a separate correction, as in #1273. Rejected: two formulas drift apart, and the inverse isn't exact.
@@ -49,7 +51,7 @@ When pitched, `pixelBounds` is the north-up bounding box, in projected map pixel
 
 `getNewPixelOrigin` and `pixelBoundsAtZoom` compute the same box for the given center and zoom. The tile range calculator uses `pixelBoundsAtZoom` scaled to the tile zoom instead of its own centered rectangle.
 
-Alternative: a canvas centered on the center point, large enough for the far edge. Rejected: at 60° it contains ground points behind the camera (concept section 4), which have no valid projection, and it is about 1.6 times larger.
+Alternative: a canvas centered on the center point, large enough for the far edge. Rejected: it is about 1.6 times larger at 60°, and it contains ground points behind the camera (concept section 4), which have no valid projection. In the spike (Spike results) such a canvas painted correctly on every renderer we tried, so the size is the deciding reason.
 
 ### 3. `MobileLayerTransformer` applies the full transform
 
@@ -68,10 +70,10 @@ Alternative: keep markers inside `MobileLayerTransformer` and counter-transform 
 
 ### 5. Options, controller and events
 
-- `MapOptions.initialPitch` (default 0) and `MapOptions.maxPitch` (default 0, asserted at most 60).
+- `MapOptions.initialPitch` (default 0) and `MapOptions.maxPitch` (default 0). A `maxPitch` above `MapOptions.pitchLimit` (60) takes effect as 60, as the spec requires, instead of failing an assert. An `@internal` `MapOptions.clampPitch` applies both limits; `MapCamera.withOptions` re-applies them when the options change.
 - `MapController.pitch(double degree, {String? id})` is a member of the interface and returns whether the camera changed, as `rotate` does. This breaks a hand-written `implements MapController`; concept decision 15 accepts that, and the upstream PR description states it.
 - `MapEventPitch`, a `MapEventWithMove` like `MapEventRotate`, with source `MapEventSource.mapController`. No `MapEventSource` value is added (concept section 11).
-- `MapCamera` includes `pitch` in equality, `hashCode` and `toString`.
+- `MapCamera` includes `pitch` in equality and `hashCode`. It has no `toString`.
 
 ### 6. Screen offsets in gestures and the controller
 
@@ -81,8 +83,12 @@ Several places convert a screen offset to a ground offset by rotation alone, whi
 - **Rotate gesture.** It already pivots on `offsetToCrs(focal)`. Rotating the center about that ground point and changing the rotation by the same angle leaves the point's offset from the center unchanged after `Rz`, so it keeps its screen position. Only `offsetToCrs` changes.
 - **`MapController.move` with `offset` (`moveRaw`).** Cast the ray through `viewport center + offset` from a camera centered on the target center at the target zoom, giving ground point G; the new center is `target − (G − target)` in projected pixels. `flutter_map_location_marker` and similar plugins use this.
 - **`MapController.rotateAroundPoint` (`rotateAroundPointRaw`).** The pivot is the ray-cast ground point at the given screen position, as in the rotate gesture.
-- **Drag.** At the start of the drag, ray-cast the pointer position to ground point G. On each update, cast the ray through the pointer at the current camera and move the center by G minus the result. This replaces `_rotateOffset` for drags.
-- **Fling.** The fling animates the ground velocity at the end of the drag (the ground movement of the last update divided by its duration) instead of the screen velocity rotated by the map rotation.
+- **Drag.** Each update moves the center by the ground shift from the previous pointer position to the current one: the ray-cast ground offset of the previous position minus that of the current one. This replaces `_rotateOffset` for drags. When either position is above the horizon, the update is skipped.
+- **Pinch move.** The move part of a two-finger pinch uses the same ground shift, from the gesture's start focal point to the current one.
+- **Fling.** On a pitched map, the fling moves the center from where the drag ended by the ground offset of a one-pixel screen step along the fling direction at the finger's last position, for each pixel that the animation advances. At pitch 0 the existing code runs unchanged.
+- **`MapControllerImpl.flingAnimatedRaw`.** On a pitched map, it maps the animation's screen offsets to ground offsets with the linearization of the ground offset at the viewport center. At pitch 0 the existing code runs unchanged.
+
+The ground offset of a screen position is available to these callers through an `@internal` `MapCamera.groundOffsetFromCenter`, which adds no public API.
 
 Unchanged: keyboard pan and keyboard rotation move along screen directions about the center, which is correct when pitched. `MapCamera.rotatePoint` is public and keeps its 2D meaning; its documentation states that it ignores pitch.
 
@@ -101,9 +107,39 @@ All API changes are additive, following the rules in concept section 11: new par
 - A Pitch page in the example app with sliders for pitch and rotation, for visual checks on Mac, iPhone and Android.
 - The test against a rendered MapLibre map is in change 2.
 
+## Spike results
+
+Task 1.4, 2026-10-24, Flutter 3.47.7. A throwaway app drew a 64 px grid with text, a hit-testable `CustomPainter` and `GestureDetector` boxes under the transform of decision 1 at pitch 60 and rotation 20, on a canvas covering the footprint's bounding box (decision 2), and on a canvas centered on the center point. A test tapped the screen positions of 4 boxes, including one 4% below the top edge, and of 4 bare canvas positions, including the top corners.
+
+| Platform | Renderer | Taps | Painting |
+|---|---|---|---|
+| Mac | Impeller (Metal) | Pass | Correct |
+| Mac | Skia (`--no-enable-impeller`) | Pass | Correct |
+| Pixel 4a (5G), Android 14 | Impeller | Pass | Correct |
+| iPhone 13, iOS 26.2 | Impeller (Metal) | Pass | Correct |
+| Chrome | not run | Pass (`flutter test --platform chrome`) | Checked in task 6.1 |
+
+- Every tap resolved within 0.5 px of the expected position: boxes received the tap at their center, and the painter's `hitTest` received the canvas position of the tapped ground point. `RenderTransform` and `PointerEvent.transformPosition` invert the perspective transform correctly, so hit testing needs no extra work.
+- The canvas covered the viewport to its corners, with no gaps or tears at the far edge. At 0.4 times scale, 1 px lines are faint and 14 px text is barely legible, as expected.
+- The centered canvas, which contains ground points behind the camera, also painted correctly on all four renderers. Decision 2 stands for its smaller size.
+- Painting was captured with `RenderRepaintBoundary.toImage`, which renders with the device's renderer.
+
+## Example page and frame time
+
+Task 6.1, 2026-10-24. The example app's Pitch page shows OpenStreetMap tiles, a labelled polygon, a polyline and markers, with sliders for pitch and rotation. A harness app outside the fork showed the page at pitch 0, 30 and 60 with rotation 20 and captured it through each device's renderer: Mac (Impeller), iPhone 13, Pixel 4a (5G), and Chrome (a release web build, headless Chrome with SwiftShader). On every platform, tiles cover the view to the far edge, the polygon and polyline lie on the ground, markers stand upright and the label turns with the map. At 60°, some far tiles at the top corner had not arrived from the tile server within the 5 s wait on the phones; the tile range tests show that those tiles are requested.
+
+Frame time on the Pixel 4a (5G), profile build (release builds report no timings), 600 frames while the camera rotated 0.6° per frame:
+
+| Pitch | Build avg / p99 / worst (ms) | Raster avg / p99 / worst (ms) | Missed frames | GC (new / old) |
+|---|---|---|---|---|
+| 0 | 3.36 / 4.13 / 7.84 | 3.63 / 4.37 / 4.91 | 0 | 66 / 2 |
+| 60 | 3.54 / 4.77 / 7.92 | 3.94 / 4.83 / 6.00 | 0 | 116 / 6 |
+
+Pitch 60 adds about 5% to build time and 9% to raster time on average, and no frame missed the 16.7 ms budget. The extra garbage collection comes from the larger number of tiles.
+
 ## Risks / Trade-offs
 
-- [Hit testing through a perspective `Transform` may not invert as expected] → The first implementation task is a spike: a pitched `CustomPaint` with hit testing and a `GestureDetector` child, on Impeller, Skia and web (Chrome), before any other work.
+- [Hit testing through a perspective `Transform` may not invert as expected] → Resolved by the spike (Spike results): taps resolve correctly on Impeller, Skia and web.
 - [Perspective painting quality on Impeller, for example aliasing at the far edge] → Checked visually in the spike and on the example page; if needed, a slight minimum on line width at the far edge is a follow-up, not part of this change.
 - [Up to 7.5 times as many tiles at 60°] → Accepted until tile level of detail (concept change 5). Frame time at 60° is measured; the example page states the tile cost.
 - [`screenOffsetToLatLng` returns a substitute coordinate above the horizon] → Documented; the nullable method is the correct one for new code. At pitch up to 60° no position in the viewport is above the horizon.

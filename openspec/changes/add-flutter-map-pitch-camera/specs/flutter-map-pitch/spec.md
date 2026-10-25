@@ -110,12 +110,17 @@ Layers that move with the map, among them the tile, polygon, polyline, circle an
 
 ### Requirement: Visible bounds and tiles of the visible ground
 
-When pitched, the camera's visible bounds SHALL contain every coordinate visible in the viewport. The tile layer SHALL load the tiles that cover the visible ground, at the tile zoom that it chooses from the camera zoom.
+When pitched, the camera's visible bounds SHALL contain every coordinate visible in the viewport, except that, as for an unpitched map, they SHALL be limited to longitudes from -180 to 180. The tile layer SHALL load the tiles that cover the visible ground, at the tile zoom that it chooses from the camera zoom, including on both sides of the antimeridian.
 
 #### Scenario: Far edge in visible bounds
 
 - **WHEN** the map is at pitch 60
 - **THEN** the coordinates at the four corners of the viewport are within the visible bounds
+
+#### Scenario: Tiles across the antimeridian
+
+- **WHEN** the map is at pitch 60, in a CRS that repeats the world horizontally, with the far edge of the view across the antimeridian
+- **THEN** the tile layer loads the tiles on both sides, and every position in the viewport shows a tile
 
 #### Scenario: Far tiles loaded
 
@@ -168,8 +173,8 @@ When the focal point is above the horizon, zoom and rotation SHALL keep the cent
 
 #### Scenario: Rotate gesture
 
-- **WHEN** the map is at pitch 50 and the user rotates the map with two fingers whose focal point is near the bottom of the viewport
-- **THEN** the coordinate under the focal point at the start of each update is within 0.5 px of the focal point after the update
+- **WHEN** the map is at pitch 50 and the user rotates the map with two fingers whose focal point is near the bottom of the viewport, at 0.75 and at 3 degrees per frame
+- **THEN** the distance, in projected pixels at the camera zoom, between the coordinate under the focal point before the gesture and the ground point under the focal point after it is within 0.05 px of the same distance for the same gesture on an unpitched map
 
 #### Scenario: Drag near the top of the viewport
 

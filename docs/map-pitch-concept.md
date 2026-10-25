@@ -164,7 +164,7 @@ The tile layer chooses the tile zoom for each tile from its size on screen, so t
 | 7 | mapigrade depends on the fork branch through `dependency_overrides` | Decided | Same as 6 |
 | 8 | All OpenSpec changes are in mapigrade; capability `flutter-map-pitch` | Decided | One planning record |
 | 9 | Zoom is the scale at the center point | Decided | Same as MapLibre; zoom limits and styling keep their meaning (section 6) |
-| 10 | Layer canvas covers the footprint's bounding box, not centered on the center point | Decided | Avoids points behind the camera (section 4) |
+| 10 | Layer canvas covers the footprint's bounding box, not centered on the center point | Decided | About 1.6 times smaller at 60°; avoids points behind the camera (section 4), although the spike showed that Flutter paints those correctly |
 | 11 | Branch the fork from `upstream/master` | Decided | Base for the upstream PR |
 | 12 | Single tile zoom until tile level of detail (change 5) | Decided | Correct, at 7.5 times the tiles at 60°; change 5 is planned before the upstream PR is accepted, because the maintainers may require it |
 | 13 | A recognized pitch gesture locks out other two-finger gestures | Proposed (change 3) | Same as MapLibre |
@@ -204,3 +204,4 @@ These don't block change 1:
 - When to contact the fleaflet maintainers, for example with an issue or discussion about the API, and how to split the upstream PRs. Change 1 alone is large. Both are decided later, and each public action needs explicit approval first.
 - Non-Mercator CRSs. Pitch works in projected pixel space, so they should work, but the MapLibre reference tests cover only EPSG:3857.
 - Polyline simplification near the bottom edge, where the 1.5 times magnification at 60° may make the simplification visible.
+- Markers that lie on the ground. Every marker faces the viewer (section 5), so a marker can't be drawn flat on the map, for example a direction arrow on a road. MapLibre offers both through pitch alignment: `icon-pitch-alignment` in the style spec, and `pitchAlignment` (`map` or `viewport`) on GL JS's `Marker`. #1273 had the same choice as `applyPitch`. A pitch-alignment option on `MarkerLayer` or `Marker` would be additive (section 11).
