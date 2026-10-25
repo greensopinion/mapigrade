@@ -11,7 +11,8 @@
 - Change 3 (`add-flutter-map-pitch-gestures`) is done and archived. Its code is commit `66b72e5` on the fork's local branch `map-pitch`, which is not pushed. In Chrome on macOS, Ctrl-click opens the browser's context menu; the fork documents that web applications that enable pitch disable it.
 - Change 4 (`pitch-camera-fit-and-constraints`) is done and archived. Its code is commit `a581ef2` on the fork's local branch `map-pitch`, which is not pushed. It also fixed the contain constraints, which change 1 had broken on pitched maps.
 - Change 5 (`add-flutter-map-tile-level-of-detail`) is done and archived; decisions 21 and 23 were revised during implementation. Its code is commit `979748d` on the fork's local branch `map-pitch`, which is not pushed. It also fixed a defect in `NetworkTileImageProvider`, in its own commit `e33cd10`: a tile whose URL matched an aborted load could show the aborted load's transparent image. Upstream PRs are not planned yet.
-- Next: change 6 (`limit-flutter-map-pitch-near-horizon`). Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
+- Change 6, renamed `raise-flutter-map-pitch-limit`, is proposed: it raises the pitch limit to 85°, with a far limit of the visible ground at 89.25° from straight down, the background color above it, and a movement limit for gestures above it (user decisions, 2026-10-25).
+- Next: implement change 6. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 
@@ -117,7 +118,7 @@ We split the work so that the projection is verified against MapLibre before the
 | 3 | `add-flutter-map-pitch-gestures` | fork | 1, verified by 2 |
 | 4 | `pitch-camera-fit-and-constraints` | fork | 1 |
 | 5 | `add-flutter-map-tile-level-of-detail` | fork | 1 |
-| 6 | `limit-flutter-map-pitch-near-horizon` | fork | 1, 5 |
+| 6 | `raise-flutter-map-pitch-limit` (first named `limit-flutter-map-pitch-near-horizon`) | fork and mapigrade | 1, 5 |
 
 Change 5 is planned before the upstream PR is accepted, because the maintainers may require it (decision 12). When we open the PR, and how we split it, is open (section 12).
 
@@ -170,9 +171,11 @@ The goal is lower latency, decoded image memory and data transferred for `TileLa
 - Tiles load in order of their center's distance on screen from the viewport center (decision 25).
 - Culling, the zoom rule and the load order are one change, so that the upstream PR is one review; it is split only if the zoom rule turns out to be large or complex.
 
-### Change 6: `limit-flutter-map-pitch-near-horizon` (fork)
+### Change 6: `raise-flutter-map-pitch-limit` (fork and mapigrade)
 
-- Focal point or pointer near or above the horizon: limit the ground distance that a focal-point, drag or fling movement can cause, as MapLibre does. Change 1 already anchors zoom, rotation, drag and fling on the ground; change 6 adds only this limit.
+First named `limit-flutter-map-pitch-near-horizon`. On 2026-10-25 we decided that change 6 also raises the pitch limit to 85°, because the movement limit has no effect at 60°. The change's design has the far limit, the clip of ground layers, and MapLibre Native's maximum pitch in mapigrade.
+
+- Focal point or pointer near or above the horizon: limit the ground distance that a focal-point, drag or fling movement can cause, as MapLibre does. Change 1 already anchors zoom, rotation, drag and fling on the ground; change 6 limits the movement by acting on pointers above the far limit as on the far limit.
 - The limit is needed only when `maxPitch` exceeds 60°, which requires change 5. The horizon is in the viewport only above a pitch of 90° − fov / 2 = 71.57°. At 60°, a 1 px vertical drag at the top edge moves the ground about 11 projected px, compared with 2 px at the center: large, but bounded and correct.
 
 ## 9. Decisions
