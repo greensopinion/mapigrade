@@ -1,15 +1,15 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; changes 1 and 2 done; change 3 proposed
-**Updated:** 2026-10-24
+**Status:** Concept and decisions; changes 1, 2 and 3 done
+**Updated:** 2026-10-25
 
 ## Current state
 
 - Change 1 (`add-flutter-map-pitch-camera`) is done and archived. Its code is commit `04c3e14` on the fork's local branch `map-pitch` in `~/git/flutter_map`, which is not pushed.
-- Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and archived, with its specs synced; the archive isn't committed. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
+- Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and archived, with its specs synced. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
 - The demo's README video was made again with the pitched flyover (`packages/demo/build/readme_demo.mp4`) and is not uploaded.
-- Change 3 (`add-flutter-map-pitch-gestures`) is proposed: its proposal, spec, design and tasks are complete, and it isn't implemented.
-- Next: implement change 3, then change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
+- Change 3 (`add-flutter-map-pitch-gestures`) is done and archived. Its code is commit `66b72e5` on the fork's local branch `map-pitch`, which is not pushed. In Chrome on macOS, Ctrl-click opens the browser's context menu; the fork documents that web applications that enable pitch disable it.
+- Next: change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 

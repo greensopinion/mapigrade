@@ -31,7 +31,7 @@ MapLibre GL JS's handlers (`src/ui/handler/two_fingers_touch.ts` and `mouse.ts` 
 
 ### 1. Per-finger positions come from the `Listener`
 
-The viewer keeps a map from pointer id to the position at `PointerDown` and the latest position, updated in `_onPointerMove` and removed in `_onPointerUp` and `_onPointerCancel`. `_handleScaleStart` records the start position of each tracked pointer, because the scale gesture can start after the pointers went down. Trackpad gestures add no entries, so they are never pitch candidates and behave as now.
+The viewer keeps a map from pointer id to a start position and the latest position. The latest position is updated in `_onPointerMove`. When a pointer is added or removed, every pointer's start position is reset to its latest position, because the scale recognizer also restarts its gesture then. The `Listener` receives each pointer event before the recognizers, so the positions are current when the scale callbacks run. Finger movement is measured from the start positions, not from the scale gesture's start, which the recognizer reports only after the fingers have moved past its slop. Trackpad gestures add no entries, so they are never pitch candidates and behave as now.
 
 Alternative: a custom recognizer in the gesture arena. Rejected: the scale recognizer must still win the arena for zoom, move and rotate, and two recognizers would have to share one decision.
 
@@ -59,11 +59,11 @@ Each multi-finger scale gesture has a pitch state, reset in `_handleScaleStart`:
 
 The rules are GL JS's `TwoFingersTouchPitchHandler`: the finger line counts as near horizontal when its vertical component is no larger than its horizontal component, a finger's movement counts as vertical when its vertical component is larger, and the single-finger window is 100 ms (`ALLOWED_SINGLE_TOUCH_TIME`). "Enabled" is `InteractiveFlag.hasPitch(flags)` and a clamped maximum pitch above 0.
 
-- **Undecided:** `_handleScaleMultiFingerUpdate` returns before the race and before applying zoom, move or rotate. `_lastRotation` and `_lastScale` stay at their start values, so that the first update after the decision sees the whole gesture so far.
-- **Ruled out:** the existing code runs unchanged. Zoom and move are computed from the gesture's start values and rotation from `_lastRotation` (still 0), so the first update applies everything held back, and the ground under the focal point is where it would have been without the hold-back. In race mode, the race runs on the same values. A gesture that is ruled out at its start never holds back.
-- **Pitch:** zoom, move and rotate are not applied for the rest of the gesture. The pitch is `startPitch − 0.5 · (focal.dy − focalStart.dy)`, set through `pitchRaw`, which clamps it and keeps the center (spec: pitch pivots on the viewport center). With two pointers the focal point is the midpoint, so this is GL JS's average vertical finger movement times −0.5°. Computing from the start, as iOS does, rather than accumulating deltas, as GL JS does, makes the pitch a function of the finger position, so moving back after reaching the maximum returns to the same pitch.
+- **Undecided:** `_handleScaleUpdate` keeps each `ScaleUpdateDetails` in a list and applies nothing.
+- **Ruled out:** the held-back updates are replayed, in order, through the unchanged update code, and later updates go straight to it. The existing code is a function of the sequence of updates and the camera, which the replay changes in the same order, so the result is the same as without the hold-back in both race modes. Freezing `_lastRotation` and `_lastScale` instead would not be: in race mode the race runs on every update, and rotation before the winner is never applied. A gesture that is ruled out at its start never holds back.
+- **Pitch:** zoom, move and rotate are not applied for the rest of the gesture. The pitch is `startPitch − 0.5 · d`, where `d` is the average vertical movement of the fingers from their start positions, set through `pitchRaw`, which clamps it and keeps the center (spec: pitch pivots on the viewport center). This is GL JS's average vertical finger movement times −0.5°. Computing from the start, as iOS does, rather than accumulating deltas, as GL JS does, makes the pitch a function of the finger position, so moving back after reaching the maximum returns to the same pitch.
 
-`_handleScaleEnd` emits the pitch end event and returns before the fling code when the state is pitch. The recognizer's restart on a pointer change (Context) ends a pitch gesture when a third finger touches or one finger lifts; the remaining pointers start a new gesture with a new decision.
+`_handleScaleEnd` emits the pitch end event when the state is pitch, and returns before the fling code unless the state is ruled out; an undecided gesture ends with its held-back updates discarded. The recognizer's restart on a pointer change (Context) ends a pitch gesture when a third finger touches or one finger lifts; the remaining pointers start a new gesture with a new decision.
 
 Alternative: add `MultiFingerGesture.pitch` to the race. Rejected: the race is off by default, so most applications would still apply zoom and move during a pitch drag, and the race's own thresholds (40 px for move) are larger than the pitch decision needs.
 
@@ -75,7 +75,7 @@ Alternative: apply zoom, move and rotate while undecided and undo them when pitc
 
 ### 4. Ctrl-drag follows GL JS's mouse handlers
 
-While pitch gestures are enabled and the trigger key is held, `_onPointerMove` computes, from the previous and current cursor positions and the viewport center `c`:
+While pitch gestures are enabled and the trigger key is held, `_onPointerMove` computes, from the previous and current cursor positions and the center `c` of the map's viewport, as GL JS does (the existing cursor/keyboard rotation measures its angle about the center of the screen):
 
 - pitch change: `(current.y − previous.y) · −0.5` (GL JS `pitchSpeed`), through `pitchRaw`;
 - rotation change, GL JS's default `circular` movement: if `|c.y − previous.y| > 100`, the angle at `c` from `(previous.x, current.y)` to `current`, which is the turn caused by the horizontal movement alone; otherwise `(current.x − previous.x) · 0.8` (GL JS `rotateSpeed`), negated when the cursor is above `c`. The sign is converted from GL JS's bearing to `flutter_map`'s rotation so that the map turns with the cursor, and applied through `rotateRaw`, which keeps the center.
@@ -96,6 +96,14 @@ Alternative: keep rotation to the cursor's angle and add pitch from vertical mov
 - Widget tests for Ctrl-drag, with the Control key held through `simulateKeyDownEvent` (the fork has no Ctrl-drag widget tests yet): pitch from vertical movement, rotation far from and near the center, and events. A test with pitch gestures disabled records the existing Ctrl-drag rotation before the change.
 - The existing gesture tests run unchanged at maximum pitch 0.
 - The example app's Pitch page needs no change; its `maxPitch` enables the gestures. On devices: two-finger pitch on the iPhone and the Pixel, and Ctrl-drag on the Mac and in Chrome, checked by hand.
+
+## Device check
+
+Task 5.3, 2026-10-25. The user checked the example app's Pitch page by hand, in release builds of the fork's working tree. Two-finger pitch, pinch-zoom, two-finger pan and rotate all worked on the iPhone 13 (iOS 26.2) and on the Pixel 4a (5G) (Android 14). The pitch threshold default of 2 px stays. Ctrl-drag pitch and rotation worked on the Mac.
+
+In Chrome on macOS, Ctrl-click opens the browser's context menu; while it is open the map receives no cursor movement, and the pitch jumps to its final value when the button is released. MapLibre GL JS avoids this by preventing the `contextmenu` event on the map's element. Flutter web renders the whole app in one element, so the only control is `BrowserContextMenu.disableContextMenu()`, which applies to the whole app, including the browser menu of text fields. We decided not to change it from flutter_map: the `CursorKeyboardRotationOptions` documentation states that web applications that enable pitch should disable the browser's context menu.
+
+The example app's Android build fails under `flutter run` on the development Mac: Flutter runs Gradle with Java 25, which the example's Gradle 8.14 doesn't support. The Pixel build used the example's Gradle wrapper directly with Java 21 and was installed with `adb`. This is a problem in the example's setup, not part of this change.
 
 ## Risks / Trade-offs
 
