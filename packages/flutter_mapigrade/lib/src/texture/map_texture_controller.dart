@@ -5,14 +5,16 @@ import 'map_texture_controller_ffi.dart'
     as platform;
 import 'native_library.dart';
 
-/// A map camera: center, zoom and bearing in degrees.
+/// A map camera: center, zoom, and bearing and pitch in degrees.
 class MapCamera {
-  /// A camera at [latitude], [longitude] and [zoom], turned by [bearing].
+  /// A camera at [latitude], [longitude] and [zoom], turned by [bearing] and
+  /// tilted by [pitch].
   const MapCamera({
     required this.latitude,
     required this.longitude,
     required this.zoom,
     this.bearing = 0,
+    this.pitch = 0,
   });
 
   /// The latitude of the center, in degrees.
@@ -27,9 +29,14 @@ class MapCamera {
   /// The bearing in degrees.
   final double bearing;
 
+  /// The pitch in degrees: the angle between the view direction and straight
+  /// down.
+  final double pitch;
+
   @override
   String toString() =>
-      'MapCamera(lat: $latitude, lon: $longitude, zoom: $zoom, bearing: $bearing)';
+      'MapCamera(lat: $latitude, lon: $longitude, zoom: $zoom, '
+      'bearing: $bearing, pitch: $pitch)';
 }
 
 /// The camera and viewport size a frame was rendered with, and where it is.

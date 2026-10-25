@@ -1,5 +1,5 @@
 // Web Mercator projection of the map camera, the C++ counterpart of
-// lib/src/layer/camera_projection.dart. The camera has no pitch.
+// lib/src/layer/camera_projection.dart, with MapLibre Native's camera model.
 #pragma once
 
 #include <algorithm>
@@ -35,6 +35,9 @@ struct RenderedView {
   double height = 0;
 };
 
+// MapLibre Native's default vertical field of view, in radians.
+inline constexpr double kFieldOfView = 0.6435011087932844;
+
 // The largest latitude Web Mercator shows, as in MapLibre.
 inline constexpr double kMaxMercatorLatitude = 85.051128779806604;
 
@@ -65,7 +68,14 @@ inline ScreenPoint ScreenPosition(const Camera& camera, double width,
   double angle = -camera.bearing * std::numbers::pi / 180;
   double c = std::cos(angle);
   double s = std::sin(angle);
-  return {c * px - s * py + width / 2, s * px + c * py + height / 2};
+  double x = c * px - s * py;
+  double y = s * px + c * py;
+  // Tilt the ground away from the camera at the top of the viewport, then
+  // divide by the depth relative to the center's.
+  double pitch = camera.pitch * std::numbers::pi / 180;
+  double distance = 0.5 * height / std::tan(kFieldOfView / 2);
+  double w = 1 - y * std::sin(pitch) / distance;
+  return {x / w + width / 2, y * std::cos(pitch) / w + height / 2};
 }
 
 // The smallest box aligned with the screen axes that contains the positions

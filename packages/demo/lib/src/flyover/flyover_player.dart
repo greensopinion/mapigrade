@@ -105,7 +105,9 @@ class FlyoverPlayer extends ChangeNotifier {
     final camera = flyover.cameraAt(t);
     // Its source is MapEventSource.mapController, so it doesn't stop the
     // flyover.
-    controller.moveAndRotate(camera.center, camera.zoom, camera.rotation);
+    controller
+      ..moveAndRotate(camera.center, camera.zoom, camera.rotation)
+      ..pitch(camera.pitch);
     rider.value = flyover.riderAt(t);
     final stage = flyover.segmentAt(t).stage;
     if (stage != _stage) {
@@ -121,7 +123,9 @@ class FlyoverPlayer extends ChangeNotifier {
     _ticker.stop();
     _phase = FlyoverPhase.waiting;
     final camera = flyover.cameraAt(Duration.zero);
-    controller.moveAndRotate(camera.center, camera.zoom, camera.rotation);
+    controller
+      ..moveAndRotate(camera.center, camera.zoom, camera.rotation)
+      ..pitch(camera.pitch);
     rider.value = null;
     _stage = flyover.segmentAt(Duration.zero).stage;
     notifyListeners();

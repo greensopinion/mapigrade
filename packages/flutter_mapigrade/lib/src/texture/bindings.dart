@@ -42,6 +42,8 @@ final class MapTextureEventStruct extends Struct {
   external double zoom;
   @Double()
   external double bearing;
+  @Double()
+  external double pitch;
   @Int32()
   external int physicalWidth;
   @Int32()
@@ -76,6 +78,8 @@ final class MapTextureFrameStruct extends Struct {
   external double zoom;
   @Double()
   external double bearing;
+  @Double()
+  external double pitch;
   @Int32()
   external int physicalWidth;
   @Int32()
@@ -199,7 +203,7 @@ external int mapTextureLoadStyleUrl(int handle, Pointer<Utf8> url);
 )
 external int mapTextureLoadStyleJson(int handle, Pointer<Utf8> json);
 
-@Native<Int32 Function(Int64, Double, Double, Double, Double, Int64)>(
+@Native<Int32 Function(Int64, Double, Double, Double, Double, Double, Int64)>(
   symbol: 'map_texture_set_camera',
 )
 external int mapTextureSetCamera(
@@ -208,6 +212,7 @@ external int mapTextureSetCamera(
   double longitude,
   double zoom,
   double bearing,
+  double pitch,
   int seq,
 );
 

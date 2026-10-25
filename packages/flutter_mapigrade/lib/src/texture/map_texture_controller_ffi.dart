@@ -189,6 +189,7 @@ class _FfiMapTextureController implements MapTextureController {
         camera.longitude,
         camera.zoom,
         camera.bearing,
+        camera.pitch,
         seq,
       ),
     );
@@ -210,6 +211,7 @@ class _FfiMapTextureController implements MapTextureController {
         longitude: f.longitude,
         zoom: f.zoom,
         bearing: f.bearing,
+        pitch: f.pitch,
       ),
       physicalSize: Size(
         f.physicalWidth.toDouble(),
@@ -398,6 +400,7 @@ class _FfiMapTextureController implements MapTextureController {
           longitude: e.longitude,
           zoom: e.zoom,
           bearing: e.bearing,
+          pitch: e.pitch,
         ),
         physicalSize: Size(
           e.physicalWidth.toDouble(),

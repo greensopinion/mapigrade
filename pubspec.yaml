@@ -9,3 +9,9 @@ workspace:
   - packages/flutter_mapigrade/example
   - packages/demo
   - packages/test_harness
+
+# The flutter_map fork with pitch (docs/map-pitch-concept.md), checked out next
+# to this repository, until its branch is pushed and pinned.
+dependency_overrides:
+  flutter_map:
+    path: ../flutter_map

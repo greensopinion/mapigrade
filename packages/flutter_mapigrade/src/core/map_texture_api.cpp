@@ -197,6 +197,7 @@ int32_t map_texture_select_newest(int64_t handle, map_texture_frame* out) {
   out->longitude = info.camera.longitude;
   out->zoom = info.camera.zoom;
   out->bearing = info.camera.bearing;
+  out->pitch = info.camera.pitch;
   out->physical_width = static_cast<int32_t>(info.physical_width);
   out->physical_height = static_cast<int32_t>(info.physical_height);
   out->scale_factor = info.scale_factor;
@@ -221,10 +222,10 @@ int32_t map_texture_load_style_json(int64_t handle, const char* json) {
 
 int32_t map_texture_set_camera(int64_t handle, double latitude,
                                double longitude, double zoom, double bearing,
-                               int64_t seq) {
+                               double pitch, int64_t seq) {
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
-  texture->SetCamera({latitude, longitude, zoom, bearing}, seq);
+  texture->SetCamera({latitude, longitude, zoom, bearing, pitch}, seq);
   return MAP_TEXTURE_OK;
 }
 

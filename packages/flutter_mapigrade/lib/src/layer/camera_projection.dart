@@ -1,5 +1,6 @@
 import 'dart:math' as math;
-import 'dart:ui';
+
+import 'package:flutter/painting.dart';
 
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart';
@@ -32,6 +33,7 @@ class ViewCamera {
       other.camera.longitude == camera.longitude &&
       other.camera.zoom == camera.zoom &&
       other.camera.bearing == camera.bearing &&
+      other.camera.pitch == camera.pitch &&
       other.viewport == viewport;
 
   @override
@@ -40,6 +42,7 @@ class ViewCamera {
     camera.longitude,
     camera.zoom,
     camera.bearing,
+    camera.pitch,
     viewport,
   );
 
@@ -57,6 +60,7 @@ ViewCamera viewCameraOf(fm.MapCamera camera) => ViewCamera(
     longitude: camera.center.longitude,
     zoom: camera.zoom - 1,
     bearing: -camera.rotation,
+    pitch: camera.pitch,
   ),
   camera.nonRotatedSize,
 );
@@ -72,6 +76,7 @@ fm.MapCamera flutterMapCameraOf(MapCamera camera, fm.MapCamera live) =>
       zoom: camera.zoom + 1,
       rotation: -camera.bearing,
       nonRotatedSize: live.nonRotatedSize,
+      pitch: camera.pitch,
       minZoom: live.minZoom,
       maxZoom: live.maxZoom,
     );
@@ -92,30 +97,53 @@ double worldSize(double zoom) => 512 * math.pow(2, zoom).toDouble();
 
 /// The logical position in the viewport of [view] at which MapLibre draws
 /// the point at normalized Mercator coordinates [world].
-Offset screenPosition(ViewCamera view, Offset world) {
-  final center = mercator(view.camera.latitude, view.camera.longitude);
-  final d = (world - center) * worldSize(view.camera.zoom);
-  return _rotate(d, -_radians(view.camera.bearing)) +
-      view.viewport.center(Offset.zero);
-}
+Offset screenPosition(ViewCamera view, Offset world) =>
+    MatrixUtils.transformPoint(
+      _cameraOf(view).pixelToScreenTransform,
+      world * worldSize(view.camera.zoom),
+    );
 
 /// The normalized Mercator coordinates of the point that MapLibre draws at
 /// the logical position [screen] in the viewport of [view]; the inverse of
 /// [screenPosition].
 Offset worldPosition(ViewCamera view, Offset screen) {
-  final center = mercator(view.camera.latitude, view.camera.longitude);
-  final d = _rotate(
-    screen - view.viewport.center(Offset.zero),
-    _radians(view.camera.bearing),
-  );
-  return center + d / worldSize(view.camera.zoom);
+  // On the ground, the transform is the homography of its rows and columns
+  // 0, 1 and 3; inverting it doesn't limit the longitude, as unprojecting
+  // through the CRS would.
+  final m = _cameraOf(view).pixelToScreenTransform.storage;
+  final h = [m[0], m[4], m[12], m[1], m[5], m[13], m[3], m[7], m[15]];
+  final inverse = _invert3(h);
+  final x = inverse[0] * screen.dx + inverse[1] * screen.dy + inverse[2];
+  final y = inverse[3] * screen.dx + inverse[4] * screen.dy + inverse[5];
+  final w = inverse[6] * screen.dx + inverse[7] * screen.dy + inverse[8];
+  return Offset(x / w, y / w) / worldSize(view.camera.zoom);
 }
 
-double _radians(double degrees) => degrees * math.pi / 180;
+/// The `flutter_map` camera that shows the same map as [view].
+fm.MapCamera _cameraOf(ViewCamera view) => fm.MapCamera(
+  crs: const fm.Epsg3857(),
+  center: LatLng(view.camera.latitude, view.camera.longitude),
+  zoom: view.camera.zoom + 1,
+  rotation: -view.camera.bearing,
+  pitch: view.camera.pitch,
+  nonRotatedSize: view.viewport,
+);
 
-/// Rotates [p] by [angle] radians, clockwise on screen for a positive angle.
-Offset _rotate(Offset p, double angle) {
-  final c = math.cos(angle);
-  final s = math.sin(angle);
-  return Offset(c * p.dx - s * p.dy, s * p.dx + c * p.dy);
+/// The inverse of the row-major 3 x 3 matrix [m].
+List<double> _invert3(List<double> m) {
+  final a = m[4] * m[8] - m[5] * m[7];
+  final b = m[5] * m[6] - m[3] * m[8];
+  final c = m[3] * m[7] - m[4] * m[6];
+  final det = m[0] * a + m[1] * b + m[2] * c;
+  return [
+    a / det,
+    (m[2] * m[7] - m[1] * m[8]) / det,
+    (m[1] * m[5] - m[2] * m[4]) / det,
+    b / det,
+    (m[0] * m[8] - m[2] * m[6]) / det,
+    (m[2] * m[3] - m[0] * m[5]) / det,
+    c / det,
+    (m[1] * m[6] - m[0] * m[7]) / det,
+    (m[0] * m[4] - m[1] * m[3]) / det,
+  ];
 }

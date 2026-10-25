@@ -1080,10 +1080,12 @@ void MapTexture::ApplyCamera() {
   camera_update.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
   camera_update.camera = mln_camera_options_default();
   camera_update.camera.fields =
-      MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_BEARING;
+      MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM |
+      MLN_CAMERA_OPTION_BEARING | MLN_CAMERA_OPTION_PITCH;
   camera_update.camera.center = {camera.latitude, camera.longitude};
   camera_update.camera.zoom = camera.zoom;
   camera_update.camera.bearing = camera.bearing;
+  camera_update.camera.pitch = camera.pitch;
   // The completion reports the render update that includes the camera, which
   // a frame result's map_update_generation counts.
   int64_t seq = update->seq;
@@ -1602,7 +1604,7 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
     std::lock_guard lock(rendered_view_mutex_);
     rendered_view_ = RenderedView{
         {view.camera.center.latitude, view.camera.center.longitude,
-         view.camera.zoom, view.camera.bearing},
+         view.camera.zoom, view.camera.bearing, view.camera.pitch},
         static_cast<double>(view.extent.width),
         static_cast<double>(view.extent.height)};
   }
@@ -1809,7 +1811,7 @@ FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   // The view that the frame drew. Its center longitude is unwrapped.
   const mln_camera_options& camera = result.view.camera;
   info.camera = {camera.center.latitude, camera.center.longitude, camera.zoom,
-                 camera.bearing};
+                 camera.bearing, camera.pitch};
   {
     // The newest camera command whose generation the frame's update includes.
     // Older entries are no longer needed.
@@ -1870,6 +1872,7 @@ void MapTexture::Emit(int32_t type, const char* message,
     event->longitude = frame->camera.longitude;
     event->zoom = frame->camera.zoom;
     event->bearing = frame->camera.bearing;
+    event->pitch = frame->camera.pitch;
     event->physical_width = static_cast<int32_t>(frame->physical_width);
     event->physical_height = static_cast<int32_t>(frame->physical_height);
     event->scale_factor = frame->scale_factor;

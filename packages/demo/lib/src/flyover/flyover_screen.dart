@@ -172,6 +172,7 @@ class _FlyoverScreenState extends State<FlyoverScreen>
             options: MapOptions(
               initialCenter: _initialCenter,
               initialZoom: _initialZoom,
+              maxPitch: MapOptions.pitchLimit,
               onPointerDown: _onPointerDown,
               onMapEvent: _onMapEvent,
               onPositionChanged: _onPositionChanged,

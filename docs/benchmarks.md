@@ -663,6 +663,20 @@ Conditions: the Setup's iPhone, OS, Xcode and Flutter versions and style; copy-f
 
 Procedure: as for the alignment benchmark above, with `--dart-define=ALIGNMENT_CHILDREN=1 --dart-define=ALIGNMENT_MODE=<mode> --dart-define=ALIGNMENT_PHASES=pan100,pan500,pan1000,stop,fling,reverse`.
 
+### Pitched map (macOS, add-pitch change, task 4.3)
+
+The benchmark with children at a `flutter_map` pitch of 45 degrees (`--dart-define=ALIGNMENT_PITCH=45`), which the layer passes to MapLibre. The error and the lag are computed with the pitched projection. Measured 2026-10-24, release build, one run, `flutter_map` from the fork (`8.4.0-dev.1`, commit `04c3e14` on its `map-pitch` branch).
+
+| Phase | Mode | Frames over 1 px | Error p50 / p95 / max | Lag p50 / p95 / max | Map fps | Rendered frames not displayed | Skipped renders per s | Most slots in use |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| pan 1,000 px/s | `predict1` | 0 of 2401 | 0 / 0 / 0 | 8.33 / 16.67 / 41.71 | 107.1 | 5.2% | 0 | 3 |
+
+- As unpitched, no Flutter frame had an error over 1 px: the children were drawn at the camera, pitch included, of the displayed map frame in every frame. The lag matches the unpitched `predict1` pan at 1,000 px/s.
+
+Conditions: the Setup's Mac, OS, Xcode and Flutter versions; the Liberty style; copy-free rendering; window 1600x1000, which gave a 1600x1000 map viewport; `caffeinate -dims` kept the display on. The thermal state was nominal at the end of the phase.
+
+Procedure: as for the alignment benchmark above, with `--dart-define=ALIGNMENT_CHILDREN=1 --dart-define=ALIGNMENT_PITCH=45 --dart-define=ALIGNMENT_PHASES=pan1000`.
+
 ## The port to the FFI core executor (adopt-ffi-core-executor change, task 8.2)
 
 Measured 2026-10-22: `main` at `d71c9bc` (MapLibre Native FFI 0.202610.1) against the change (FFI 0.202610.2, maplibre-native-ffi#760), 3 runs each, alternating, release builds, copy-free, rendering ahead with the hysteresis (the default). Mac: MacBook Pro (M2 Max), window 1600x1000 on the built-in display at 120 Hz, AC power. iPhone 15 Pro Max over Wi-Fi on battery; iPhone 13 and Pixel 4a (5G) on cable. The thermal state was nominal throughout, except on the iPhone 15 Pro Max, where it was fair at the end of some alignment runs of both builds. `main`'s harness got two changes that don't touch the map: the window placement of `MLT_WINDOW_SCREEN=builtin` on the Mac, and the short `BENCHMARK_KEY` line on Android, whose log truncates the full result line. `main` has no camera latency statistic (design D189).

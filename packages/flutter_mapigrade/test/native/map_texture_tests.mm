@@ -287,6 +287,7 @@ struct Event {
   int32_t type;
   int64_t frame_id;
   double zoom;
+  double pitch;
   int32_t physical_width;
   int64_t display_time_us;
   std::string message;
@@ -302,7 +303,7 @@ void OnEvent(map_texture_event* event) {
   {
     std::lock_guard lock(events_mutex);
     events.push_back({event->type, event->frame_id, event->zoom,
-                      event->physical_width, event->display_time_us,
+                      event->pitch, event->physical_width, event->display_time_us,
                       event->message == nullptr ? "" : event->message,
                       event->slot, event->seq, event->request_id,
                       event->status});
@@ -491,7 +492,7 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
   int64_t handle = CreateMap();
   {
     SurfaceDart dart(handle);
-    map_texture_set_camera(handle, 51.5, -0.1, 12.5, 0, 1);
+    map_texture_set_camera(handle, 51.5, -0.1, 12.5, 0, 0, 1);
     map_texture_resize(handle, 200, 100, 2.0);
     CHECK(last_target->will_resize_width.load() == 400);
     CHECK(WaitFor([] { return !FrameEvents().empty(); }));
@@ -620,7 +621,7 @@ void RendersArePacedByRefreshInterval() {
 // D132).
 void SurfaceFrameIsReadyWhenItsImageArrives() {
   int64_t handle = CreateMap();
-  map_texture_set_camera(handle, 0, 0, 6, 0, 4);
+  map_texture_set_camera(handle, 0, 0, 6, 0, 0, 4);
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(WaitFor([handle] { return Stats(handle).rendered_frames == 1; }));
   Sleep(50);
@@ -833,7 +834,7 @@ void NoRenderWhilePaused() {
   CHECK(Settled(handle, 1));
   int64_t rendered = Stats(handle).rendered_frames;
   map_texture_set_paused_for_testing(1);
-  map_texture_set_camera(handle, 0, 0, 3, 0, 1);
+  map_texture_set_camera(handle, 0, 0, 3, 0, 0, 1);
   Sleep(300);
   CHECK(Stats(handle).rendered_frames == rendered);
   CHECK(Stats(handle).paused_renders > 0);
@@ -848,9 +849,9 @@ void NoRenderWhilePaused() {
 void FrameReportsLatestCameraSequenceNumber() {
   int64_t handle = CreateMap();
   SurfaceDart dart(handle);
-  map_texture_set_camera(handle, 0, 0, 1, 0, 1);
-  map_texture_set_camera(handle, 0, 0, 2, 0, 2);
-  map_texture_set_camera(handle, 0, 0, 3, 0, 3);
+  map_texture_set_camera(handle, 0, 0, 1, 0, 0, 1);
+  map_texture_set_camera(handle, 0, 0, 2, 0, 0, 2);
+  map_texture_set_camera(handle, 0, 0, 3, 0, 0, 3);
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(WaitFor([] { return FrameEvents().size() >= 1; }));
   CHECK(Settled(handle, 1));
@@ -877,7 +878,7 @@ void LastRenderedViewIsNewestFrame() {
       {48.2, 16.37, 12, 0}, {48.21, 16.4, 12.5, 15}, {-33.9, 151.2, 9.75, -40}};
   int64_t seq = 0;
   for (const auto& c : cameras) {
-    map_texture_set_camera(handle, c[0], c[1], c[2], c[3], ++seq);
+    map_texture_set_camera(handle, c[0], c[1], c[2], c[3], 0, ++seq);
     CHECK(WaitFor([seq] {
       auto ready = ReadyEvents();
       return !ready.empty() && ready.back().seq == seq;
@@ -894,6 +895,26 @@ void LastRenderedViewIsNewestFrame() {
     CHECK(view->width == 120);
     CHECK(view->height == 90);
   }
+  map_texture_dispose(handle);
+}
+
+// A camera set with a pitch is rendered with it, and the frame-ready event, the
+// chosen frame and the last rendered view report it.
+void PitchIsSetAndReported() {
+  int64_t handle = CreateMap();
+  auto owner = last_owner.lock();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 120, 90, 2.0);
+  map_texture_set_camera(handle, 48.2, 16.37, 12, 20, 45, 1);
+  CHECK(WaitFor([] {
+    auto ready = ReadyEvents();
+    return !ready.empty() && ready.back().seq == 1;
+  }));
+  CHECK(std::abs(ReadyEvents().back().pitch - 45) < 1e-9);
+  CHECK(Settled(handle, 1));
+  auto view = owner->LastRenderedViewForTesting();
+  CHECK(view.has_value());
+  if (view) CHECK(std::abs(view->camera.pitch - 45) < 1e-9);
   map_texture_dispose(handle);
 }
 
@@ -961,7 +982,7 @@ int64_t CreateLineMap() {
   int64_t handle = CreateMap(false);
   map_texture_load_style_json(handle, kLineStyle);
   map_texture_resize(handle, 120, 90, 2.0);
-  map_texture_set_camera(handle, 0, 0, kQueryZoom, 0, 1);
+  map_texture_set_camera(handle, 0, 0, kQueryZoom, 0, 0, 1);
   return handle;
 }
 
@@ -1013,7 +1034,7 @@ void QueryReadsLastRenderedFrameWhileCameraMoves() {
   int misses = 0;
   int false_hits = 0;
   for (int i = 0; i < 40; ++i) {
-    map_texture_set_camera(handle, 0, i % 2 == 0 ? -1 : 1, kQueryZoom, 0,
+    map_texture_set_camera(handle, 0, i % 2 == 0 ? -1 : 1, kQueryZoom, 0, 0,
                            2 + i);
     if (i % 4 == 0) Sleep(5);
     if (!FindsLine(Query(handle, QuerySquare(2)))) ++misses;
@@ -1194,7 +1215,7 @@ bool ReadySettled(size_t ready) {
 void ReadyEventPrecedesDisplayedEvent() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
-  map_texture_set_camera(handle, 0, 0, 4, 0, 7);
+  map_texture_set_camera(handle, 0, 0, 4, 0, 0, 7);
   map_texture_resize(handle, 100, 100, 2.0);
   CHECK(ReadySettled(1));
   // Not displayed until Dart chooses the frame.
@@ -1379,7 +1400,7 @@ void SelectAfterDisposeReportsDisposed() {
   map_texture_dispose(handle);
   CHECK(SelectNewest(handle) == MAP_TEXTURE_ERROR_DISPOSED);
   CHECK(map_texture_texture_ids(handle, ids, 4) == MAP_TEXTURE_ERROR_DISPOSED);
-  CHECK(map_texture_set_camera(handle, 0, 0, 0, 0, 1) ==
+  CHECK(map_texture_set_camera(handle, 0, 0, 0, 0, 0, 1) ==
         MAP_TEXTURE_ERROR_DISPOSED);
 }
 
@@ -1758,6 +1779,7 @@ int main(int argc, char** argv) {
       {"FrameReportsLatestCameraSequenceNumber",
        FrameReportsLatestCameraSequenceNumber},
       {"LastRenderedViewIsNewestFrame", LastRenderedViewIsNewestFrame},
+      {"PitchIsSetAndReported", PitchIsSetAndReported},
       {"QueryBeforeFirstRenderIsEmpty", QueryBeforeFirstRenderIsEmpty},
       {"QueryFindsLineAtRest", QueryFindsLineAtRest},
       {"QueryReadsLastRenderedFrameWhileCameraMoves",

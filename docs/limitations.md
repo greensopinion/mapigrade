@@ -187,7 +187,7 @@ On 2026-10-18, an app installed from TestFlight reported `LayerCreateException`:
 - On Android, Flutter doesn't report when it has finished with an image, so a display slot is freed when Dart has chosen three later frames (design D133 of the android-layer-children-alignment change). No tearing was seen on the Pixel; a device whose GPU lags further behind could show it.
 - On Android, `copyFree: false` has no effect: every map renders directly into the buffers of its `ImageReader`, which Flutter displays.
 - On Android, the plugin's own frame path has no CPU readback by design, which we did not trace. When Impeller uses OpenGL ES, Flutter may copy the `HardwareBuffer` on the GPU while it samples it.
-- The plugin exposes only style, camera (center, zoom, bearing), resize and dispose. There are no gestures, pitch or animations.
+- The plugin exposes only style, camera (center, zoom, bearing, pitch), resize and dispose. There are no gestures or animations. Pitch needs a `flutter_map` with camera pitch, which only our fork has so far (`docs/map-pitch-concept.md`).
 
 ## What the Android slice can reuse
 

@@ -12,6 +12,11 @@ const streetZoom = 14.0;
 /// The zoom while the flyover follows a route.
 const followZoom = 16.0;
 
+/// The pitch while the flyover follows a route, in degrees, so that the
+/// drone looks ahead of the rider. The flyover is north up and unpitched at a
+/// stage's start and finish, and between stages.
+const followPitch = 50.0;
+
 /// The speed along a route, in logical pixels per second at [followZoom]:
 /// about 0.85 km/s on the ground at the latitude of the stages.
 const followSpeed = 500.0;
@@ -65,8 +70,13 @@ const _crs = Epsg3857();
 final _followScale = math.pow(2, followZoom).toDouble();
 
 /// A position of the flyover's camera. [rotation] is in degrees, from -180
-/// to 180.
-typedef FlyoverCamera = ({LatLng center, double zoom, double rotation});
+/// to 180, and [pitch] in degrees.
+typedef FlyoverCamera = ({
+  LatLng center,
+  double zoom,
+  double rotation,
+  double pitch,
+});
 
 /// What a segment of the flyover shows (design D118).
 enum SegmentKind {
@@ -126,7 +136,7 @@ class Flyover {
       nonRotatedSize: size,
     );
     FlyoverCamera northUp(LatLng center) =>
-        (center: center, zoom: streetZoom, rotation: 0);
+        (center: center, zoom: streetZoom, rotation: 0, pitch: 0);
 
     final segments = <Segment>[];
     void add(
@@ -151,12 +161,36 @@ class Flyover {
     const s2 = Duration(seconds: 2);
     const s3 = Duration(seconds: 3);
 
+    // The rider's place and drift are given on screen; the follow camera
+    // places the rider on the ground, which the pitch shows foreshortened.
+    final follower = MapCamera(
+      crs: _crs,
+      center: const LatLng(0, 0),
+      zoom: followZoom,
+      rotation: 0,
+      nonRotatedSize: size,
+      pitch: followPitch,
+    );
+    Offset ground(Offset screen) =>
+        follower.projectAtZoom(follower.screenOffsetToLatLng(screen)) -
+        follower.projectAtZoom(follower.center);
+    final rider = size.center(Offset.zero) + Offset(0, size.height * lookAhead);
+    final lookAheadPixels = ground(rider).dy;
+    // The pitched map is shown largest sideways and towards the viewer, so the
+    // smaller of those ground distances keeps a drift in any direction within
+    // maxDrift on screen.
+    final drift = size.shortestSide * maxDrift;
+    final maxDriftPixels = math.min(
+      (ground(rider + Offset(drift, 0)) - ground(rider)).distance,
+      (ground(rider + Offset(0, drift)) - ground(rider)).distance,
+    );
+
     for (var i = 0; i < stages.length; i++) {
       final stage = stages[i];
       final follow = _Follow(
         stage.route,
-        lookAheadPixels: size.height * lookAhead,
-        maxDriftPixels: size.shortestSide * maxDrift,
+        lookAheadPixels: lookAheadPixels,
+        maxDriftPixels: maxDriftPixels,
       );
       final start = northUp(stage.startPoint);
       // A loop's finish is its start: the flyover turns north up where the
@@ -247,7 +281,7 @@ double _zoomDip(MapCamera viewport, FlyoverCamera a, FlyoverCamera b) {
 
 /// The camera of [segment] at the eased progress [e]: the center in Web
 /// Mercator coordinates, the zoom linearly minus the dip, the rotation by the
-/// shorter angle.
+/// shorter angle, and the pitch linearly.
 FlyoverCamera _interpolate(Segment segment, double e) {
   final from = segment.from;
   final to = segment.to;
@@ -260,6 +294,7 @@ FlyoverCamera _interpolate(Segment segment, double e) {
     rotation: _normalized(
       from.rotation + _normalized(to.rotation - from.rotation) * e,
     ),
+    pitch: _lerp(from.pitch, to.pitch, e),
   );
 }
 
@@ -502,6 +537,7 @@ class _Follow {
       zoom: followZoom,
       // The map turns the other way from the heading, so that it points up.
       rotation: _normalized(-heading),
+      pitch: followPitch,
     );
   }
 }

@@ -16,6 +16,7 @@ MapCamera _camera({
   LatLng center = const LatLng(43.7, 7.27),
   double zoom = 12,
   double rotation = 0,
+  double pitch = 0,
   Size size = _viewport,
 }) => MapCamera(
   crs: const Epsg3857(),
@@ -23,10 +24,15 @@ MapCamera _camera({
   zoom: zoom,
   rotation: rotation,
   nonRotatedSize: size,
+  pitch: pitch,
 );
 
-MapCamera _view(FlyoverCamera c) =>
-    _camera(center: c.center, zoom: c.zoom, rotation: c.rotation);
+MapCamera _view(FlyoverCamera c) => _camera(
+  center: c.center,
+  zoom: c.zoom,
+  rotation: c.rotation,
+  pitch: c.pitch,
+);
 
 /// Where the rider is on screen: below the center by the look-ahead.
 const _riderOnScreen = Offset(600, 400 + 800 * lookAhead);
@@ -202,7 +208,15 @@ void main() {
       var up = 0, samples = 0;
       for (var ms = 0; ms + 500 < s.duration.inMilliseconds; ms += 200) {
         final t = flyover.startOf(i) + Duration(milliseconds: ms);
-        final view = _view(flyover.cameraAt(t));
+        // The direction on the ground relative to the camera's heading: a
+        // pitched view shortens distances up the screen but not across it, so
+        // the angle on screen would overstate sideways movement.
+        final camera = flyover.cameraAt(t);
+        final view = _camera(
+          center: camera.center,
+          zoom: camera.zoom,
+          rotation: camera.rotation,
+        );
         final later = flyover.riderAt(t + const Duration(milliseconds: 500))!;
         // Where the rider will be in 0.5 s, seen from the camera now.
         final move =
@@ -220,6 +234,38 @@ void main() {
         greaterThan(0.9),
         reason: 'stage ${stages[n].number}: $up of $samples',
       );
+    }
+  });
+
+  test('the camera is pitched only while it follows a route', () {
+    for (final (i, s) in indexed()) {
+      for (final t in [flyover.startOf(i), mid(i)]) {
+        final pitch = flyover.cameraAt(t).pitch;
+        switch (s.kind) {
+          case SegmentKind.followRoute:
+            expect(pitch, followPitch, reason: 'segment $i');
+          case SegmentKind.holdAtStart ||
+              SegmentKind.holdAtFinish ||
+              SegmentKind.toNextStart:
+            expect(pitch, 0, reason: 'segment $i');
+          case SegmentKind.turnToRoute || SegmentKind.turnToNorth:
+            expect(
+              pitch,
+              inInclusiveRange(0, followPitch),
+              reason: 'segment $i',
+            );
+        }
+      }
+    }
+    // The turns change the pitch gradually.
+    for (final (i, s) in indexed()) {
+      if (s.kind != SegmentKind.turnToRoute) continue;
+      const dt = Duration(milliseconds: 100);
+      for (var t = flyover.startOf(i); t + dt <= end(i); t += dt) {
+        final change =
+            (flyover.cameraAt(t + dt).pitch - flyover.cameraAt(t).pitch).abs();
+        expect(change, lessThan(5), reason: 'segment $i at $t');
+      }
     }
   });
 

@@ -172,6 +172,7 @@ void main() {
       longitude: 2.3522,
       zoom: 11,
       bearing: 30,
+      pitch: 45,
     );
     final frame = waitFor<FrameCamera>(
       controller.frames,
@@ -185,6 +186,7 @@ void main() {
     // The frame reports the bearing with the sign it was set with; the
     // layer's transform relies on it (flutter-map-layer design D23).
     expect(displayed.camera.bearing, closeTo(30, 1e-6));
+    expect(displayed.camera.pitch, closeTo(45, 1e-6));
   });
 
   testWidgets('display time increases from frame to frame', (tester) async {

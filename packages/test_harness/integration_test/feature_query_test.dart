@@ -69,6 +69,7 @@ Widget _app(
   required String style,
   LatLng center = _center,
   double rotation = 0,
+  double pitch = 0,
   LayerAlignment alignment = const LayerAlignment.prediction(),
 }) => MaterialApp(
   home: Align(
@@ -83,6 +84,8 @@ Widget _app(
             initialCenter: center,
             initialZoom: _zoom,
             initialRotation: rotation,
+            initialPitch: pitch,
+            maxPitch: fm.MapOptions.pitchLimit,
           ),
           children: [
             MapTextureLayer(
@@ -120,6 +123,7 @@ Future<_Map> _show(
   String? style,
   LatLng center = _center,
   double rotation = 0,
+  double pitch = 0,
   LayerAlignment alignment = const LayerAlignment.prediction(),
 }) async {
   final map = _Map(LayerController(), GlobalKey());
@@ -129,6 +133,7 @@ Future<_Map> _show(
       style: style ?? featureQueryStyle(),
       center: center,
       rotation: rotation,
+      pitch: pitch,
       alignment: alignment,
     ),
   );
@@ -293,6 +298,28 @@ void main() {
       expect(
         _ids(await map.controller.queryRenderedFeatures(beside, radius: 2)),
         isNot(contains(1)),
+      );
+    });
+
+    testWidgets('a point query finds the route near the top of a map pitched '
+        'at 60 degrees', (tester) async {
+      final map = await _show(tester, pitch: 60);
+      final camera = fm.MapCamera(
+        crs: const fm.Epsg3857(),
+        center: _center,
+        zoom: _zoom,
+        rotation: 0,
+        nonRotatedSize: _size,
+        pitch: 60,
+      );
+      final top = camera.screenOffsetToLatLng(const Offset(0, 20)).latitude;
+      final onRoute = camera.latLngToScreenOffset(
+        LatLng(top, primaryRouteLongitude),
+      );
+      expect(onRoute.dy, closeTo(20, 1));
+      expect(
+        _ids(await map.controller.queryRenderedFeatures(onRoute, radius: 2)),
+        contains(1),
       );
     });
 

@@ -2,6 +2,8 @@ import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter_map/flutter_map.dart' as fm;
+
 import '../texture/map_texture_controller.dart';
 import 'camera_projection.dart';
 
@@ -14,10 +16,10 @@ const Duration maxCameraRecordAge = Duration(milliseconds: 50);
 typedef CameraRecord = ({Duration time, ViewCamera camera});
 
 /// The rate of change of a camera, per second: the center in normalized
-/// Mercator coordinates, the zoom, and the bearing in degrees.
+/// Mercator coordinates, the zoom, and the bearing and pitch in degrees.
 class CameraVelocity {
   /// A velocity with these rates of change.
-  const CameraVelocity(this.center, this.zoom, this.bearing);
+  const CameraVelocity(this.center, this.zoom, this.bearing, [this.pitch = 0]);
 
   /// No change.
   static const zero = CameraVelocity(Offset.zero, 0, 0);
@@ -31,18 +33,22 @@ class CameraVelocity {
   /// The rate of change of the bearing, in degrees.
   final double bearing;
 
+  /// The rate of change of the pitch, in degrees.
+  final double pitch;
+
   @override
   bool operator ==(Object other) =>
       other is CameraVelocity &&
       other.center == center &&
       other.zoom == zoom &&
-      other.bearing == bearing;
+      other.bearing == bearing &&
+      other.pitch == pitch;
 
   @override
-  int get hashCode => Object.hash(center, zoom, bearing);
+  int get hashCode => Object.hash(center, zoom, bearing, pitch);
 
   @override
-  String toString() => 'CameraVelocity($center, $zoom, $bearing)';
+  String toString() => 'CameraVelocity($center, $zoom, $bearing, $pitch)';
 }
 
 /// The velocity of the camera of the last record in [records], which are
@@ -73,13 +79,15 @@ CameraVelocity cameraVelocity(List<CameraRecord> records) {
           seconds,
       (to.zoom - from.zoom) / seconds,
       _angleDifference(to.bearing, from.bearing) / seconds,
+      (to.pitch - from.pitch) / seconds,
     );
   }
   return CameraVelocity.zero;
 }
 
 /// [view] moved by [velocity] for [seconds], with the latitude clamped to the
-/// Mercator limit and the longitude normalized to [-180, 180).
+/// Mercator limit, the longitude normalized to [-180, 180), and the pitch
+/// limited to the range that `flutter_map` allows.
 ViewCamera extrapolateCamera(
   ViewCamera view,
   CameraVelocity velocity,
@@ -96,6 +104,10 @@ ViewCamera extrapolateCamera(
       longitude: longitude,
       zoom: camera.zoom + velocity.zoom * seconds,
       bearing: camera.bearing + velocity.bearing * seconds,
+      pitch: (camera.pitch + velocity.pitch * seconds).clamp(
+        0,
+        fm.MapOptions.pitchLimit,
+      ),
     ),
     view.viewport,
   );
@@ -143,7 +155,8 @@ extension on MapCamera {
       latitude == other.latitude &&
       longitude == other.longitude &&
       zoom == other.zoom &&
-      bearing == other.bearing;
+      bearing == other.bearing &&
+      pitch == other.pitch;
 }
 
 double _sinh(double x) => (math.exp(x) - math.exp(-x)) / 2;

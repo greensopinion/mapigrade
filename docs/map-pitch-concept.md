@@ -1,6 +1,6 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; change 1 proposed
+**Status:** Concept and decisions; change 1 done and archived; change 2 implemented
 **Updated:** 2026-10-24
 
 ## 1. Purpose
@@ -204,4 +204,5 @@ These don't block change 1:
 - When to contact the fleaflet maintainers, for example with an issue or discussion about the API, and how to split the upstream PRs. Change 1 alone is large. Both are decided later, and each public action needs explicit approval first.
 - Non-Mercator CRSs. Pitch works in projected pixel space, so they should work, but the MapLibre reference tests cover only EPSG:3857.
 - Polyline simplification near the bottom edge, where the 1.5 times magnification at 60° may make the simplification visible.
+- A pitched flyover in the demo. While the flyover follows a route, the camera should pitch, like a drone behind the rider, to make it look better. This changes the demo app's flyover requirement and the README recording, so it needs its own change after change 2.
 - Markers that lie on the ground. Every marker faces the viewer (section 5), so a marker can't be drawn flat on the map, for example a direction arrow on a road. MapLibre offers both through pitch alignment: `icon-pitch-alignment` in the style spec, and `pitchAlignment` (`map` or `viewport`) on GL JS's `Marker`. #1273 had the same choice as `applyPitch`. A pitch-alignment option on `MarkerLayer` or `Marker` would be additive (section 11).

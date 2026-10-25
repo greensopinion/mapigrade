@@ -195,7 +195,8 @@ android {
 
 ## Limitations
 
-- No API for style layers, sources or pitch. Feature queries cover rendered features at a point or in a rectangle; there are no line-string or source feature queries.
+- No API for style layers or sources. Feature queries cover rendered features at a point or in a rectangle; there are no line-string or source feature queries.
+- The map follows the pitch of the `flutter_map` camera, which needs a `flutter_map` with camera pitch; no released version has it yet.
 - While the camera moves, labels and icons are matched where MapLibre placed them last, which can be behind the map on screen.
 - Sprite and glyph density is fixed when the map is created.
 

@@ -48,6 +48,7 @@ typedef struct map_texture_event {
   double longitude;
   double zoom;
   double bearing;
+  double pitch;
   int32_t physical_width;
   int32_t physical_height;
   double scale_factor;
@@ -89,6 +90,7 @@ typedef struct map_texture_frame {
   double longitude;
   double zoom;
   double bearing;
+  double pitch;
   int32_t physical_width;
   int32_t physical_height;
   double scale_factor;
@@ -206,7 +208,7 @@ MAP_TEXTURE_EXPORT int32_t map_texture_set_camera(int64_t handle,
                                                   double latitude,
                                                   double longitude,
                                                   double zoom, double bearing,
-                                                  int64_t seq);
+                                                  double pitch, int64_t seq);
 // Sets the widget's logical size and device pixel ratio.
 MAP_TEXTURE_EXPORT int32_t map_texture_resize(int64_t handle,
                                               double logical_width,

@@ -78,6 +78,11 @@ const alignmentPhaseDuration = Duration(
 );
 const alignmentPhases = String.fromEnvironment('ALIGNMENT_PHASES');
 const alignmentVideo = bool.fromEnvironment('ALIGNMENT_VIDEO');
+
+/// The flutter_map pitch in degrees, 0 unless set.
+final alignmentPitch = double.parse(
+  const String.fromEnvironment('ALIGNMENT_PITCH', defaultValue: '0'),
+);
 const alignmentModeName = String.fromEnvironment(
   'ALIGNMENT_MODE',
   defaultValue: 'predict1',
@@ -86,8 +91,8 @@ const alignmentModeName = String.fromEnvironment(
 /// The layer configuration, or null if ALIGNMENT_MODE names none.
 final alignmentMode = AlignmentMode.byLabel(alignmentModeName);
 
-/// The flutter_map version in pubspec.yaml, for the result lines.
-const flutterMapVersion = '8.3.2';
+/// The flutter_map version that the workspace resolves, for the result lines.
+const flutterMapVersion = '8.4.0-dev.1 (fork map-pitch 04c3e14)';
 
 const libertyStyleUrl = 'https://tiles.openfreemap.org/styles/liberty';
 
@@ -305,6 +310,8 @@ class _AlignmentBenchmarkPageState extends State<AlignmentBenchmarkPage> {
     options: MapOptions(
       initialCenter: startCenter,
       initialZoom: startZoom,
+      initialPitch: alignmentPitch,
+      maxPitch: MapOptions.pitchLimit,
       interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
     ),
     children: [
@@ -647,6 +654,7 @@ class AlignmentBenchmark {
         'ALIGNMENT_RESULT ${jsonEncode({
           'mode': mode.label,
           'children': alignmentChildren,
+          'pitch': alignmentPitch,
           'phase': phase.name,
           'kind': phase.kind,
           'speed': phase.speed,

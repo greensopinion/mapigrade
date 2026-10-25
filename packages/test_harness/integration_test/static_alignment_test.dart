@@ -63,6 +63,7 @@ class AlignmentCase {
     this.center,
     this.zoom, {
     this.rotation = 0,
+    this.pitch = 0,
     this.size = const Size(400, 300),
     this.resizeTo,
     this.pointAt = const Offset(300, 100),
@@ -73,6 +74,7 @@ class AlignmentCase {
   final LatLng center;
   final double zoom;
   final double rotation;
+  final double pitch;
   final Size size;
 
   /// If set, the map is shown at [size] first and then resized to this size.
@@ -124,6 +126,22 @@ const cases = [
     resizeTo: Size(380, 320),
     pointAt: Offset(290, 80),
   ),
+  AlignmentCase('pitch 30 degrees', LatLng(48.85, 2.35), 12.5, pitch: 30),
+  AlignmentCase(
+    'pitch 30 and rotation 30 degrees',
+    LatLng(48.85, 2.35),
+    12.5,
+    rotation: 30,
+    pitch: 30,
+  ),
+  AlignmentCase('pitch 60 degrees', LatLng(48.85, 2.35), 12.5, pitch: 60),
+  AlignmentCase(
+    'pitch 60 and rotation 30 degrees',
+    LatLng(48.85, 2.35),
+    12.5,
+    rotation: 30,
+    pitch: 60,
+  ),
 ];
 
 void main() {
@@ -143,6 +161,7 @@ void main() {
           zoom: c.zoom,
           rotation: c.rotation,
           nonRotatedSize: c.finalSize,
+          pitch: c.pitch,
         );
         final point = c.point ?? camera.screenOffsetToLatLng(c.pointAt);
         final style = styleWithPoint(point);
@@ -150,15 +169,34 @@ void main() {
         final boundaryKey = GlobalKey();
         MapTextureController? controller;
         Widget app(Size size, {required bool overlay}) {
-          final circles = fm.CircleLayer(
-            circles: [
-              fm.CircleMarker(
-                point: point,
-                radius: radius,
-                color: const Color(0xff0000ff),
-              ),
-            ],
-          );
+          // On a pitched map a circle on the ground is drawn as an ellipse,
+          // whose centroid isn't the projected point, so the overlay is a
+          // marker, which faces the viewer like the style's circle.
+          final Widget circles = c.pitch == 0
+              ? fm.CircleLayer(
+                  circles: [
+                    fm.CircleMarker(
+                      point: point,
+                      radius: radius,
+                      color: const Color(0xff0000ff),
+                    ),
+                  ],
+                )
+              : fm.MarkerLayer(
+                  markers: [
+                    fm.Marker(
+                      point: point,
+                      width: 2 * radius,
+                      height: 2 * radius,
+                      child: const DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Color(0xff0000ff),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
           return MaterialApp(
             home: Align(
               alignment: Alignment.topLeft,
@@ -171,6 +209,8 @@ void main() {
                       initialCenter: c.center,
                       initialZoom: c.zoom,
                       initialRotation: c.rotation,
+                      initialPitch: c.pitch,
+                      maxPitch: fm.MapOptions.pitchLimit,
                     ),
                     children: [
                       MapTextureLayer(

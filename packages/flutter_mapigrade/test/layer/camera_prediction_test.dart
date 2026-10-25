@@ -18,12 +18,14 @@ ViewCamera view(
   double longitude,
   double zoom, {
   double bearing = 0,
+  double pitch = 0,
 }) => ViewCamera(
   MapCamera(
     latitude: latitude,
     longitude: longitude,
     zoom: zoom,
     bearing: bearing,
+    pitch: pitch,
   ),
   viewport,
 );
@@ -49,6 +51,11 @@ Matcher closeCamera(ViewCamera expected, [double tolerance = 1e-9]) =>
           (v) => v.camera.bearing,
           'bearing',
           closeTo(expected.camera.bearing, tolerance),
+        )
+        .having(
+          (v) => v.camera.pitch,
+          'pitch',
+          closeTo(expected.camera.pitch, tolerance),
         )
         .having((v) => v.viewport, 'viewport', expected.viewport);
 
@@ -198,6 +205,20 @@ void main() {
   test('zoom is extrapolated linearly', () {
     final cameras = [view(0, 10, 12), view(0, 10, 12.1), view(0, 10, 12.2)];
     expect(predictLast(cameras, lead: 3), closeCamera(view(0, 10, 12.5)));
+  });
+
+  test('pitch is extrapolated linearly', () {
+    final cameras = [
+      for (var i = 0; i < 5; i++) view(0, 10, 12, pitch: 20 + 2.0 * i),
+    ];
+    expect(predictLast(cameras), closeCamera(view(0, 10, 12, pitch: 32)));
+  });
+
+  test('the predicted pitch is limited to 60 degrees', () {
+    final cameras = [
+      for (var i = 0; i < 5; i++) view(0, 10, 12, pitch: 51 + 2.0 * i),
+    ];
+    expect(predictLast(cameras), closeCamera(view(0, 10, 12, pitch: 60)));
   });
 
   test('the predicted latitude is clamped to the Mercator limit', () {

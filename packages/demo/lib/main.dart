@@ -5,6 +5,7 @@ import 'src/flyover/flyover_screen.dart';
 import 'src/flyover/recording.dart';
 import 'src/gallery.dart';
 import 'src/inspect/inspect_screen.dart';
+import 'src/three_d/three_d_screen.dart';
 
 void main() {
   final recording = Recording.fromEnvironment();
@@ -22,6 +23,12 @@ final _showcases = [
     'Inspect features',
     'Tap a road, building or label to highlight it and see its properties.',
     (context) => const InspectScreen(),
+  ),
+  Showcase(
+    '3D view',
+    'Tilt Midtown Manhattan with the slider to see its buildings in 3D, '
+        'with a route and markers that stay on the map.',
+    (context) => const ThreeDScreen(),
   ),
 ];
 
