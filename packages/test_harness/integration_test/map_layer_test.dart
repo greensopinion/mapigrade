@@ -16,6 +16,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'threads.dart';
+
 final redStyle = jsonEncode({
   'version': 8,
   'sources': {},
@@ -343,7 +345,7 @@ void main() {
     // MapLibre's shared worker threads.
     await cycle();
     await Future<void>.delayed(const Duration(milliseconds: 500));
-    final threadsBefore = processThreadCount();
+    final threadsBefore = Threads();
     final footprintBefore = memoryFootprintForTesting();
     final footprints = <int>[];
     for (var i = 0; i < 50; i++) {
@@ -354,18 +356,18 @@ void main() {
     // a plain MapTextureView shows the same rise and settling without
     // flutter_map.
     await Future<void>.delayed(const Duration(seconds: 3));
-    final threadsAfter = processThreadCount();
+    final threadsAfter = Threads();
     final footprintAfter = memoryFootprintForTesting();
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
     debugPrint(
-      'LAYER_LIFECYCLE threads $threadsBefore -> $threadsAfter; '
+      'LAYER_LIFECYCLE threads ${threadsBefore.count} -> ${threadsAfter.count}; '
       'footprint ${mib(footprintBefore)} MiB -> ${mib(footprintAfter)} MiB; '
       'after cycles 10/20/30/40/50: '
       '${[
         for (final i in [9, 19, 29, 39, 49]) mib(footprints[i]),
       ]}',
     );
-    expect(threadsAfter, lessThanOrEqualTo(threadsBefore));
+    expectNoLeakedThreads(threadsBefore, threadsAfter);
     expect(footprintAfter - footprintBefore, lessThan(100 * 1024 * 1024));
   });
 
@@ -391,7 +393,10 @@ void main() {
     await tester.pumpWidget(
       appWith(
         MapigradeLayer(
-          styleUrl: demoStyleUrl,
+          // MapLibre parses a style URL again, and reports a second load, when
+          // it revalidates a stale cached style and the server returns it in
+          // full.
+          styleJson: redStyle,
           onStyleLoaded: () {
             loads++;
             if (!loaded.isCompleted) loaded.complete();

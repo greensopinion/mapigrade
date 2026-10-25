@@ -14,6 +14,8 @@ import 'package:test_harness/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'threads.dart';
+
 const demoStyleUrl = 'https://demotiles.maplibre.org/style.json';
 const unreachableStyleUrl = 'https://invalid.example.invalid/style.json';
 
@@ -355,37 +357,20 @@ void main() {
     // MapLibre's shared worker threads.
     await cycle();
     await Future<void>.delayed(const Duration(milliseconds: 500));
-    final before = processThreadCount();
-    final namesBefore = _threadNames();
+    final before = Threads();
     final footprintBefore = memoryFootprintForTesting();
     for (var i = 0; i < 50; i++) {
       await cycle();
     }
     await Future<void>.delayed(const Duration(milliseconds: 500));
-    final after = processThreadCount();
+    final after = Threads();
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);
     debugPrint(
-      'thread count: before $before, after 50 cycles $after; '
+      'thread count: before ${before.count}, after 50 cycles ${after.count}; '
       'memory footprint ${mib(footprintBefore)} MiB before, '
       '${mib(memoryFootprintForTesting())} MiB after',
     );
-    // A thread leaked by each cycle adds 50 threads. The Dart VM and Android
-    // start and stop threads of their own pools as needed, so the count may
-    // grow by a few: DartWorker and binder threads don't count, and two other
-    // threads are allowed. Thread names are read on Android only.
-    var poolThreadsAdded = 0;
-    if (after > before) {
-      final namesAfter = _threadNames();
-      final added = _subtract(namesAfter, namesBefore);
-      poolThreadsAdded = added
-          .where((name) => name == 'DartWorker' || name.startsWith('binder:'))
-          .length;
-      debugPrint(
-        'threads added: $added; '
-        'removed: ${_subtract(namesBefore, namesAfter)}',
-      );
-    }
-    expect(after - poolThreadsAdded, lessThanOrEqualTo(before + 2));
+    expectNoLeakedThreads(before, after);
   });
 
   testWidgets('dispose while rendering', (tester) async {
@@ -1248,28 +1233,4 @@ class _SelectingViewState extends State<_SelectingView> {
       slot: controller.selectedFrame?.slot ?? 0,
     );
   }
-}
-
-/// The names of the process's threads, from /proc/self/task/*/comm, on Android
-/// only; empty elsewhere.
-List<String> _threadNames() {
-  if (!Platform.isAndroid) return const [];
-  final names = <String>[];
-  for (final task in Directory('/proc/self/task').listSync()) {
-    try {
-      names.add(File('${task.path}/comm').readAsStringSync().trim());
-    } on FileSystemException {
-      // The thread exited while the directory was listed.
-    }
-  }
-  return names..sort();
-}
-
-/// The elements of [a] that [b] doesn't have, counting repeated names.
-List<String> _subtract(List<String> a, List<String> b) {
-  final rest = [...b];
-  return [
-    for (final name in a)
-      if (!rest.remove(name)) name,
-  ];
 }

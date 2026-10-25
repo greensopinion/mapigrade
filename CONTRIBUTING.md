@@ -83,6 +83,8 @@ flutter drive -d <iPhone id> --driver=test_driver/integration_test.dart \
 flutter test integration_test -d <Android id>
 ```
 
+On macOS, run `integration_test/engines_test.dart` with `flutter drive`, as its header describes, and the other files with one `flutter test` command each: after `engines_test.dart` has run under `flutter test`, the later files of a directory run fail to load with "Unable to start the app on the device". Start the builds for two devices one after the other: two builds of the test harness that start at the same time can fail, for example with a macOS build error about the minimum platform version of `FlutterGeneratedPluginSwiftPackage`. The static alignment test uses viewports 400 logical pixels wide, so run it on a phone at least that wide; on the iPhone 13 (390) every case fails.
+
 On Android the tests that need display times or plugin-owned display buffers are skipped, and each skip states its reason. On the emulator, "rapid camera updates do not build up a backlog" fails, because the emulator renders OpenGL ES in software; it passes on a device.
 
 The iOS and Android lifecycle tests use test hooks (`package:flutter_mapigrade/src/testing.dart`) that call the same functions as the background, foreground and memory warning handlers. The real notifications were checked on an iPhone (design D13, result). On Android, a test hook also makes Flutter remove the map's surface, as it does when the app goes to the background.
