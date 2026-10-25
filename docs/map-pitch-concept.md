@@ -1,6 +1,6 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; changes 1 to 4 done
+**Status:** Concept and decisions; changes 1 to 5 done
 **Updated:** 2026-10-25
 
 ## Current state
@@ -10,7 +10,8 @@
 - The demo's README video was made again with the pitched flyover (`packages/demo/build/readme_demo.mp4`) and is not uploaded.
 - Change 3 (`add-flutter-map-pitch-gestures`) is done and archived. Its code is commit `66b72e5` on the fork's local branch `map-pitch`, which is not pushed. In Chrome on macOS, Ctrl-click opens the browser's context menu; the fork documents that web applications that enable pitch disable it.
 - Change 4 (`pitch-camera-fit-and-constraints`) is done and archived. Its code is commit `a581ef2` on the fork's local branch `map-pitch`, which is not pushed. It also fixed the contain constraints, which change 1 had broken on pitched maps.
-- Next: decide how to approach the upstream PR (section 12), then change 5 (tile level of detail). Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
+- Change 5 (`add-flutter-map-tile-level-of-detail`) is done and archived; decisions 21 and 23 were revised during implementation. Its code is commit `979748d` on the fork's local branch `map-pitch`, which is not pushed. It also fixed a defect in `NetworkTileImageProvider`, in its own commit `e33cd10`: a tile whose URL matched an aborted load could show the aborted load's transparent image. Upstream PRs are not planned yet.
+- Next: change 6 (`limit-flutter-map-pitch-near-horizon`). Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 
@@ -160,7 +161,14 @@ Change 5 is planned before the upstream PR is accepted, because the maintainers 
 
 ### Change 5: `add-flutter-map-tile-level-of-detail` (fork)
 
-The tile layer chooses the tile zoom for each tile from its size on screen, so that far tiles are loaded at lower zooms. This removes most of the 7.5 times tile cost at 60° and is required before `maxPitch` can exceed 60°.
+The goal is lower latency, decoded image memory and data transferred for `TileLayer` users of the fork; the user experience comes before the number of tile server requests. mapigrade doesn't use `TileLayer`, because MapLibre Native draws its base map. The change is required before `maxPitch` can exceed 60°.
+
+- The tile layer loads the tiles that cover the visible ground, not its bounding box, with each tile's zoom chosen from its size on screen but not finer than today's (decision 21), so that far ground uses coarser tiles. On a Pixel-sized viewport at 60° and rotation 45°, that is 132 tiles today and 64 with the change, including the pan buffer.
+- One code path for every map: an unrotated, unpitched map loads, draws and prunes the same tiles as before, and a rotated, unpitched map no longer loads tiles beyond the buffer in the corners of the bounding box (decision 22).
+- `panBuffer` and `keepBuffer` are tiles around the visible ground, at each tile's zoom (decision 23).
+- No hysteresis in the zoom rule (decision 24).
+- Tiles load in order of their center's distance on screen from the viewport center (decision 25).
+- Culling, the zoom rule and the load order are one change, so that the upstream PR is one review; it is split only if the zoom rule turns out to be large or complex.
 
 ### Change 6: `limit-flutter-map-pitch-near-horizon` (fork)
 
@@ -191,6 +199,11 @@ The tile layer chooses the tile zoom for each tile from its size on screen, so t
 | 18 | MapLibre reference positions are generated through the FFI's `mln_map_pixel_for_lat_lng` | Decided | Uses the FFI build we already have, instead of C++ against `TransformState` |
 | 19 | While `maxPitch` is above 0, Ctrl-drag rotates with horizontal movement and pitches with vertical movement; no keyboard pitch keys | Decided (change 3) | Same as MapLibre GL JS; applications that keep `maxPitch` at 0 don't change |
 | 20 | The contain constraints ignore pitch and keep the unpitched viewport box inside their bounds | Decided (change 4) | Same as MapLibre GL JS; keeping the footprint inside would refuse pitch changes whenever the bounds are smaller than about 2.5 W × 3 H at 60° |
+| 21 | Each tile's zoom is `round(zoom + log2(scale))` at the tile's point nearest the camera, from the minimum native zoom to today's tile zoom | Decided (change 5) | Far tiles are drawn at most √2 times their native size and near tiles are as today; no more tiles than today for any camera. Without the limit to today's tile zoom, a zoom 0.45 above an integer loaded 10 to 25% more tiles than today; applications that need sharp near ground can use vector tiles |
+| 22 | One tile selection for every map; unrotated, unpitched maps load the same tiles as before | Decided (change 5) | Two code paths would have to be maintained; rotated maps load about 15% fewer off-screen tiles |
+| 23 | `panBuffer` and `keepBuffer` are the tiles around the visible ground, at each tile's own zoom | Decided (change 5) | Rings around every tile overlap the coarser covering tiles; at one zoom it is today's buffer |
+| 24 | No hysteresis in the tile zoom rule | Decided (change 5) | Switching back is served from tiles that are already kept; today's rounding of the zoom has none either |
+| 25 | Tiles load by their center's distance on screen from the viewport center | Decided (change 5) | Close to today's order at pitch 0; loads the center of the view first when pitched |
 
 ## 10. Risks
 
