@@ -1,7 +1,14 @@
 # Map pitch: concept
 
-**Status:** Concept and decisions; change 1 done and archived; change 2 implemented
+**Status:** Concept and decisions; changes 1 and 2 done
 **Updated:** 2026-10-24
+
+## Current state
+
+- Change 1 (`add-flutter-map-pitch-camera`) is done and archived. Its code is commit `04c3e14` on the fork's local branch `map-pitch` in `~/git/flutter_map`, which is not pushed.
+- Change 2 (`add-pitch`) is done on mapigrade's branch `map-pitch` and not yet archived. mapigrade resolves `flutter_map` to the fork through a path override in the root `pubspec.yaml`, which needs the fork checked out next to mapigrade.
+- The demo's README video was made again with the pitched flyover (`packages/demo/build/readme_demo.mp4`) and is not uploaded.
+- Next: archive change 2, then change 3 (pitch gesture) or change 4 (camera fit and constraints), written from section 8. Pushing the fork, contacting the fleaflet maintainers and uploading the video are public actions that need explicit approval first (section 12).
 
 ## 1. Purpose
 
@@ -83,7 +90,7 @@ A layer that paints in map pixels from `pixelOrigin` and `visibleBounds` works p
 
 The zoom is the scale at the center point (section 3), so changing the pitch doesn't change the zoom, and `minZoom`, `maxZoom` and zoom-dependent styling keep their meaning. Zoom behavior changes in these places:
 
-1. **Focal-point zoom.** Pinch-zoom, scroll-wheel zoom and double-tap zoom keep the ground point under the focal point fixed. Pitched, the focal point's ground point is found by ray-casting, the zoom is changed, the ground point under the focal point is found again, and the center is moved by the difference. This is exact because moving the center only translates the projection in Mercator pixel space. When the focal point is above the horizon, the zoom is around the center point. Near the horizon, small focal-point movements map to large ground distances; change 3 handles that. The same ray-casting applies to the rotate gesture, drag, fling and the controller's screen-offset methods (section 8, change 1).
+1. **Focal-point zoom.** Pinch-zoom, scroll-wheel zoom and double-tap zoom keep the ground point under the focal point fixed. Pitched, the focal point's ground point is found by ray-casting, the zoom is changed, the ground point under the focal point is found again, and the center is moved by the difference. This is exact because moving the center only translates the projection in Mercator pixel space. When the focal point is above the horizon, the zoom is around the center point. Near the horizon, small focal-point movements map to large ground distances; change 6 handles that. The same ray-casting applies to the rotate gesture, drag, fling and the controller's screen-offset methods (section 8, change 1).
 2. **Pitch gesture and pinch-zoom.** A two-finger gesture can be zoom, rotate, move or pitch. Change 3 decides how they are told apart.
 3. **Fit and constraints.** `CameraFit.bounds` and `CameraConstraint` assume a rectangular visible area. Change 4 makes them use the footprint.
 4. **Tile zoom.** `TileLayer` chooses one tile zoom from the camera zoom. At 60°, near tiles are drawn 1.5 times larger (slightly blurred) and far tiles 2.5 times smaller (more tiles than needed). We accept both until tile level of detail.
@@ -107,6 +114,7 @@ We split the work so that the projection is verified against MapLibre before the
 | 3 | `add-flutter-map-pitch-gestures` | fork | 1, verified by 2 |
 | 4 | `pitch-camera-fit-and-constraints` | fork | 1 |
 | 5 | `add-flutter-map-tile-level-of-detail` | fork | 1 |
+| 6 | `limit-flutter-map-pitch-near-horizon` | fork | 1, 5 |
 
 Change 5 is planned before the upstream PR is accepted, because the maintainers may require it (decision 12). When we open the PR, and how we split it, is open (section 12).
 
@@ -135,11 +143,12 @@ Change 5 is planned before the upstream PR is accepted, because the maintainers 
 ### Change 3: `add-flutter-map-pitch-gestures` (fork)
 
 - `InteractiveFlag.pitch`, included in `InteractiveFlag.all`; it has no effect while `maxPitch` is 0. Pitch gesture events use the existing multi-finger `MapEventSource` values (section 11).
-- Two-finger vertical drag changes the pitch: both fingers move vertically in the same direction, and the line between them is near horizontal. This is MapLibre's rule.
+- Two-finger vertical drag changes the pitch: both fingers move vertically in the same direction, and the line between them is near horizontal. This is MapLibre's rule. `ScaleUpdateDetails` has only the focal point, so the viewer records each pointer's position in its `Listener`.
+- The pitch changes by 0.5° per px of vertical movement, as on iOS and in GL JS, and moving up increases it. The pitch pivots on the viewport center, so the center and the zoom don't change, as with `MapController.pitch`.
 - A threshold for the pitch gesture, alongside `rotationThreshold`, `pinchZoomThreshold` and `pinchMoveThreshold`.
-- Decide whether a recognized pitch gesture locks out zoom, rotate and move for the rest of the gesture. MapLibre locks them out; we propose the same, so that a pitch drag doesn't also zoom.
-- Focal point or pointer near or above the horizon: limit the ground distance that a focal-point or drag movement can cause, as MapLibre does. Change 1 already anchors zoom, rotation, drag and fling on the ground; change 3 adds only this limit and the pitch gesture.
-- Keyboard and cursor pitch, if `flutter_map`'s keyboard options are extended.
+- While `maxPitch` is above 0, a two-finger gesture holds back zoom, rotate and move until the pitch gesture is recognized or ruled out, with or without `enableMultiFingerGestureRace`. A recognized pitch gesture locks them out for the rest of the gesture (decision 13).
+- Ctrl-drag (cursor/keyboard rotation) while `maxPitch` is above 0: horizontal movement rotates and vertical movement pitches, as in GL JS. `CursorRotationBehaviour` and `setNorthOnClick` have no effect in this mode. At `maxPitch` 0, Ctrl-drag is unchanged. The rates are taken from GL JS's source; from memory, 0.8° per px for rotation and 0.5° per px for pitch.
+- No keyboard pitch keys. A trackpad gives Flutter no per-finger positions, only a combined pan, scale and rotation, so it has no pitch gesture; on macOS, Ctrl-drag pitches.
 
 ### Change 4: `pitch-camera-fit-and-constraints` (fork)
 
@@ -150,6 +159,11 @@ Change 5 is planned before the upstream PR is accepted, because the maintainers 
 ### Change 5: `add-flutter-map-tile-level-of-detail` (fork)
 
 The tile layer chooses the tile zoom for each tile from its size on screen, so that far tiles are loaded at lower zooms. This removes most of the 7.5 times tile cost at 60° and is required before `maxPitch` can exceed 60°.
+
+### Change 6: `limit-flutter-map-pitch-near-horizon` (fork)
+
+- Focal point or pointer near or above the horizon: limit the ground distance that a focal-point, drag or fling movement can cause, as MapLibre does. Change 1 already anchors zoom, rotation, drag and fling on the ground; change 6 adds only this limit.
+- The limit is needed only when `maxPitch` exceeds 60°, which requires change 5. The horizon is in the viewport only above a pitch of 90° − fov / 2 = 71.57°. At 60°, a 1 px vertical drag at the top edge moves the ground about 11 projected px, compared with 2 px at the center: large, but bounded and correct.
 
 ## 9. Decisions
 
@@ -167,12 +181,13 @@ The tile layer chooses the tile zoom for each tile from its size on screen, so t
 | 10 | Layer canvas covers the footprint's bounding box, not centered on the center point | Decided | About 1.6 times smaller at 60°; avoids points behind the camera (section 4), although the spike showed that Flutter paints those correctly |
 | 11 | Branch the fork from `upstream/master` | Decided | Base for the upstream PR |
 | 12 | Single tile zoom until tile level of detail (change 5) | Decided | Correct, at 7.5 times the tiles at 60°; change 5 is planned before the upstream PR is accepted, because the maintainers may require it |
-| 13 | A recognized pitch gesture locks out other two-finger gestures | Proposed (change 3) | Same as MapLibre |
+| 13 | A recognized pitch gesture locks out other two-finger gestures | Decided (change 3) | Same as MapLibre |
 | 14 | Only additive API changes in `flutter_map`, in all four changes (section 11) | Decided | Applications and plugins upgrade without changes |
 | 15 | `pitch` is a member of the `MapController` interface | Decided | `MapController` is abstract to hide `MapControllerImpl`; a GitHub code search found almost no other implementations, and mocks are unaffected |
 | 16 | One branch `map-pitch` in each repository; mapigrade's override pins a commit of the fork's `map-pitch` | Decided | One line of work per repository; reproducible mapigrade builds |
 | 17 | Pitch-0 compatibility is checked by geometry assertions in the fork's tests, and by golden tests kept out of the upstream PR | Decided | Upstream has no golden tests, and golden images differ between platforms |
 | 18 | MapLibre reference positions are generated through the FFI's `mln_map_pixel_for_lat_lng` | Decided | Uses the FFI build we already have, instead of C++ against `TransformState` |
+| 19 | While `maxPitch` is above 0, Ctrl-drag rotates with horizontal movement and pitches with vertical movement; no keyboard pitch keys | Decided (change 3) | Same as MapLibre GL JS; applications that keep `maxPitch` at 0 don't change |
 
 ## 10. Risks
 
@@ -188,7 +203,7 @@ The tile layer chooses the tile zoom for each tile from its size on screen, so t
 Every change to `flutter_map` is additive (decision 14), so that code written for the current release compiles unchanged and, at pitch 0, behaves the same. These rules apply to changes 1, 3, 4 and 5:
 
 - New parameters are optional, with defaults that keep current behavior: `MapOptions.initialPitch`, `MapOptions.maxPitch`, the `MapCamera` constructor's `pitch`, and the pitch gesture's `InteractionOptions`.
-- No new `MapEventSource` values: an exhaustive `switch` on an enum stops compiling when a value is added, and upstream added values only in major releases (`keyboard` in v8.0.0). Pitch changes use `mapController`; the pitch gesture uses `multiFingerGestureStart`, `onMultiFinger` and `multiFingerEnd`; keyboard pitch uses `keyboard`.
+- No new `MapEventSource` values: an exhaustive `switch` on an enum stops compiling when a value is added, and upstream added values only in major releases (`keyboard` in v8.0.0). Pitch changes use `mapController`; the pitch gesture uses `multiFingerGestureStart`, `onMultiFinger` and `multiFingerEnd`; Ctrl-drag pitch uses `cursorKeyboardRotation`.
 - New `MapEvent` subclasses are allowed: `MapEvent` is `abstract`, not `sealed`.
 - No new abstract members on `CameraFit` or `CameraConstraint`, which applications subclass. Change 4 changes only the built-in implementations.
 - Existing method signatures don't change. `screenOffsetToLatLng` stays non-nullable; a new method returns null above the horizon.
@@ -204,5 +219,5 @@ These don't block change 1:
 - When to contact the fleaflet maintainers, for example with an issue or discussion about the API, and how to split the upstream PRs. Change 1 alone is large. Both are decided later, and each public action needs explicit approval first.
 - Non-Mercator CRSs. Pitch works in projected pixel space, so they should work, but the MapLibre reference tests cover only EPSG:3857.
 - Polyline simplification near the bottom edge, where the 1.5 times magnification at 60° may make the simplification visible.
-- A pitched flyover in the demo. While the flyover follows a route, the camera should pitch, like a drone behind the rider, to make it look better. This changes the demo app's flyover requirement and the README recording, so it needs its own change after change 2.
+- Done in change 2: a pitched flyover in the demo, which pitches the camera to 50 degrees while it follows a route.
 - Markers that lie on the ground. Every marker faces the viewer (section 5), so a marker can't be drawn flat on the map, for example a direction arrow on a road. MapLibre offers both through pitch alignment: `icon-pitch-alignment` in the style spec, and `pitchAlignment` (`map` or `viewport`) on GL JS's `Marker`. #1273 had the same choice as `applyPitch`. A pitch-alignment option on `MarkerLayer` or `Marker` would be additive (section 11).

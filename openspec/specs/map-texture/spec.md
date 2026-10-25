@@ -33,10 +33,10 @@ The system SHALL load a map style from a URL or from a JSON string. It SHALL rep
 - **THEN** the map renders using the second style
 
 ### Requirement: Camera control
-The system SHALL set the map camera from Dart, using center latitude and longitude, zoom, and bearing. When Dart sends camera updates faster than the map renders, the system SHALL render the most recent camera; it is not required to render intermediate cameras. A camera update SHALL NOT block the Dart caller until a frame renders.
+The system SHALL set the map camera from Dart, using center latitude and longitude, zoom, bearing, and pitch. When Dart sends camera updates faster than the map renders, the system SHALL render the most recent camera; it is not required to render intermediate cameras. A camera update SHALL NOT block the Dart caller until a frame renders.
 
 #### Scenario: Camera change is displayed
-- **WHEN** a Dart caller sets the camera to a known center, zoom and bearing
+- **WHEN** a Dart caller sets the camera to a known center, zoom, bearing and pitch
 - **THEN** a later displayed frame shows the map at that camera
 
 #### Scenario: Rapid camera updates
@@ -59,7 +59,7 @@ The system SHALL render the map at the widget's logical size multiplied by the d
 - **THEN** after the rotation, the map fills the widget's new bounds without stretching, and features keep their size in logical pixels
 
 ### Requirement: Camera of each displayed frame
-The system SHALL report to Dart the camera (center, zoom, bearing) and viewport size that each frame was rendered with. The report SHALL identify the frame, so that Dart can tell which camera a frame corresponds to. On macOS and iOS, the system SHALL send the report when Flutter takes the frame for display, and the report SHALL include the time at which Flutter took it, on the same clock as Flutter's frame timings, so that Dart can match the frame to the Flutter frame that displayed it. On Android, the system SHALL send the report when Dart chooses the frame for display (requirement "Display slots"), and the report SHALL have no display time. Each camera update from Dart SHALL carry a sequence number, and the report SHALL include the sequence number of the camera update that the frame was rendered with. The system SHALL also report each frame when it has finished rendering, before Flutter displays it, with the same camera, viewport size, identifier and sequence number, and with the display slot that holds it.
+The system SHALL report to Dart the camera (center, zoom, bearing, pitch) and viewport size that each frame was rendered with. The report SHALL identify the frame, so that Dart can tell which camera a frame corresponds to. On macOS and iOS, the system SHALL send the report when Flutter takes the frame for display, and the report SHALL include the time at which Flutter took it, on the same clock as Flutter's frame timings, so that Dart can match the frame to the Flutter frame that displayed it. On Android, the system SHALL send the report when Dart chooses the frame for display (requirement "Display slots"), and the report SHALL have no display time. Each camera update from Dart SHALL carry a sequence number, and the report SHALL include the sequence number of the camera update that the frame was rendered with. The system SHALL also report each frame when it has finished rendering, before Flutter displays it, with the same camera, viewport size, identifier and sequence number, and with the display slot that holds it.
 
 #### Scenario: Frame camera is reported
 - **WHEN** a new frame becomes available for display

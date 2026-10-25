@@ -30,7 +30,7 @@ The system SHALL provide a layer that an application places among the children o
 - **THEN** the map renders using the new style, the handler for loaded styles is called again, and the layer creates no other map
 
 ### Requirement: Map follows the flutter_map camera
-The system SHALL set the map camera from the `flutter_map` camera whenever the `flutter_map` camera changes. The MapLibre zoom SHALL be the `flutter_map` zoom minus 1, the MapLibre bearing SHALL be the negated `flutter_map` rotation, and the map viewport SHALL be the size of the `flutter_map` viewport before rotation. Pitch SHALL be 0. In the camera prediction mode the system SHALL set the predicted camera instead (requirement "Camera prediction").
+The system SHALL set the map camera from the `flutter_map` camera whenever the `flutter_map` camera changes. The MapLibre zoom SHALL be the `flutter_map` zoom minus 1, the MapLibre bearing SHALL be the negated `flutter_map` rotation, the MapLibre pitch SHALL be the `flutter_map` pitch, and the map viewport SHALL be the size of the `flutter_map` viewport before rotation. In the camera prediction mode the system SHALL set the predicted camera instead (requirement "Camera prediction").
 
 #### Scenario: Camera change
 - **WHEN** the `flutter_map` camera changes through a gesture or a camera controller call
@@ -43,6 +43,10 @@ The system SHALL set the map camera from the `flutter_map` camera whenever the `
 #### Scenario: Rotated map
 - **WHEN** the `flutter_map` rotation is 30 degrees
 - **THEN** the map is rotated by the same angle in the same direction as the overlays, and fills the viewport without empty corners when the camera is at rest
+
+#### Scenario: Pitched map
+- **WHEN** the `flutter_map` pitch is 45 degrees
+- **THEN** a later displayed map frame reports pitch 45, and the map is tilted by the same angle in the same direction as the overlays
 
 ### Requirement: Alignment at rest
 When the camera is at rest and the map has displayed a frame for it, a geographic coordinate SHALL appear at the same screen position in the map and in `flutter_map` overlays, within 1 logical pixel.
@@ -59,8 +63,12 @@ When the camera is at rest and the map has displayed a frame for it, a geographi
 - **WHEN** the `flutter_map` viewport is resized and the camera is then at rest
 - **THEN** the markers meet the 1 logical pixel limit at the new size
 
+#### Scenario: Pitched map
+- **WHEN** the static alignment check runs at pitch 30 and 60, with rotation 0 and 30, with a `flutter_map` marker, which faces the viewer, at the coordinate where the style draws a marker
+- **THEN** each case meets the 1 logical pixel limit
+
 ### Requirement: Camera prediction
-The system SHALL provide a camera prediction mode for the layer, with a lead given as a number of display refresh intervals. The layer SHALL provide one alignment option with two values: camera prediction at a stated lead, or no alignment. Camera prediction with a lead of 1 SHALL be the layer's default. In the prediction mode the system SHALL set the map camera to the converted `flutter_map` camera extrapolated by the lead from the camera's velocity over the last Flutter frames, for center, zoom and bearing. When the `flutter_map` camera hasn't changed since the previous Flutter frame, the predicted camera SHALL equal the converted camera. With either value, the system SHALL draw the displayed map frame at the position of the layer, without moving, scaling or rotating it.
+The system SHALL provide a camera prediction mode for the layer, with a lead given as a number of display refresh intervals. The layer SHALL provide one alignment option with two values: camera prediction at a stated lead, or no alignment. Camera prediction with a lead of 1 SHALL be the layer's default. In the prediction mode the system SHALL set the map camera to the converted `flutter_map` camera extrapolated by the lead from the camera's velocity over the last Flutter frames, for center, zoom, bearing and pitch. The predicted pitch SHALL be limited to the range from 0 to 60 degrees. When the `flutter_map` camera hasn't changed since the previous Flutter frame, the predicted camera SHALL equal the converted camera. With either value, the system SHALL draw the displayed map frame at the position of the layer, without moving, scaling or rotating it.
 
 #### Scenario: Default layer
 - **WHEN** an application places the layer without configuring its alignment, and the `flutter_map` camera pans at a constant speed
@@ -81,6 +89,10 @@ The system SHALL provide a camera prediction mode for the layer, with a lead giv
 #### Scenario: No alignment
 - **WHEN** the layer is configured with no alignment, and the `flutter_map` camera moves
 - **THEN** the map camera is the converted camera, the displayed map frame is drawn at the position of the layer, and no strips are uncovered at the viewport edges
+
+#### Scenario: Pitch change
+- **WHEN** the prediction mode is on with a lead of n refresh intervals, and the `flutter_map` pitch changes at a constant rate
+- **THEN** the pitch the map renders is ahead of the converted pitch by n refresh intervals of that change, and is never above 60 degrees
 
 ### Requirement: Alignment measurement
 The system SHALL provide a measurement mode that records, for each Flutter frame during camera changes, the map frame that Flutter displayed and the `flutter_map` camera. From these it SHALL compute the alignment error in logical pixels: the largest distance at the viewport corners and center between where the displayed map frame, as the layer draws it, draws a coordinate and where the overlays draw it. The measurement mode SHALL run with the layer configured with camera prediction at a stated lead or with no alignment, and with the overlays placed after the layer or as its children, and SHALL report the configuration. With the overlays as children, the overlays SHALL be drawn at the camera the layer gives its children, and the measurement mode SHALL also report the lag: the distance at the viewport center between where the displayed map frame draws a coordinate and where the live `flutter_map` camera places it. The measurement mode SHALL include phases in which the pan stops abruptly, decelerates as a `flutter_map` fling does, and reverses direction, and for these SHALL report the overshoot: the largest alignment error from the moment the camera's motion changes (an abrupt stop, the start of a deceleration, or a reversal) until half a second after the camera is at rest or moves at constant speed again, and the overshoot ahead: over the same time, the largest distance at the viewport center by which the drawn map is ahead of the overlays in the direction of motion before the change, or 0 if it isn't ahead. With the overlays as children, the overshoot ahead SHALL be measured against the live `flutter_map` camera instead of the overlays.
@@ -265,3 +277,7 @@ The layer SHALL draw its children at the `flutter_map` camera that the displayed
 #### Scenario: Android
 - **WHEN** on the reference Android device the layer has a route and markers as children, and a tester pans and flings the map by hand
 - **THEN** the route and the markers stay on the map in every Flutter frame, as the tester judges by eye
+
+#### Scenario: Pan with children on a pitched map
+- **WHEN** the `flutter_map` pitch is 45 degrees, a polyline layer is a child of the layer, and the `flutter_map` camera pans at 1,000 logical px/s
+- **THEN** in each Flutter frame the polyline and the same line drawn by the style are at most 1 logical pixel apart
