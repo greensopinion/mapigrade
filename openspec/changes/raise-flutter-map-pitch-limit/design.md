@@ -70,6 +70,14 @@ We chose no new API (user decision, 2026-10-25); an application that wants a sky
 - The tile harness of change 5 (`~/git/tile-lod-harness`) on the Pixel at 70, 80 and 85°: tile requests, decoded memory, load time and frame time.
 - In mapigrade: the static alignment check at pitch 85, and the demo's 3D view on the Mac and the iPhone.
 
+### 8. Polygons behind the camera
+
+Flutter 3.27's renderer fills nothing of a path that has a vertex behind the camera, so a polygon that reaches behind the camera disappears; newer releases clip it. The polygon painter therefore clips each ring, in canvas coordinates, to the half-plane where the perspective divisor is at least half of its value at the bottom edge of the viewport. The divisor is linear in canvas coordinates, so the boundary is a straight line; every visible ground point is in front of it, and the boundary projects below the viewport, so the edges that the clip adds are not on screen. A polygon that needs clipping is filled through its path instead of its precomputed triangles. At pitch 0, and for polygons entirely in front of the line, nothing changes. `MobileLayerTransformer`'s clip (decision 3) still limits the drawing to the visible ground.
+
+Polylines aren't clipped. The polyline painter already limits its segments to the layer canvas, which on most viewports contains no ground behind the camera; on a wide viewport (2000 × 300 at rotation 45) it does, but Flutter 3.27 draws solid and dotted polylines that reach behind the camera correctly, so a clip would change nothing that a test can show.
+
+This fixes a defect that exists since pitch was added, so it is its own commit, and PR, on top of the far limit's.
+
 ## Risks / Trade-offs
 
 - [Clipping every ground layer costs raster time] → A hard-edged clip to a quadrilateral; measured with the harness's frame times at 60° and 85°.
@@ -83,3 +91,48 @@ We chose no new API (user decision, 2026-10-25); an application that wants a sky
 ### Static alignment on the Mac, 2026-10-25
 
 `static_alignment_test.dart` on macOS, with two cases added: pitch 85 with the point at (300, 200), and pitch 85, rotation 30 with the point at (100, 135), 18 px below the far limit at 116.6 px. The test now also waits for a displayed frame with the case's pitch. All 26 tests passed. Both 85° cases were within 0.066 logical px, with the overlay after the layer and as a child of it; the other cases gave the same distances as before (at most 0.042 px).
+
+### Device check on the Mac, 2026-10-26
+
+The fork example's Pitch page and the demo's 3D view on the Mac, in profile mode. On the Pitch page, at pitch 85 and rotation near 90, the marker layer froze the app: the copies of a marker in other worlds converge to the horizon, which is in the viewport above a pitch of about 71.6°, so its loop over worlds never ended and the Dart heap grew to 16 GB. The polygon label painter has the same loop; its guard threw after 30 worlds. Both now cull a point above the far limit, as decision 3 requires, and `far_limit_layers_test.dart` covers both at rotation 90. The label of the Pitch page's polygon turned with the map's rotation, which at 85° doesn't match the direction of the ground on screen; the page now sets `rotateLabel`. After the fixes, the user found the Pitch page correct. The demo's 3D view at 85° also looked right.
+
+### Device check on the iPhone 13, 2026-10-26
+
+The demo's 3D view at 85° and the fork example's Pitch page, in profile mode, with the fixes above: the user found both correct, including the far limit, the absence of gaps below it, and gestures near it.
+
+### Tile harness on the Pixel, 2026-10-26
+
+Harness: `~/git/tile-lod-harness`, as in change 5, with the pitches 70, 80 and 85 and the frame times at 60 and 85 (`--dart-define=PITCHES=70,80,85 --dart-define=FRAME_PITCHES=60,85`), and `maxPitch` 85, on the Pixel 4a (5G) in profile mode, with the fork's working tree including the marker and label fixes. Each row is one run; the columns are as in change 5's measurements.
+
+| Retina | Zoom | Pitch | Rotation | Requests | Decoded MB | Load ms |
+|---|---|---|---|---|---|---|
+| off | 14.0 | 70 | 0 | 120 | 30.0 | 2272 |
+| off | 14.0 | 70 | 45 | 197 | 44.0 | 3418 |
+| off | 14.0 | 80 | 0 | 132 | 33.0 | 2544 |
+| off | 14.0 | 80 | 45 | 222 | 49.2 | 3694 |
+| off | 14.0 | 85 | 0 | 111 | 27.8 | 2124 |
+| off | 14.0 | 85 | 45 | 171 | 40.5 | 3062 |
+| off | 14.45 | 70 | 0 | 103 | 25.8 | 2009 |
+| off | 14.45 | 70 | 45 | 184 | 42.5 | 3139 |
+| off | 14.45 | 80 | 0 | 109 | 27.2 | 2182 |
+| off | 14.45 | 80 | 45 | 192 | 43.2 | 3173 |
+| off | 14.45 | 85 | 0 | 86 | 21.5 | 1675 |
+| off | 14.45 | 85 | 45 | 148 | 35.0 | 2656 |
+| on | 14.0 | 70 | 0 | 273 | 68.2 | 5419 |
+| on | 14.0 | 70 | 45 | 493 | 94.8 | 7364 |
+| on | 14.0 | 80 | 0 | 280 | 70.0 | 5870 |
+| on | 14.0 | 80 | 45 | 508 | 100.0 | 7734 |
+| on | 14.0 | 85 | 0 | 226 | 56.5 | 4148 |
+| on | 14.0 | 85 | 45 | 391 | 81.5 | 6180 |
+| on | 14.45 | 70 | 0 | 241 | 60.2 | 5085 |
+| on | 14.45 | 70 | 45 | 449 | 88.2 | 6780 |
+| on | 14.45 | 80 | 0 | 256 | 64.0 | 4982 |
+| on | 14.45 | 80 | 45 | 471 | 91.8 | 6772 |
+| on | 14.45 | 85 | 0 | 201 | 50.2 | 3904 |
+| on | 14.45 | 85 | 45 | 353 | 73.2 | 5434 |
+
+Frame times while rotating from 0° to 90° at zoom 14.45, without retina mode: at pitch 60, build 3.99 ms median and 4.32 ms 90th percentile, raster 5.58 ms median and 6.40 ms 90th percentile, 362 frames, 36 tile requests; at pitch 85, build 5.60 and 6.62 ms, raster 3.46 and 5.07 ms, 375 frames, 76 tile requests.
+
+- At 85° the cover is smaller than at 80°, because the far limit ends the visible ground: 14% to 23% fewer requests than at 80°.
+- At zoom 14.0, rotation 45 and retina mode, the decoded tiles at 80° filled Flutter's default image cache of 100 MB, and at 70° nearly did.
+- The raster time at 60° is 5.58 ms median, where change 5 measured 2.9 ms on 2026-10-25 with the same harness. The runs are from different days, so the difference isn't attributed to the clip of decision 3 without a same-day comparison. Frames still complete within a 16.7 ms frame budget at 60 Hz.

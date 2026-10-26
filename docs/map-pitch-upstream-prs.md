@@ -1,6 +1,6 @@
 # Map pitch: upstream PR plan
 
-This plan covers opening one PR in [fleaflet/flutter_map](https://github.com/fleaflet/flutter_map) for each commit on the fork's branch `map-pitch` (`~/git/flutter_map`), stacked in commit order. All seven PRs were opened on 2026-10-25 (see [Branches](#branches)). Every step that pushes, opens or edits something on GitHub needs explicit approval first.
+This plan covers opening one PR in [fleaflet/flutter_map](https://github.com/fleaflet/flutter_map) for each commit on the fork's branch `map-pitch` (`~/git/flutter_map`), stacked in commit order. PRs 1 to 7 were opened on 2026-10-25, and PRs 8 and 9 on 2026-10-26 (see [Branches](#branches)). Every step that pushes, opens or edits something on GitHub needs explicit approval first.
 
 ## State before the PRs were opened (2026-10-25)
 
@@ -35,6 +35,8 @@ Each branch is in fleaflet/flutter_map. Every commit after `219a744` is the `map
 | 5 | `pitch-5-tile-level-of-detail` | `fe8e4f4` (`979748d` rebased onto `84b22ed`); opened as [#2287](https://github.com/fleaflet/flutter_map/pull/2287) into `pitch-4-aborted-tile-loads` on 2026-10-25, added to stack #2284 |
 | 6 | `pitch-6-tile-cover-once` | `72068fe` (`76d0633` rebased onto `fe8e4f4`); opened as [#2288](https://github.com/fleaflet/flutter_map/pull/2288) into `pitch-5-tile-level-of-detail` on 2026-10-25, added to stack #2284. Title `perf: compute the tile cover once per camera` |
 | 7 | `pitch-7-remove-tile-range-calculator` | `79a686f` (`03cfd00` rebased onto `72068fe`); opened as [#2289](https://github.com/fleaflet/flutter_map/pull/2289) into `pitch-6-tile-cover-once` on 2026-10-25, added to stack #2284. Title `refactor: remove TileRangeCalculator, which the tile cover replaced`; the commit has no body, so the description is the dependency note and the AI disclosure |
+| 8 | `pitch-8-raise-pitch-limit` | `88fd291`, on `79a686f`; opened as [#2291](https://github.com/fleaflet/flutter_map/pull/2291) into `pitch-7-remove-tile-range-calculator` on 2026-10-26, added to stack #2284. From the change `raise-flutter-map-pitch-limit` |
+| 9 | `pitch-9-polygons-behind-camera` | `2c6b5cd`, on `88fd291`; opened as [#2292](https://github.com/fleaflet/flutter_map/pull/2292) into `pitch-8-raise-pitch-limit` on 2026-10-26, added to stack #2284. Fixes polygons that reach behind the camera, which Flutter 3.27 didn't draw (design decision 8 of `raise-flutter-map-pitch-limit`) |
 
 ## PRs
 
@@ -144,6 +146,18 @@ I wrote this with Claude Code (Claude Opus 5.5). I directed the design,
 reviewed the code, and tested it on a Mac, an iPhone 13, an iPhone 15 Pro
 Max, a Pixel 4a (5G), and in Chrome.
 ```
+
+### PR 8
+
+**Title:** `feat: raise the pitch limit to 85° with a far limit of the visible ground`
+
+**Description:** the commit body, the dependency note on #2289, and the AI disclosure, which lists the Mac and the iPhone 13 that the change was tested on, and the Pixel 4a (5G) that it was measured on.
+
+### PR 9
+
+**Title:** `fix: draw polygons that reach behind the camera`
+
+**Description:** the commit body, the dependency note on #2291, and the AI disclosure, which says that it was tested on Flutter 3.27.0 and the current release.
 
 ## Steps
 

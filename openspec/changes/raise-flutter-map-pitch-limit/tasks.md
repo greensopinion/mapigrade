@@ -20,11 +20,18 @@
 
 - [x] 4.1 Update the documentation of `MapOptions.maxPitch` and `pitchLimit` and the example's Pitch page (limit 85, the far limit, the background color above it); verify `dart doc` reports no new warnings
 - [x] 4.2 Run `flutter analyze` and `flutter test` on the fork's branch; verify both pass
-- [ ] 4.3 Run the tile harness on the Pixel at pitch 70, 80 and 85, and the frame times at 60 and 85; record the results in design.md and terminate the harness afterwards
+- [x] 4.3 Run the tile harness on the Pixel at pitch 70, 80 and 85, and the frame times at 60 and 85; record the results in design.md and terminate the harness afterwards
 
 ## 5. mapigrade
 
 - [x] 5.1 Set MapLibre Native's maximum pitch to `fm.MapOptions.pitchLimit` with `mln_map_set_bounds` when `flutter_mapigrade` creates a map (design decision 6); verify a test that a map frame at pitch 85 reports pitch 85, for the scenario "Pitch above 60"
 - [x] 5.2 Update the camera prediction and 3D view tests and documentation that state 60 degrees; verify the `flutter_mapigrade` and demo tests pass, including the scenario "Pitch change" with a maximum of 85
 - [x] 5.3 Run the static alignment check at pitch 85 on the Mac; record the result in design.md
-- [ ] 5.4 Ask the user to check the demo's 3D view at 85° on the Mac and the iPhone, and the fork example's Pitch page on the iPhone, for the far limit, gaps and gesture behavior near it; record the result in design.md
+- [x] 5.4 Ask the user to check the demo's 3D view at 85° on the Mac and the iPhone, and the fork example's Pitch page on the iPhone, for the far limit, gaps and gesture behavior near it; record the result in design.md
+
+## 6. Geometry behind the camera
+
+- [x] 6.1 Change the far limit's pixel test of a polygon beyond the far limit so that the polygon is in front of the camera, and amend the far limit's commit; verify `flutter test` passes on current Flutter and on Flutter 3.27.0
+- [x] 6.2 Clip polygon rings at the line of design decision 8 in the polygon painter; verify unit tests of the clip, a widget test that a polygon reaching behind the camera at pitch 85 is drawn below the far limit at the positions that the pitched projection gives, that it fails on Flutter 3.27.0 without the clip, and that the tests pass on current Flutter and on Flutter 3.27.0
+- [x] 6.3 Run upstream CI's checks (format, analyze with fatal infos and warnings, tests, pana) on current Flutter and the tests on Flutter 3.27.0 for both commits
+
