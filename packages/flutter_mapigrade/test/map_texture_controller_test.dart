@@ -32,7 +32,7 @@ void main() {
     nativeLibraryAvailableOverride = false;
     final calls = mockChannel(() async => 1);
     await expectLater(
-      MapTextureController.create(pixelRatio: 1),
+      MapTextureController.create(pixelRatio: 1, maxPitch: 85),
       throwsA(
         isA<MapTextureException>().having(
           (e) => e.message,

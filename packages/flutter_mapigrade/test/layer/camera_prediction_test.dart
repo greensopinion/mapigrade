@@ -214,11 +214,11 @@ void main() {
     expect(predictLast(cameras), closeCamera(view(0, 10, 12, pitch: 32)));
   });
 
-  test('the predicted pitch is limited to 60 degrees', () {
+  test('the predicted pitch is limited to the pitch limit, 85 degrees', () {
     final cameras = [
-      for (var i = 0; i < 5; i++) view(0, 10, 12, pitch: 51 + 2.0 * i),
+      for (var i = 0; i < 5; i++) view(0, 10, 12, pitch: 76 + 2.0 * i),
     ];
-    expect(predictLast(cameras), closeCamera(view(0, 10, 12, pitch: 60)));
+    expect(predictLast(cameras), closeCamera(view(0, 10, 12, pitch: 85)));
   });
 
   test('the predicted latitude is clamped to the Mercator limit', () {

@@ -52,7 +52,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Returns null on failure and sets `out_error`.
   static std::shared_ptr<MapTexture> Create(
       int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
-      std::optional<uint64_t> maximum_cache_size,
+      double max_pitch, std::optional<uint64_t> maximum_cache_size,
       std::vector<HttpHeaderRule> header_rules,
       map_texture_event_callback callback, std::string* out_error);
 
@@ -144,7 +144,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
  private:
   MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
-             std::optional<uint64_t> maximum_cache_size,
+             double max_pitch, std::optional<uint64_t> maximum_cache_size,
              std::vector<HttpHeaderRule> header_rules,
              map_texture_event_callback callback);
 
@@ -276,6 +276,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   const int64_t handle_;
   const int64_t engine_;
   const double initial_pixel_ratio_;
+  const double max_pitch_;
   const std::optional<uint64_t> maximum_cache_size_;
 
   // Fixed after the constructor. The runtime copies them into its native

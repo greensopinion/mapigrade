@@ -31,6 +31,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(MapTextureView(controller: controller));
@@ -93,6 +94,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     final size = ValueNotifier(const Size(200, 200));
     await tester.pumpWidget(

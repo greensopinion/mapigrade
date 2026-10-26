@@ -142,6 +142,22 @@ const cases = [
     rotation: 30,
     pitch: 60,
   ),
+  AlignmentCase(
+    'pitch 85 degrees',
+    LatLng(48.85, 2.35),
+    12.5,
+    pitch: 85,
+    pointAt: Offset(300, 200),
+  ),
+  // The far limit of the visible ground is at y 116.6.
+  AlignmentCase(
+    'pitch 85 and rotation 30 degrees, near the far limit',
+    LatLng(48.85, 2.35),
+    12.5,
+    rotation: 30,
+    pitch: 85,
+    pointAt: Offset(100, 135),
+  ),
 ];
 
 void main() {
@@ -276,6 +292,7 @@ Future<void> _waitForDisplayedCamera(
       (f.camera.longitude - camera.center.longitude).abs() < 1e-9 &&
       (f.camera.zoom - (camera.zoom - 1)).abs() < 1e-9 &&
       (f.camera.bearing + camera.rotation).abs() < 1e-6 &&
+      (f.camera.pitch - camera.pitch).abs() < 1e-6 &&
       (f.physicalSize / f.scaleFactor - size as Offset).distance < 0.5;
   final deadline = DateTime.now().add(const Duration(seconds: 20));
   while (!matches(controller.displayedFrame)) {

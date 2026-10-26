@@ -74,6 +74,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(controller);
     await tester.pumpWidget(
@@ -102,6 +103,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: 2,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     // Four slots with a texture each on macOS and iOS; six slots that share
     // one texture on Android (design D135).
@@ -318,6 +320,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: 2,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controller.dispose();
     expect(
@@ -345,6 +348,7 @@ void main() {
       final controller = await MapTextureController.create(
         pixelRatio: 2,
         copyFree: copyFree,
+        maxPitch: 85,
       );
       final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);
       controller.resize(const Size(400, 300), 2);
@@ -731,6 +735,7 @@ void main() {
     final second = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(second);
     await tester.pumpWidget(
@@ -776,6 +781,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(controller);
     final size = ValueNotifier(const Size(400, 300));
@@ -875,6 +881,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(controller);
     final size = ValueNotifier(const Size(200, 200));
@@ -1041,6 +1048,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(controller);
     final log = <_SlotEntry>[];
@@ -1120,6 +1128,7 @@ void main() {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     controllers.add(controller);
     final log = <_SlotEntry>[];

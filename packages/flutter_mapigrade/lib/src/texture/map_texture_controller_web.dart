@@ -8,6 +8,7 @@ import 'map_texture_controller.dart';
 Future<MapTextureController> createMapTextureController({
   required double pixelRatio,
   required bool copyFree,
+  required double maxPitch,
   required List<HeaderRule> httpHeaders,
 }) => throw StateError('flutter_mapigrade has no native library on web');
 

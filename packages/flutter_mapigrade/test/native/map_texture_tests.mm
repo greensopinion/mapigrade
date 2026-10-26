@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -393,7 +394,7 @@ bool Settled(int64_t handle, int64_t frames) {
 int64_t CreateMapWithRules(const std::vector<const char*>& strings,
                            const std::vector<int32_t>& counts,
                            std::string* error = nullptr,
-                           int64_t engine = kEngine) {
+                           int64_t engine = kEngine, double max_pitch = 85) {
   ffi_wrappers::Reset();
   {
     std::lock_guard lock(events_mutex);
@@ -401,7 +402,8 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
   }
   char* message = nullptr;
   int64_t handle = map_texture_create(
-      engine, 2.0, 1, OnEvent, strings.empty() ? nullptr : strings.data(),
+      engine, 2.0, 1, max_pitch, OnEvent,
+      strings.empty() ? nullptr : strings.data(),
       counts.empty() ? nullptr : counts.data(),
       static_cast<int32_t>(counts.size()), &message);
   CHECK((handle > 0) == (message == nullptr));
@@ -412,8 +414,8 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
 
 // Creates a map, and with `style`, loads a style that renders without network
 // access.
-int64_t CreateMap(bool style = true) {
-  int64_t handle = CreateMapWithRules({}, {});
+int64_t CreateMap(bool style = true, double max_pitch = 85) {
+  int64_t handle = CreateMapWithRules({}, {}, nullptr, kEngine, max_pitch);
   CHECK(handle > 0);
   if (style) map_texture_load_style_json(handle, NextStyle().c_str());
   return handle;
@@ -916,6 +918,34 @@ void PitchIsSetAndReported() {
   CHECK(view.has_value());
   if (view) CHECK(std::abs(view->camera.pitch - 45) < 1e-9);
   map_texture_dispose(handle);
+}
+
+// The map renders a pitch up to the maximum pitch given to map_texture_create,
+// and the maximum pitch in place of a larger one.
+void MaxPitchLimitsThePitch() {
+  for (double max_pitch : {85.0, 60.0}) {
+    int64_t handle = CreateMap(true, max_pitch);
+    auto owner = last_owner.lock();
+    SurfaceDart dart(handle);
+    map_texture_resize(handle, 120, 90, 2.0);
+    map_texture_set_camera(handle, 48.2, 16.37, 12, 20, 85, 1);
+    CHECK(Settled(handle, 1));
+    auto view = owner->LastRenderedViewForTesting();
+    CHECK(view.has_value());
+    if (view) CHECK(std::abs(view->camera.pitch - max_pitch) < 1e-9);
+    map_texture_dispose(handle);
+  }
+}
+
+// An invalid maximum pitch fails the creation.
+void InvalidMaxPitchFailsCreation() {
+  for (double max_pitch : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+    std::string error;
+    CHECK(CreateMapWithRules({}, {}, &error, kEngine, max_pitch) ==
+          MAP_TEXTURE_ERROR_CREATE_FAILED);
+    CHECK(error == "invalid maximum pitch");
+  }
 }
 
 // A style with one GeoJSON line along the meridian from 20 degrees south to
@@ -1500,7 +1530,7 @@ void CacheSizeFailureIsReportedAndMapRenders() {
     std::lock_guard lock(events_mutex);
     events.clear();
   }
-  int64_t handle = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
+  int64_t handle = map_texture_create(kEngine, 2.0, 1, 85.0, OnEvent, nullptr,
                                       nullptr, 0, nullptr);
   ffi_wrappers::SetMaximumCacheSizeStatus(MLN_STATUS_OK);
   CHECK(handle > 0);
@@ -1598,7 +1628,7 @@ void InvalidRuleArraysFailCreate() {
   std::string error;
   ffi_wrappers::Reset();
   char* message = nullptr;
-  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 1,
+  CHECK(map_texture_create(kEngine, 2.0, 1, 85.0, OnEvent, nullptr, nullptr, 1,
                            &message) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(message != nullptr);
@@ -1607,7 +1637,7 @@ void InvalidRuleArraysFailCreate() {
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(!error.empty());
   // A null out_error is allowed.
-  CHECK(map_texture_create(kEngine, 2.0, 1, nullptr, nullptr, nullptr, 0,
+  CHECK(map_texture_create(kEngine, 2.0, 1, 85.0, nullptr, nullptr, nullptr, 0,
                            nullptr) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(ffi_wrappers::Calls().empty());
@@ -1621,7 +1651,7 @@ void FailedInitReportsMessage() {
     events.clear();
   }
   char* message = nullptr;
-  int64_t result = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
+  int64_t result = map_texture_create(kEngine, 2.0, 1, 85.0, OnEvent, nullptr,
                                       nullptr, 0, &message);
   ffi_wrappers::SetRuntimeCreateResult(MLN_STATUS_OK, "");
   std::string error = message == nullptr ? "" : message;
@@ -1692,8 +1722,8 @@ void DisposeEngineMapsDisposesOnlyThatEngine() {
   int64_t first = CreateMap(/*style=*/false);
   // Without the reset of CreateMapWithRules, which the live map uses.
   int64_t second =
-      map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0, nullptr);
-  int64_t other = map_texture_create(kOtherEngine, 2.0, 1, OnEvent, nullptr,
+      map_texture_create(kEngine, 2.0, 1, 85.0, OnEvent, nullptr, nullptr, 0, nullptr);
+  int64_t other = map_texture_create(kOtherEngine, 2.0, 1, 85.0, OnEvent, nullptr,
                                      nullptr, 0, nullptr);
   CHECK(second > 0);
   CHECK(other > 0);
@@ -1780,6 +1810,8 @@ int main(int argc, char** argv) {
        FrameReportsLatestCameraSequenceNumber},
       {"LastRenderedViewIsNewestFrame", LastRenderedViewIsNewestFrame},
       {"PitchIsSetAndReported", PitchIsSetAndReported},
+      {"MaxPitchLimitsThePitch", MaxPitchLimitsThePitch},
+      {"InvalidMaxPitchFailsCreation", InvalidMaxPitchFailsCreation},
       {"QueryBeforeFirstRenderIsEmpty", QueryBeforeFirstRenderIsEmpty},
       {"QueryFindsLineAtRest", QueryFindsLineAtRest},
       {"QueryReadsLastRenderedFrameWhileCameraMoves",

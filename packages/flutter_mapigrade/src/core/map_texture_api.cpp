@@ -122,7 +122,7 @@ void DisposeEngineMaps(int64_t engine) {
 extern "C" {
 
 int64_t map_texture_create(int64_t engine, double pixel_ratio,
-                           int32_t copy_free,
+                           int32_t copy_free, double max_pitch,
                            map_texture_event_callback callback,
                            const char* const* header_strings,
                            const int32_t* header_counts, int32_t rule_count,
@@ -149,8 +149,8 @@ int64_t map_texture_create(int64_t engine, double pixel_ratio,
     if (maximum_cache_size >= 0) cache_size = maximum_cache_size;
   }
   auto texture = MapTexture::Create(handle, engine, pixel_ratio, copy_free != 0,
-                                    cache_size, std::move(rules), callback,
-                                    &error);
+                                    max_pitch, cache_size, std::move(rules),
+                                    callback, &error);
   if (!texture) return fail(MAP_TEXTURE_ERROR_CREATE_FAILED, error);
   std::lock_guard lock(registry_mutex);
   // The map can't have rendered yet: its render session is attached by the

@@ -211,27 +211,33 @@ mln_buffer_view View(const std::string& text) {
 
 std::shared_ptr<MapTexture> MapTexture::Create(
     int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
-    std::optional<uint64_t> maximum_cache_size,
+    double max_pitch, std::optional<uint64_t> maximum_cache_size,
     std::vector<HttpHeaderRule> header_rules,
     map_texture_event_callback callback, std::string* out_error) {
   if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) {
     *out_error = "invalid pixel ratio";
     return nullptr;
   }
+  if (!(max_pitch >= 0) || !std::isfinite(max_pitch)) {
+    *out_error = "invalid maximum pitch";
+    return nullptr;
+  }
   std::shared_ptr<MapTexture> texture(
-      new MapTexture(handle, engine, pixel_ratio, maximum_cache_size,
-                     std::move(header_rules), callback));
+      new MapTexture(handle, engine, pixel_ratio, max_pitch,
+                     maximum_cache_size, std::move(header_rules), callback));
   if (!texture->Start(copy_free, out_error)) return nullptr;
   return texture;
 }
 
 MapTexture::MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
+                       double max_pitch,
                        std::optional<uint64_t> maximum_cache_size,
                        std::vector<HttpHeaderRule> header_rules,
                        map_texture_event_callback callback)
     : handle_(handle),
       engine_(engine),
       initial_pixel_ratio_(pixel_ratio),
+      max_pitch_(max_pitch),
       maximum_cache_size_(maximum_cache_size),
       header_rules_(std::move(header_rules)),
       callback_(callback) {}
@@ -738,6 +744,18 @@ bool MapTexture::Init() {
     return false;
   }
   std::memcpy(&map_, created->value.data(), sizeof(mln_map));
+
+  // Map commands run in order, so the maximum pitch is in effect before the
+  // first camera. If the call fails, the map uses MapLibre's default.
+  mln_bound_options bounds = mln_bound_options_default();
+  bounds.fields = MLN_BOUND_OPTION_MAX_PITCH;
+  bounds.max_pitch = max_pitch_;
+  mln_completion bounds_done = ReportingCompletion("mln_map_set_bounds");
+  status = mln_map_set_bounds(map_, &bounds, &bounds_done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(bounds_done);
+    ReportStatus("mln_map_set_bounds", status, &diagnostic);
+  }
   return true;
 }
 

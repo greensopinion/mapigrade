@@ -32,7 +32,10 @@ Future<void> secondEngineMain() async {
     return;
   }
   try {
-    final controller = await MapTextureController.create(pixelRatio: 2);
+    final controller = await MapTextureController.create(
+      pixelRatio: 2,
+      maxPitch: 85,
+    );
     final loaded = controller.events.firstWhere((e) => e is StyleLoaded);
     // The second engine displays no view, so no frame is displayed; the
     // first rendered frame shows that the map renders.

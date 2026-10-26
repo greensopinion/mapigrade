@@ -81,6 +81,7 @@ class _ColorCheckState extends State<ColorCheck> {
     final controller = await MapTextureController.create(
       pixelRatio: pixelRatio,
       copyFree: widget.copyFree,
+      maxPitch: 85,
     );
     if (!mounted) {
       controller.dispose();

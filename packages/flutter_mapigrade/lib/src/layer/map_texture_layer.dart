@@ -115,6 +115,7 @@ Future<MapTextureController> _createController({
 }) => MapTextureController.create(
   pixelRatio: pixelRatio,
   copyFree: copyFree,
+  maxPitch: fm.MapOptions.pitchLimit,
   httpHeaders: [
     for (final rule in httpHeaders) (url: rule.url, headers: rule.headers),
   ],

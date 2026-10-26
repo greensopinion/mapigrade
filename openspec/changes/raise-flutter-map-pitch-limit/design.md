@@ -77,3 +77,9 @@ We chose no new API (user decision, 2026-10-25); an application that wants a sky
 - [`MapOptions.pitchLimit` is public, and code that assumed 60 sees 85] → `maxPitch` still defaults to 0; the changelog of the fork notes it.
 - [MapLibre Native and the overlays end the ground at different places] → Both use 89.25°; the alignment check at 85° shows any difference.
 - [Precision of large projected coordinates near the far limit] → The far limit bounds them; the footprint at 85° is finite and checked by the visible bounds test.
+
+## Measurements
+
+### Static alignment on the Mac, 2026-10-25
+
+`static_alignment_test.dart` on macOS, with two cases added: pitch 85 with the point at (300, 200), and pitch 85, rotation 30 with the point at (100, 135), 18 px below the far limit at 116.6 px. The test now also waits for a displayed frame with the case's pitch. All 26 tests passed. Both 85° cases were within 0.066 logical px, with the overlay after the layer and as a child of it; the other cases gave the same distances as before (at most 0.042 px).

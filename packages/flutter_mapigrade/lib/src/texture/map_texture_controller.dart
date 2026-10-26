@@ -307,6 +307,9 @@ abstract interface class MapTextureController {
   /// On Android every map renders directly into the buffers that Flutter
   /// displays, and [copyFree] has no effect.
   ///
+  /// [maxPitch] is the largest pitch, in degrees, that the map renders; a
+  /// larger pitch in [setCamera] renders as [maxPitch].
+  ///
   /// The map registers its textures with the Flutter engine of the calling
   /// isolate. The first creation in an isolate asks the plugin for the
   /// engine's token over a platform channel; later creations wait only for a
@@ -318,6 +321,7 @@ abstract interface class MapTextureController {
   static Future<MapTextureController> create({
     required double pixelRatio,
     bool copyFree = true,
+    required double maxPitch,
     List<HeaderRule> httpHeaders = const [],
   }) async {
     if (!nativeLibraryAvailable) {
@@ -329,6 +333,7 @@ abstract interface class MapTextureController {
     return platform.createMapTextureController(
       pixelRatio: pixelRatio,
       copyFree: copyFree,
+      maxPitch: maxPitch,
       httpHeaders: httpHeaders,
     );
   }

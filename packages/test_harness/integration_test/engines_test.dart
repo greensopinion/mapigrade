@@ -119,6 +119,7 @@ void main() {
   ) async {
     final controller = await MapTextureController.create(
       pixelRatio: tester.view.devicePixelRatio,
+      maxPitch: 85,
     );
     controllers.add(controller);
     final loaded = waitFor<StyleLoaded>(controller.events, (_) => true);

@@ -161,6 +161,8 @@ typedef struct map_texture_stats {
 // buffers, and `copy_free` has no effect. Events are delivered through
 // `callback`, from any thread.
 //
+// `max_pitch` is the map's maximum pitch in degrees, at least 0.
+//
 // `header_strings` holds, for each of `rule_count` HTTP header rules, its URL
 // glob and `header_counts[i]` name and value pairs.
 //
@@ -168,7 +170,8 @@ typedef struct map_texture_stats {
 // `*out_error`, if non-null, is a message to free with
 // map_texture_string_free().
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
-    int64_t engine, double pixel_ratio, int32_t copy_free, map_texture_event_callback callback,
+    int64_t engine, double pixel_ratio, int32_t copy_free, double max_pitch,
+    map_texture_event_callback callback,
     const char* const* header_strings, const int32_t* header_counts,
     int32_t rule_count, char** out_error);
 

@@ -104,6 +104,7 @@ class _MapScreenState extends State<MapScreen>
     final controller = await MapTextureController.create(
       pixelRatio: pixelRatio,
       copyFree: copyFree,
+      maxPitch: 85,
     );
     if (!mounted) {
       controller.dispose();

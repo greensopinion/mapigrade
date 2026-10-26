@@ -19,6 +19,7 @@ const _maxSlots = 6;
 Future<MapTextureController> createMapTextureController({
   required double pixelRatio,
   required bool copyFree,
+  required double maxPitch,
   required List<HeaderRule> httpHeaders,
 }) async {
   final engine = await engineToken();
@@ -50,6 +51,7 @@ Future<MapTextureController> createMapTextureController({
       engine,
       pixelRatio,
       copyFree ? 1 : 0,
+      maxPitch,
       callable.nativeFunction,
       headerStrings,
       headerCounts,
