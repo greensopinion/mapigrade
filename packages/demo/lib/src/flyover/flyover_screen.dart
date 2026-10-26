@@ -12,6 +12,7 @@ import 'flyover.dart';
 import 'flyover_player.dart';
 import 'metrics_panel.dart';
 import 'recording.dart';
+import 'split_view.dart';
 import 'stage_layers.dart';
 import 'stages.dart';
 
@@ -54,6 +55,11 @@ class _FlyoverScreenState extends State<FlyoverScreen>
   DemoStyle _style = demoStyles.first;
   bool _showStages = true;
   bool _warmUp = false;
+
+  /// The split view's raster layer while the split view is on, created once
+  /// each time it is turned on: each `TileLayer` creates a tile provider,
+  /// which the layer disposes when it is removed.
+  TileLayer? _rasterLayer;
 
   late final _recording = widget.recording;
   late bool _settingsOpen = _recording == null;
@@ -182,16 +188,21 @@ class _FlyoverScreenState extends State<FlyoverScreen>
               // after it are drawn above it. The route, the pins and the rider
               // are its children, so that they stay on the map while the
               // camera moves; the attribution is screen UI and follows it.
+              // The split view's raster half is a child too, so that the two
+              // halves have the same camera in every frame (design D195).
               MapigradeLayer(
                 styleUrl: _style.url,
                 onStyleLoaded: _onStyleLoaded,
                 onError: _showError,
                 metrics: _metrics,
                 children: [
+                  if (_rasterLayer case final rasterLayer?)
+                    RightHalf(child: rasterLayer),
                   if (_showStages && stages != null) ...stageLayers(stages),
                   riderLayer(_player.rider),
                 ],
               ),
+              if (_rasterLayer != null) const SplitSeam(),
               attributionOf(_style),
             ],
           ),
@@ -263,6 +274,14 @@ class _FlyoverScreenState extends State<FlyoverScreen>
       title: const Text('Stage overlays'),
       value: _showStages,
       onChanged: (value) => setState(() => _showStages = value),
+    ),
+    SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: const Text('Split view'),
+      value: _rasterLayer != null,
+      onChanged: (value) =>
+          setState(() => _rasterLayer = value ? osmTileLayer() : null),
     ),
     CheckboxListTile(
       contentPadding: EdgeInsets.zero,

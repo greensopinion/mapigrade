@@ -6,7 +6,7 @@ The demo isn't published, and there are no built apps to download: build it from
 
 ## What it shows
 
-- **Flyover**: a drone's-eye flight along three stages of the Tour de France Femmes avec Zwift 2026, with route and pin overlays that stay on the map while it moves, and the map's and Flutter's frame rates. The video in the repository's README is a recording of it.
+- **Flyover**: a drone's-eye flight along three stages of the Tour de France Femmes avec Zwift 2026, with route and pin overlays that stay on the map while it moves, and the map's and Flutter's frame rates. The video in the repository's README is a recording of it. A split view compares the map with OpenStreetMap raster tiles.
 - **Inspect features**: tap the map to highlight the feature on top with feature state, and see its style layer, source, ID and properties, and the other features at the tap.
 
 Each screen offers four styles that need no API key: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles. The routes are approximate.
