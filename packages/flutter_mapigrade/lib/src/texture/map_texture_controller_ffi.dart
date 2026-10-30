@@ -99,13 +99,13 @@ Future<MapTextureController> createMapTextureController({
     bytes.length,
     outError,
   );
-      String? error;
-      if (outError.value != nullptr) {
-        error = outError.value.toDartString();
-        mapTextureStringFree(outError.value);
-      }
-      return (status, error);
-    });
+  String? error;
+  if (outError.value != nullptr) {
+    error = outError.value.toDartString();
+    mapTextureStringFree(outError.value);
+  }
+  return (status, error);
+});
 
 /// The native call of [MapTextureController.setMaximumCacheSize].
 void setMaximumCacheSize(int bytes) {

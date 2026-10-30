@@ -90,7 +90,10 @@ void main() {
     expect(p['j'], 'round');
 
     final layers = _layers(t);
-    expect(layers.map((l) => l['id']), ['mapigrade-overlay-7-0', 'mapigrade-overlay-7-1']);
+    expect(layers.map((l) => l['id']), [
+      'mapigrade-overlay-7-0',
+      'mapigrade-overlay-7-1',
+    ]);
     final [border, line] = layers;
     for (final l in layers) {
       expect(l['type'], 'line');
@@ -222,12 +225,18 @@ void main() {
       ], _ids);
       expect(a.runs, b.runs);
       expect(a.layersJson, b.layersJson);
-      expect(a.geoJson[PolylineSource.plain], isNot(b.geoJson[PolylineSource.plain]));
+      expect(
+        a.geoJson[PolylineSource.plain],
+        isNot(b.geoJson[PolylineSource.plain]),
+      );
     });
   });
 
   test('the gradient source exists only with a gradient polyline', () {
-    final plain = translatePolylines([_line(), _line(dashes: [2, 1])], _ids);
+    final plain = translatePolylines([
+      _line(),
+      _line(dashes: [2, 1]),
+    ], _ids);
     expect(plain.geoJson.keys, [PolylineSource.plain]);
     expect(PolylineSource.plain.lineMetrics, isFalse);
     expect(PolylineSource.gradient.lineMetrics, isTrue);
