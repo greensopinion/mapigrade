@@ -189,9 +189,8 @@ PolylineTranslation translatePolylines(
 const _earthCircumference = 40075016.686;
 const _tileSize = 512;
 
-PolylineSource _sourceOf(MapigradePolyline p) => p.gradientColors == null
-    ? PolylineSource.plain
-    : PolylineSource.gradient;
+PolylineSource _sourceOf(MapigradePolyline p) =>
+    p.gradientColors == null ? PolylineSource.plain : PolylineSource.gradient;
 
 PolylineSource _sourceOfRun(PolylineRun run) =>
     run.gradient == null ? PolylineSource.plain : PolylineSource.gradient;

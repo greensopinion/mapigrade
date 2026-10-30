@@ -484,7 +484,10 @@ void main() {
       await tester.pumpWidget(
         app([
           MapigradePolylineLayer(
-            polylines: [_polyline(), _polyline(gradientColors: _gradient)],
+            polylines: [
+              _polyline(),
+              _polyline(gradientColors: _gradient),
+            ],
           ),
         ]),
       );
@@ -493,12 +496,15 @@ void main() {
       expect(_pointCount(fake.data.last.bytes), 2);
       expect(_pointCount(fake.data[fake.data.length - 2].bytes), 2);
       final layers = jsonDecode(fake.layers.last.layersJson) as List;
-      expect([for (final l in layers) (l as Map)['source']], [
-        'mapigrade-overlay-1-source-0',
-        'mapigrade-overlay-1-source-0',
-        'mapigrade-overlay-1-source-1',
-        'mapigrade-overlay-1-source-1',
-      ]);
+      expect(
+        [for (final l in layers) (l as Map)['source']],
+        [
+          'mapigrade-overlay-1-source-0',
+          'mapigrade-overlay-1-source-0',
+          'mapigrade-overlay-1-source-1',
+          'mapigrade-overlay-1-source-1',
+        ],
+      );
 
       fake.log.clear();
       await tester.pumpWidget(
@@ -746,7 +752,10 @@ void main() {
         final fromIsolate = await Isolate.run(
           () => polylineGeoJson(polylineFeatures(polylines, source)),
         );
-        expect(fromIsolate, polylineGeoJson(polylineFeatures(polylines, source)));
+        expect(
+          fromIsolate,
+          polylineGeoJson(polylineFeatures(polylines, source)),
+        );
       }
     },
   );
