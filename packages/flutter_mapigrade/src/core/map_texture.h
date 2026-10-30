@@ -395,10 +395,16 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::mutex queries_mutex_;
   std::vector<RenderedQuery> queries_;
   // A query returns the feature state of the last rendered frame, so queries
-  // wait until a frame includes every feature-state command submitted before
-  // them: the commands submitted (map thread) and completed (any thread), the
-  // newest render update generation that a completed one is part of, and the
-  // map update generation of the last rendered frame (map thread).
+  // wait until a frame includes every feature-state command queued before
+  // them: the commands queued (any thread), the commands queued before the
+  // newest query (queries_mutex_), the commands applied, including the ones
+  // the FFI rejected (map thread), the commands submitted (map thread) and
+  // completed (any thread), the newest render update generation that a
+  // completed one is part of, and the map update generation of the last
+  // rendered frame (map thread).
+  std::atomic<int64_t> feature_state_queued_{0};
+  int64_t feature_state_queued_before_queries_ = 0;
+  int64_t feature_state_applied_ = 0;
   int64_t feature_state_submitted_ = 0;
   std::atomic<int64_t> feature_state_completed_{0};
   std::atomic<uint64_t> feature_state_generation_{0};
