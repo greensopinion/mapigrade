@@ -21,13 +21,30 @@ std::optional<mln_log_handler> log_handler;
 
 void Record(std::string name, uint64_t size = 0) {
   std::lock_guard lock(mutex);
-  calls.push_back({std::move(name), size});
+  calls.push_back({std::move(name), size, {}, {}});
 }
 
 std::string Text(const mln_buffer_view& view) {
   return view.data == nullptr
              ? std::string()
              : std::string(static_cast<const char*>(view.data), view.size);
+}
+
+void RecordStyleCall(std::string name, const mln_buffer_view& id,
+                     const mln_buffer_view& before = {}) {
+  std::lock_guard lock(mutex);
+  calls.push_back({std::move(name), 0, Text(id), Text(before)});
+}
+
+// The id member of a layer JSON object, as the test's layers write it.
+std::string LayerJsonId(const mln_buffer_view& json) {
+  std::string text = Text(json);
+  size_t key = text.find("\"id\"");
+  if (key == std::string::npos) return {};
+  size_t open = text.find('"', text.find(':', key) + 1);
+  size_t close = text.find('"', open + 1);
+  if (open == std::string::npos || close == std::string::npos) return {};
+  return text.substr(open + 1, close - open - 1);
 }
 
 void SetDiagnostic(mln_diagnostic* diagnostic, const std::string& message) {
@@ -51,6 +68,15 @@ void Reset() {
 std::vector<Call> Calls() {
   std::lock_guard lock(mutex);
   return calls;
+}
+
+std::vector<std::string> CallNames(const std::string& prefix) {
+  std::lock_guard lock(mutex);
+  std::vector<std::string> names;
+  for (const Call& call : calls) {
+    if (call.name.starts_with(prefix)) names.push_back(call.name);
+  }
+  return names;
 }
 
 void SetMaximumCacheSizeStatus(mln_status status) {
@@ -183,6 +209,59 @@ mln_status test_mln_log_set_callback(const mln_log_handler* handler,
     if (handler != nullptr) log_handler = *handler;
   }
   return mln_log_set_callback(handler, out_diagnostic);
+}
+
+mln_status test_mln_map_add_geojson_source_data(
+    mln_map map, mln_buffer_view source_id, mln_geojson_source_data data,
+    const mln_completion* completion, mln_diagnostic* out_diagnostic) {
+  RecordStyleCall("mln_map_add_geojson_source_data", source_id);
+  return mln_map_add_geojson_source_data(map, source_id, data, completion,
+                                         out_diagnostic);
+}
+
+mln_status test_mln_map_set_geojson_source_data(
+    mln_map map, mln_buffer_view source_id, mln_geojson_source_data data,
+    const mln_completion* completion, mln_diagnostic* out_diagnostic) {
+  RecordStyleCall("mln_map_set_geojson_source_data", source_id);
+  return mln_map_set_geojson_source_data(map, source_id, data, completion,
+                                         out_diagnostic);
+}
+
+mln_status test_mln_map_remove_style_source(mln_map map,
+                                            mln_buffer_view source_id,
+                                            const mln_completion* completion,
+                                            mln_diagnostic* out_diagnostic) {
+  RecordStyleCall("mln_map_remove_style_source", source_id);
+  return mln_map_remove_style_source(map, source_id, completion,
+                                     out_diagnostic);
+}
+
+mln_status test_mln_map_add_style_layer_json(mln_map map,
+                                             mln_buffer_view layer_json,
+                                             mln_buffer_view before_layer_id,
+                                             const mln_completion* completion,
+                                             mln_diagnostic* out_diagnostic) {
+  std::string id = LayerJsonId(layer_json);
+  RecordStyleCall("mln_map_add_style_layer_json", {id.data(), id.size()},
+                  before_layer_id);
+  return mln_map_add_style_layer_json(map, layer_json, before_layer_id,
+                                      completion, out_diagnostic);
+}
+
+mln_status test_mln_map_remove_style_layer(mln_map map, mln_buffer_view layer_id,
+                                           const mln_completion* completion,
+                                           mln_diagnostic* out_diagnostic) {
+  RecordStyleCall("mln_map_remove_style_layer", layer_id);
+  return mln_map_remove_style_layer(map, layer_id, completion, out_diagnostic);
+}
+
+mln_status test_mln_map_move_style_layer(mln_map map, mln_buffer_view layer_id,
+                                         mln_buffer_view before_layer_id,
+                                         const mln_completion* completion,
+                                         mln_diagnostic* out_diagnostic) {
+  RecordStyleCall("mln_map_move_style_layer", layer_id, before_layer_id);
+  return mln_map_move_style_layer(map, layer_id, before_layer_id, completion,
+                                  out_diagnostic);
 }
 
 }  // extern "C"

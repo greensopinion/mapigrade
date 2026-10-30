@@ -5,7 +5,7 @@ Applications draw routes and tracks with `flutter_map`'s `PolylineLayer`, which 
 ## What Changes
 
 - Add `MapigradePolylineLayer`, a widget that an application places in `MapigradeLayer.children`. It gives its polylines to MapLibre as one GeoJSON source and `line` style layers, so MapLibre draws them in the map frame.
-- Add `MapigradePolyline`, the polyline model. It keeps `flutter_map`'s field names and defaults for the properties that MapLibre can draw: `points`, `color`, `strokeWidth`, `useStrokeWidthInMeter`, `borderStrokeWidth`, `borderColor`, `strokeCap` and `strokeJoin`. It adds `dashes`, in multiples of the stroke width, and `gradientColors` with `gradientStops`, a gradient along the length of the line. `MapigradePolyline.fromPolyline` converts a `flutter_map` `Polyline`, and fails an assertion in debug builds for a gradient, because `flutter_map`'s gradient means something else.
+- Add `MapigradePolyline`, the polyline model. It keeps `flutter_map`'s field names and defaults for the properties that MapLibre can draw: `points`, `color`, `strokeWidth`, `useStrokeWidthInMeter`, `borderStrokeWidth`, `borderColor`, `strokeCap` and `strokeJoin`. It adds `dashes`, in multiples of the stroke width, and `gradientColors` with `gradientStops`, a gradient along the length of the line.
 - Add `LayerPlacement`, which places the polylines among the style's layers: below the labels by default, below a named style layer, or above all style layers. When the named layer is missing, the polylines are drawn above all style layers and the layer reports a `LayerLoadException`.
 - The rendering is MapLibre's, not a copy of `flutter_map`'s painter. The documentation states the differences: the gradient, dots drawn as dashes of length 0 with round caps, `PatternFit` ignored, and hit testing not available.
 - Polylines stay on the map across style loads.
@@ -15,7 +15,7 @@ Applications draw routes and tracks with `flutter_map`'s `PolylineLayer`, which 
 ## Capabilities
 
 ### New Capabilities
-- `polyline-layer`: the polyline model and its converter, the layer in `MapigradeLayer.children`, how each property is drawn, draw order, placement among the style's layers, the order of several polyline layers, style loads, and updates.
+- `polyline-layer`: the polyline model, the layer in `MapigradeLayer.children`, how each property is drawn, draw order, placement among the style's layers, the order of several polyline layers, style loads, and updates.
 
 ### Modified Capabilities
 - `map-layer`: the requirement "Base layer of a flutter_map map" states that every child is drawn above the map; a `MapigradePolylineLayer` child is drawn in the map instead.

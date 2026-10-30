@@ -13,5 +13,8 @@ export 'src/layer/layer_exception.dart'
         LayerQueryException,
         LayerRenderException;
 export 'src/layer/layer_metrics.dart' show LayerMetrics, LayerMetricsSnapshot;
+export 'src/layer/layer_placement.dart' show LayerPlacement;
 export 'src/layer/mapigrade_layer.dart' show MapigradeLayer;
 export 'src/layer/queried_feature.dart' show QueriedFeature;
+export 'src/polyline/mapigrade_polyline.dart' show MapigradePolyline;
+export 'src/polyline/mapigrade_polyline_layer.dart' show MapigradePolylineLayer;

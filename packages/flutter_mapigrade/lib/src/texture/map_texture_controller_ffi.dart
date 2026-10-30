@@ -3,6 +3,8 @@
 // functions.
 import 'dart:async';
 import 'dart:ffi' hide Size;
+import 'dart:isolate';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:ffi/ffi.dart';
@@ -77,6 +79,33 @@ Future<MapTextureController> createMapTextureController({
   controller = _FfiMapTextureController(handle, textureIds, copyFree, callable);
   return controller;
 }
+
+(int, String?) _setOverlaySource(
+  int handle,
+  int overlayId,
+  int sourceIndex,
+  bool lineMetrics,
+  Uint8List bytes,
+) => using((arena) {
+  final data = arena<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+  data.asTypedList(bytes.length).setAll(0, bytes);
+  final outError = arena<Pointer<Utf8>>();
+  final status = mapTextureOverlaySetSource(
+    handle,
+    overlayId,
+    sourceIndex,
+    lineMetrics ? mapTextureSourceLineMetrics : 0,
+    data,
+    bytes.length,
+    outError,
+  );
+      String? error;
+      if (outError.value != nullptr) {
+        error = outError.value.toDartString();
+        mapTextureStringFree(outError.value);
+      }
+      return (status, error);
+    });
 
 /// The native call of [MapTextureController.setMaximumCacheSize].
 void setMaximumCacheSize(int bytes) {
@@ -308,6 +337,89 @@ class _FfiMapTextureController implements MapTextureController {
         ),
       );
     });
+  }
+
+  @override
+  void setOverlaySource(
+    int overlayId,
+    int sourceIndex,
+    Uint8List geoJson, {
+    required bool lineMetrics,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    _checkOverlaySource(
+      _setOverlaySource(_handle, overlayId, sourceIndex, lineMetrics, geoJson),
+    );
+  }
+
+  @override
+  Future<void> setOverlaySourceInBackground(
+    int overlayId,
+    int sourceIndex,
+    Uint8List Function() encode, {
+    required bool lineMetrics,
+  }) async {
+    if (_disposed) throw const MapTextureDisposedException();
+    final handle = _handle;
+    _checkOverlaySource(
+      await Isolate.run(
+        () => _setOverlaySource(
+          handle,
+          overlayId,
+          sourceIndex,
+          lineMetrics,
+          encode(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void removeOverlaySource(int overlayId, int sourceIndex) {
+    if (_disposed) throw const MapTextureDisposedException();
+    _check(mapTextureOverlayRemoveSource(_handle, overlayId, sourceIndex));
+  }
+
+  @override
+  void setOverlayLayers(
+    int overlayId, {
+    required String layersJson,
+    required int placementKind,
+    String? belowLayerId,
+    required int orderChild,
+    required int orderSeq,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      _check(
+        mapTextureOverlaySetLayers(
+          _handle,
+          overlayId,
+          layersJson.toNativeUtf8(allocator: arena),
+          placementKind,
+          (belowLayerId ?? '').toNativeUtf8(allocator: arena),
+          orderChild,
+          orderSeq,
+        ),
+      );
+    });
+  }
+
+  @override
+  void removeOverlay(int overlayId) {
+    if (_disposed) throw const MapTextureDisposedException();
+    _check(mapTextureOverlayRemove(_handle, overlayId));
+  }
+
+  void _checkOverlaySource((int, String?) result) {
+    final (status, error) = result;
+    if (status == mapTextureOk) return;
+    if (status == mapTextureErrorDisposed) {
+      throw const MapTextureDisposedException();
+    }
+    throw MapTextureException(
+      error ?? 'native call failed with status $status',
+    );
   }
 
   @override

@@ -244,6 +244,49 @@ MAP_TEXTURE_EXPORT int32_t map_texture_set_feature_state(
 MAP_TEXTURE_EXPORT int32_t map_texture_remove_feature_state(
     int64_t handle, const char* source_id, const char* source_layer_id,
     const char* feature_id, const char* key);
+
+// Overlays: GeoJSON that the map draws with style layers of its own among the
+// style's layers, in the loaded style and in every style loaded later. An
+// overlay has GeoJSON sources, each at an index, and style layers. Its
+// sources have the IDs `mapigrade-overlay-<overlay_id>-source-<source_index>`,
+// and its style layers the IDs `mapigrade-overlay-<overlay_id>-<n>` for the
+// n-th layer of the array. An overlay is drawn once it has at least one style
+// layer and every source its style layers name.
+//
+// The options of a source, a bit set; they are fixed when the source is
+// added, so an option change on an index removes the source and adds it
+// again, with the overlay's layers.
+#define MAP_TEXTURE_SOURCE_LINE_METRICS 1
+// Prepares the UTF-8 GeoJSON `geojson` of `length` bytes on the calling
+// thread, with the options `source_options`, and gives it to the overlay's
+// source `source_index`. Returns MAP_TEXTURE_ERROR_INVALID_ARGUMENT for
+// GeoJSON the map can't use, a negative index or unknown options; then
+// `*out_error`, if non-null, is the message, to free with
+// map_texture_string_free().
+MAP_TEXTURE_EXPORT int32_t map_texture_overlay_set_source(
+    int64_t handle, int64_t overlay_id, int32_t source_index,
+    int32_t source_options, const uint8_t* geojson, int64_t length,
+    char** out_error);
+// Removes the overlay's source `source_index`. Nothing happens when the
+// overlay has no such source.
+MAP_TEXTURE_EXPORT int32_t map_texture_overlay_remove_source(
+    int64_t handle, int64_t overlay_id, int32_t source_index);
+// Sets the overlay's style layers, placement and order key. `layers_json` is
+// a JSON array of style layer objects, in draw order, whose `id` members are
+// the layer IDs above and whose `source` members are source IDs of the
+// overlay; an array with other IDs or sources is rejected. `placement_kind`
+// is 0 for below the labels, 1 for below the style layer `below_layer_id`, 2
+// for the top. Overlays at the same place are drawn in increasing
+// (`order_child`, `order_seq`). A layer that MapLibre rejects, or a missing
+// `below_layer_id`, is reported as MAP_TEXTURE_EVENT_RENDER_ERROR or
+// MAP_TEXTURE_EVENT_LOADING_FAILED.
+MAP_TEXTURE_EXPORT int32_t map_texture_overlay_set_layers(
+    int64_t handle, int64_t overlay_id, const char* layers_json,
+    int32_t placement_kind, const char* below_layer_id, int64_t order_child,
+    int64_t order_seq);
+// Removes the overlay's style layers and sources from the map.
+MAP_TEXTURE_EXPORT int32_t map_texture_overlay_remove(int64_t handle,
+                                                      int64_t overlay_id);
 MAP_TEXTURE_EXPORT int32_t map_texture_get_stats(int64_t handle,
                                                  map_texture_stats* out_stats);
 // Stops the map thread, releases the map and its resources, and unregisters

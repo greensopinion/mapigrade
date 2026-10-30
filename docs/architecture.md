@@ -82,6 +82,33 @@ Queries wait in their own queue. Each loop iteration runs them after the frame r
 
 Feature state is set and removed with commands in the ordered queue. Because a query returns the state of the last rendered frame, the map thread holds queries until a frame has rendered with every feature-state command submitted before them. The FFI keeps feature state on the map, so it survives a style change.
 
+## Overlays
+
+A `MapigradePolylineLayer` draws nothing in Flutter. It gives its polylines to the map as an overlay: GeoJSON sources and the style layers that draw them, which the map adds to the style among the style's own layers (designs D197 to D199 of the add-mapigrade-polyline-layer change). Below the polyline translation (`lib/src/polyline/polyline_translation.dart`), no code refers to lines.
+
+```
+ Dart (main isolate)                                       map thread
+ ───────────────────                                       ──────────
+ MapigradePolylineLayer
+   translation: runs, layer JSON, GeoJSON per source
+   OverlayRegistration (OverlayHost, from MapTextureLayer)
+     setSource ──► map_texture_overlay_set_source:
+                   mln_geojson_source_data_create on the
+                   calling thread (or in Isolate.run) ──► ordered queue ──► kept overlay state
+     setLayers ──► map_texture_overlay_set_layers ───────► ordered queue ──►   (sources, layers,
+     remove    ──► map_texture_overlay_remove(_source) ──► ordered queue ──►    placement, order key)
+                                                                          SyncOverlays: query the
+                                                                            style's layer list, plan
+                                                                            the commands (ComputeAnchor,
+                                                                            PlanLayers), submit them
+```
+
+`MapTextureLayer` provides an `OverlayHost` to its children and wraps each child in an `OverlayChildIndex`, whose index is the first part of an overlay's order key (design D200). The host keeps the overlays until the controller exists and then sends them. The polyline layer sends a source only when its features changed, and the style layers only when the run structure, the placement or the order key changed (design D196). Above 20,000 points, the GeoJSON encoding and the `set_source` call run in `Isolate.run`, so MapLibre also parses and tiles the data on that isolate's thread (design D202).
+
+Commands only change the map thread's kept state of each overlay (`MapTexture::Overlay` in `src/core/map_texture.h`). After the commands of a loop iteration, and again before `MaybeRender` requests a frame, `SyncOverlays` queries `mln_map_list_style_layers` when the overlays changed or a style has loaded, and makes the style match the kept state: `ComputeAnchor` (`src/core/overlay.h`) resolves each placement to the layer the overlay's layers go before, and `PlanLayers` plans the layer additions, moves and removals. A layer list queried before a later style command or style load is dropped and queried again (design D199).
+
+A style load removes every runtime source and layer. `OnEvents` counts style loads (`style_loads_`) and wakes the map thread, which installs every overlay again in the new style from the prepared data it kept, without a round trip to Dart (design D201). A failed overlay command is reported as a render error that names the operation (design D203).
+
 ## Flutter engines
 
 A process can run more than one Flutter engine, for example a background engine that a messaging plugin starts. Each engine registers the plugin, and texture ids are only valid in the engine that issued them, so each map registers its textures with the engine whose Dart code created it (design D153 to D157 of the multiple-flutter-engines change).

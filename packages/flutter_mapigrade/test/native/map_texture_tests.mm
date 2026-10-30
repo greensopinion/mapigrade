@@ -1696,6 +1696,531 @@ void UnknownEngineFailsCreate() {
   CHECK(ffi_wrappers::Calls().empty());
 }
 
+// Overlays (designs D198, D199, D201 and D203 of the
+// add-mapigrade-polyline-layer change).
+
+// A style with an empty GeoJSON source, so that it loads without network
+// access: two non-symbol layers, then two symbol layers.
+constexpr char kOverlayStyle[] = R"({"version": 8,
+  "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
+  "layers": [{"id": "background", "type": "background", "paint": {"background-color": "#ffffff"}},
+    {"id": "water", "type": "fill", "source": "s"},
+    {"id": "road", "type": "line", "source": "s"},
+    {"id": "road_label", "type": "symbol", "source": "s"},
+    {"id": "poi", "type": "symbol", "source": "s"}]})";
+
+// Another style, with other layer IDs.
+constexpr char kOverlayStyle2[] = R"({"version": 8,
+  "sources": {"s": {"type": "geojson", "data": {"type": "FeatureCollection", "features": []}}},
+  "layers": [{"id": "land", "type": "background", "paint": {"background-color": "#eeeeee"}},
+    {"id": "street", "type": "line", "source": "s"},
+    {"id": "label", "type": "symbol", "source": "s"}]})";
+
+// A line along the meridian from 20 degrees south to 20 degrees north, as
+// kLineStyle has, with the property v = `v`.
+std::string LineGeoJson(int v) {
+  return R"({"type": "FeatureCollection", "features": [{"type": "Feature", "id": 1,)"
+         R"( "properties": {"v": )" +
+         std::to_string(v) +
+         R"(}, "geometry": {"type": "LineString", "coordinates": [[0, -20], [0, 20]]}}]})";
+}
+
+// The line layer `index` of the overlay `id`, from the source `source`.
+std::string LineLayerJson(int64_t id, int index, const std::string& source,
+                          const char* width = "4") {
+  return R"({"id": ")" + map_texture::OverlayLayerId(id, index) +
+         R"(", "type": "line", "source": ")" + source +
+         R"(", "paint": {"line-width": )" + width + R"(, "line-color": "#0000ff"}})";
+}
+
+// `count` line layers of the overlay `id` from its source 0, each 4 logical
+// pixels wide.
+std::string LineLayersJson(int64_t id, int count, const char* width = "4") {
+  std::string json = "[";
+  for (int i = 0; i < count; ++i) {
+    if (i > 0) json += ", ";
+    json += LineLayerJson(id, i, map_texture::OverlaySourceId(id, 0), width);
+  }
+  return json + "]";
+}
+
+int32_t SetOverlaySource(int64_t handle, int64_t id, const std::string& geojson,
+                         std::string* error = nullptr, int32_t index = 0,
+                         int32_t options = 0) {
+  char* message = nullptr;
+  int32_t status = map_texture_overlay_set_source(
+      handle, id, index, options,
+      reinterpret_cast<const uint8_t*>(geojson.data()),
+      static_cast<int64_t>(geojson.size()), &message);
+  if (error != nullptr) *error = message == nullptr ? "" : message;
+  map_texture_string_free(message);
+  return status;
+}
+
+int32_t SetOverlayLayers(int64_t handle, int64_t id, const std::string& layers,
+                         int32_t placement = 0, const char* below = nullptr,
+                         int64_t child = 0, int64_t seq = 0) {
+  return map_texture_overlay_set_layers(handle, id, layers.c_str(), placement,
+                                        below, child, seq);
+}
+
+// The IDs of the style's layers in style order.
+std::vector<std::string> LayerIds() {
+  auto owner = last_owner.lock();
+  std::vector<std::string> ids;
+  if (!owner) return ids;
+  auto layers = owner->ListStyleLayersForTesting();
+  if (!layers) return ids;
+  for (const auto& layer : *layers) ids.push_back(layer.id);
+  return ids;
+}
+
+std::string OverlaySourceOfLayer(const std::string& layer_id) {
+  auto owner = last_owner.lock();
+  auto layers = owner->ListStyleLayersForTesting();
+  if (!layers) return "<no list>";
+  for (const auto& layer : *layers) {
+    if (layer.id == layer_id) return layer.source;
+  }
+  return "<no layer>";
+}
+
+bool WaitForLayers(const std::vector<std::string>& expected) {
+  return WaitFor([&] { return LayerIds() == expected; });
+}
+
+std::vector<std::string> RenderErrors() {
+  std::vector<std::string> messages;
+  for (const Event& event : EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR)) {
+    messages.push_back(event.message);
+  }
+  return messages;
+}
+
+// A surface map with kOverlayStyle loaded, at kQueryZoom over the meridian.
+int64_t CreateOverlayMap() {
+  int64_t handle = CreateMap(false);
+  map_texture_load_style_json(handle, kOverlayStyle);
+  map_texture_resize(handle, 120, 90, 2.0);
+  map_texture_set_camera(handle, 0, 0, kQueryZoom, 0, 1);
+  CHECK(WaitForStyleLoaded());
+  ffi_wrappers::Reset();
+  return handle;
+}
+
+const std::vector<std::string> kStyleIds = {"background", "water", "road",
+                                            "road_label", "poi"};
+
+void OverlayAppearsInStyleBelowLabels() {
+  int64_t handle = CreateOverlayMap();
+  CHECK(WaitForLayers(kStyleIds));
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1)) == MAP_TEXTURE_OK);
+  // Data alone draws nothing and adds nothing.
+  Sleep(100);
+  CHECK(LayerIds() == kStyleIds);
+  CHECK(ffi_wrappers::Calls().empty());
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 2)) == MAP_TEXTURE_OK);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-1-1", "road_label", "poi"})));
+  CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == "mapigrade-overlay-1-source-0");
+  auto calls = ffi_wrappers::Calls();
+  CHECK(calls.size() == 3);
+  if (calls.size() == 3) {
+    CHECK(calls[0].name == "mln_map_add_geojson_source_data");
+    CHECK(calls[0].id == "mapigrade-overlay-1-source-0");
+    CHECK(calls[1].name == "mln_map_add_style_layer_json");
+    CHECK(calls[1].id == "mapigrade-overlay-1-0");
+    CHECK(calls[1].before == "road_label");
+    CHECK(calls[2].id == "mapigrade-overlay-1-1");
+    CHECK(calls[2].before == "road_label");
+  }
+  // The map draws it: a rendered query at the line finds the feature.
+  {
+    SurfaceDart dart(handle);
+    CHECK(Settled(handle, 1));
+    Event hit = Query(handle, QuerySquare(2));
+    CHECK(hit.status == 0);
+    CHECK(hit.message.find(R"("source":"mapigrade-overlay-1-source-0")") != std::string::npos);
+    CHECK(hit.message.find(R"("v":1)") != std::string::npos);
+  }
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void OverlayDataChangeSendsOnlyData() {
+  int64_t handle = CreateOverlayMap();
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 2));
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-1-1", "road_label", "poi"})));
+  ffi_wrappers::Reset();
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(2)) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] {
+    return !ffi_wrappers::CallNames("mln_map_set_geojson_source_data").empty();
+  }));
+  Sleep(200);
+  CHECK((ffi_wrappers::CallNames() ==
+         std::vector<std::string>{"mln_map_set_geojson_source_data"}));
+  // The same layers again, with the same placement and order key, submit
+  // nothing.
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 2));
+  Sleep(200);
+  CHECK(ffi_wrappers::Calls().size() == 1);
+  {
+    SurfaceDart dart(handle);
+    CHECK(Settled(handle, 1));
+    CHECK(Query(handle, QuerySquare(2)).message.find(R"("v":2)") !=
+          std::string::npos);
+  }
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void OverlayRemoveDeletesLayersThenSource() {
+  int64_t handle = CreateOverlayMap();
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 2));
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-1-1", "road_label", "poi"})));
+  ffi_wrappers::Reset();
+  CHECK(map_texture_overlay_remove(handle, 1) == MAP_TEXTURE_OK);
+  CHECK(WaitForLayers(kStyleIds));
+  CHECK(WaitFor([] { return ffi_wrappers::Calls().size() >= 3; }));
+  auto calls = ffi_wrappers::Calls();
+  CHECK(calls.size() == 3);
+  if (calls.size() == 3) {
+    CHECK(calls[0].name == "mln_map_remove_style_layer");
+    CHECK(calls[1].name == "mln_map_remove_style_layer");
+    CHECK(calls[2].name == "mln_map_remove_style_source");
+    CHECK(calls[2].id == "mapigrade-overlay-1-source-0");
+  }
+  // Removing a source that a layer still uses fails, so no error means the
+  // layers were removed first; and the overlay can be added again under the
+  // same ID.
+  Sleep(200);
+  CHECK(RenderErrors().empty());
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1));
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  CHECK(map_texture_overlay_remove(handle, 2) == MAP_TEXTURE_OK);
+  Sleep(100);
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void InvalidGeoJsonFailsSetData() {
+  int64_t handle = CreateOverlayMap();
+  std::string error;
+  CHECK(SetOverlaySource(handle, 1, "not geojson", &error) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(!error.empty());
+  CHECK(SetOverlaySource(handle, 1, "", &error) == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(!error.empty());
+  CHECK(map_texture_overlay_set_source(handle, 1, 0, 0, nullptr, 0, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1), &error, -1) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(!error.empty());
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1), &error, 0, 2) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(!error.empty());
+  CHECK(map_texture_overlay_remove_source(handle, 1, -1) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_overlay_remove_source(handle, 1, 5) == MAP_TEXTURE_OK);
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1), &error) == MAP_TEXTURE_OK);
+  CHECK(error.empty());
+  map_texture_dispose(handle);
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1)) == MAP_TEXTURE_ERROR_DISPOSED);
+}
+
+void InvalidOverlayLayersAreRejected() {
+  int64_t handle = CreateOverlayMap();
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(2, 1)) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, R"([{"type": "line"}])") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  // A layer must name a source of its overlay.
+  CHECK(SetOverlayLayers(handle, 1, "[" + LineLayerJson(1, 0, "s") + "]") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1,
+                         "[" + LineLayerJson(1, 0, "mapigrade-overlay-1") + "]") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(
+            handle, 1,
+            "[" + LineLayerJson(1, 0, map_texture::OverlaySourceId(2, 0)) + "]") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, R"([{"id": "mapigrade-overlay-1-0", "type": "line"}])") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, "{}") == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_overlay_set_layers(handle, 1, nullptr, 0, nullptr, 0, 0) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 3) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 1, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 1, "") ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(SetOverlayLayers(handle, 1, "[]") == MAP_TEXTURE_OK);
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 1, "water") ==
+        MAP_TEXTURE_OK);
+  Sleep(100);
+  CHECK(LayerIds() == kStyleIds);
+  map_texture_dispose(handle);
+}
+
+void OverlaysAtSameAnchorFollowOrderKeyInStyle() {
+  int64_t handle = CreateOverlayMap();
+  for (int64_t id : {1, 3}) {
+    SetOverlaySource(handle, id, LineGeoJson(1));
+    SetOverlayLayers(handle, id, LineLayersJson(id, 1), 0, nullptr, id, id);
+  }
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-3-0", "road_label", "poi"})));
+  // Added later, between the two by its order key.
+  SetOverlaySource(handle, 2, LineGeoJson(1));
+  SetOverlayLayers(handle, 2, LineLayersJson(2, 2), 0, nullptr, 2, 2);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-2-0", "mapigrade-overlay-2-1",
+                       "mapigrade-overlay-3-0", "road_label", "poi"})));
+  // An order key change moves the layers without adding them again.
+  ffi_wrappers::Reset();
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 0, nullptr, 9, 1);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-2-0",
+                       "mapigrade-overlay-2-1", "mapigrade-overlay-3-0",
+                       "mapigrade-overlay-1-0", "road_label", "poi"})));
+  CHECK(!ffi_wrappers::CallNames("mln_map_move_style_layer").empty());
+  CHECK(ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty());
+  CHECK(ffi_wrappers::CallNames("mln_map_add_geojson_source_data").empty());
+  // A placement change moves them too.
+  ffi_wrappers::Reset();
+  SetOverlayLayers(handle, 2, LineLayersJson(2, 2), 1, "water", 2, 2);
+  CHECK((WaitForLayers({"background", "mapigrade-overlay-2-0",
+                       "mapigrade-overlay-2-1", "water", "road",
+                       "mapigrade-overlay-3-0", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  CHECK(ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty());
+  // Changed layers are added again, in place.
+  ffi_wrappers::Reset();
+  SetOverlayLayers(handle, 3, LineLayersJson(3, 1, "8"), 0, nullptr, 3, 3);
+  CHECK(WaitFor([] {
+    return !ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty();
+  }));
+  CHECK((WaitForLayers({"background", "mapigrade-overlay-2-0",
+                       "mapigrade-overlay-2-1", "water", "road",
+                       "mapigrade-overlay-3-0", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  CHECK((ffi_wrappers::CallNames("mln_map_remove_style_layer") ==
+         std::vector<std::string>{"mln_map_remove_style_layer"}));
+  Sleep(200);
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void OverlaysAreInstalledAgainAfterStyleLoad() {
+  int64_t handle = CreateOverlayMap();
+  SurfaceDart dart(handle);
+  for (int64_t id : {1, 2}) {
+    SetOverlaySource(handle, id, LineGeoJson(1));
+    SetOverlayLayers(handle, id, LineLayersJson(id, 1), 0, nullptr, id, id);
+  }
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-2-0", "road_label", "poi"})));
+  CHECK(Settled(handle, 1));
+  {
+    std::lock_guard lock(events_mutex);
+    events.clear();
+  }
+  map_texture_load_style_json(handle, kOverlayStyle2);
+  // Commands between the load and the install apply: new data for 1, and 2
+  // moves to the top.
+  SetOverlaySource(handle, 1, LineGeoJson(2));
+  SetOverlayLayers(handle, 2, LineLayersJson(2, 1), 2, nullptr, 2, 2);
+  CHECK(WaitForStyleLoaded());
+  CHECK((WaitForLayers({"land", "street", "mapigrade-overlay-1-0", "label",
+                       "mapigrade-overlay-2-0"})));
+  CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == "mapigrade-overlay-1-source-0");
+  CHECK(Settled(handle, 1));
+  Event hit = Query(handle, QuerySquare(2));
+  CHECK(hit.message.find(R"("source":"mapigrade-overlay-1-source-0")") != std::string::npos);
+  CHECK(hit.message.find(R"("v":2)") != std::string::npos);
+  CHECK(hit.message.find(R"("source":"mapigrade-overlay-2-source-0")") != std::string::npos);
+  // Loading the first style again puts them back below its labels.
+  map_texture_load_style_json(handle, kOverlayStyle);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "road_label", "poi", "mapigrade-overlay-2-0"})));
+  Sleep(200);
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void OverlaySetBeforeStyleLoadsIsInstalledWhenItLoads() {
+  int64_t handle = CreateMap(false);
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 1, "water");
+  map_texture_resize(handle, 120, 90, 2.0);
+  Sleep(200);
+  // Nothing is placed, and no missing layer is reported, before a style.
+  CHECK(ffi_wrappers::CallNames("mln_map_").empty());
+  CHECK(LoadFailures().empty());
+  map_texture_load_style_json(handle, kOverlayStyle);
+  CHECK((WaitForLayers({"background", "mapigrade-overlay-1-0", "water", "road",
+                       "road_label", "poi"})));
+  CHECK(LoadFailures().empty());
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void MissingBelowLayerIsReportedOncePerStyleLoad() {
+  int64_t handle = CreateOverlayMap();
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1), 1, "road-label");
+  // On top, and reported.
+  CHECK((WaitForLayers({"background", "water", "road", "road_label", "poi",
+                       "mapigrade-overlay-1-0"})));
+  CHECK(WaitFor([] { return !LoadFailures().empty(); }));
+  auto reported = LoadFailures();
+  CHECK(reported.size() == 1);
+  CHECK(!reported.empty() && reported[0].find("road-label") != std::string::npos);
+  // Later changes don't report it again.
+  SetOverlaySource(handle, 1, LineGeoJson(2));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 2), 1, "road-label");
+  CHECK((WaitForLayers({"background", "water", "road", "road_label", "poi",
+                       "mapigrade-overlay-1-0", "mapigrade-overlay-1-1"})));
+  Sleep(200);
+  CHECK(LoadFailures().size() == 1);
+  // The next style load does.
+  map_texture_load_style_json(handle, kOverlayStyle2);
+  CHECK(WaitFor([] { return LoadFailures().size() == 2; }));
+  // A style with the layer places the overlay below it.
+  std::string with_label = kOverlayStyle2;
+  with_label.replace(with_label.find(R"("id": "label")"), 13, R"("id": "road-label")");
+  map_texture_load_style_json(handle, with_label.c_str());
+  CHECK((WaitForLayers({"land", "street", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-1-1", "road-label"})));
+  Sleep(200);
+  CHECK(LoadFailures().size() == 2);
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+// An overlay with two sources, one with line metrics, as the polyline layer
+// sends for a list with a gradient polyline.
+void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
+  int64_t handle = CreateOverlayMap();
+  const std::string source0 = map_texture::OverlaySourceId(1, 0);
+  const std::string source1 = map_texture::OverlaySourceId(1, 1);
+  const std::string both_layers = "[" + LineLayerJson(1, 0, source0) + ", " +
+                                  LineLayerJson(1, 1, source1) + "]";
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(1)) == MAP_TEXTURE_OK);
+  CHECK(SetOverlayLayers(handle, 1, both_layers) == MAP_TEXTURE_OK);
+  // The layers name a source the overlay doesn't have yet: nothing happens.
+  Sleep(200);
+  CHECK(LayerIds() == kStyleIds);
+  CHECK(ffi_wrappers::Calls().empty());
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(2), nullptr, 1,
+                         MAP_TEXTURE_SOURCE_LINE_METRICS) == MAP_TEXTURE_OK);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "mapigrade-overlay-1-1", "road_label", "poi"})));
+  CHECK((ffi_wrappers::CallNames() ==
+         std::vector<std::string>{
+             "mln_map_add_geojson_source_data", "mln_map_add_geojson_source_data",
+             "mln_map_add_style_layer_json", "mln_map_add_style_layer_json"}));
+  CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == source0);
+  CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-1") == source1);
+  {
+    SurfaceDart dart(handle);
+    CHECK(Settled(handle, 1));
+    Event hit = Query(handle, QuerySquare(2));
+    CHECK(hit.message.find("\"source\":\"" + source0 + "\"") != std::string::npos);
+    CHECK(hit.message.find("\"source\":\"" + source1 + "\"") != std::string::npos);
+  }
+  // Only the first source's data changes: one data command.
+  ffi_wrappers::Reset();
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(3)) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return ffi_wrappers::Calls().size() >= 1; }));
+  Sleep(200);
+  auto calls = ffi_wrappers::Calls();
+  CHECK(calls.size() == 1);
+  CHECK(!calls.empty() && calls[0].name == "mln_map_set_geojson_source_data" &&
+        calls[0].id == source0);
+
+  // Layers that name only source 0, then the removal of source 1, as Dart
+  // sends them: the source is removed after the layers that named it.
+  ffi_wrappers::Reset();
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1)) == MAP_TEXTURE_OK);
+  CHECK(map_texture_overlay_remove_source(handle, 1, 1) == MAP_TEXTURE_OK);
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  CHECK(WaitFor([] {
+    return !ffi_wrappers::CallNames("mln_map_remove_style_source").empty();
+  }));
+  Sleep(200);
+  auto names = ffi_wrappers::CallNames();
+  CHECK((names == std::vector<std::string>{
+                      "mln_map_remove_style_layer", "mln_map_remove_style_layer",
+                      "mln_map_add_style_layer_json",
+                      "mln_map_remove_style_source"}));
+  CHECK(ffi_wrappers::Calls().back().id == source1);
+  CHECK(RenderErrors().empty());
+  // Removing it again changes nothing.
+  CHECK(map_texture_overlay_remove_source(handle, 1, 1) == MAP_TEXTURE_OK);
+  Sleep(200);
+  CHECK(ffi_wrappers::Calls().size() == 4);
+
+  // An option change on an existing index adds the source again, with the
+  // layers that name it removed before and added after.
+  ffi_wrappers::Reset();
+  CHECK(SetOverlaySource(handle, 1, LineGeoJson(4), nullptr, 0,
+                         MAP_TEXTURE_SOURCE_LINE_METRICS) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] {
+    return !ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty();
+  }));
+  Sleep(200);
+  CHECK((ffi_wrappers::CallNames() ==
+         std::vector<std::string>{
+             "mln_map_remove_style_layer", "mln_map_remove_style_source",
+             "mln_map_add_geojson_source_data", "mln_map_add_style_layer_json"}));
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  {
+    SurfaceDart dart(handle);
+    CHECK(Settled(handle, 1));
+    CHECK(Query(handle, QuerySquare(2)).message.find(R"("v":4)") !=
+          std::string::npos);
+  }
+  CHECK(RenderErrors().empty());
+  // Removing the overlay removes its layers, then its remaining source.
+  ffi_wrappers::Reset();
+  CHECK(map_texture_overlay_remove(handle, 1) == MAP_TEXTURE_OK);
+  CHECK(WaitForLayers(kStyleIds));
+  CHECK(WaitFor([] { return ffi_wrappers::Calls().size() >= 2; }));
+  Sleep(200);
+  CHECK((ffi_wrappers::CallNames() ==
+         std::vector<std::string>{"mln_map_remove_style_layer",
+                                  "mln_map_remove_style_source"}));
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
+void RejectedLayerJsonIsReportedAsRenderError() {
+  int64_t handle = CreateOverlayMap();
+  SetOverlaySource(handle, 1, LineGeoJson(1));
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1, R"("wide")"));
+  CHECK(WaitFor([] { return !RenderErrors().empty(); }));
+  auto errors = RenderErrors();
+  CHECK(errors.size() == 1);
+  if (!errors.empty()) {
+    CHECK(errors[0].find("mln_map_add_style_layer_json") != std::string::npos);
+    CHECK(errors[0].find("mapigrade-overlay-1-0") != std::string::npos);
+  }
+  // Valid layers afterwards are installed.
+  SetOverlayLayers(handle, 1, LineLayersJson(1, 1));
+  CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
+                       "road_label", "poi"})));
+  map_texture_dispose(handle);
+}
+
 }  // namespace
 
 namespace map_texture {
@@ -1800,6 +2325,24 @@ int main(int argc, char** argv) {
       {"DisposeEngineMapsDisposesOnlyThatEngine",
        DisposeEngineMapsDisposesOnlyThatEngine},
       {"UnknownEngineFailsCreate", UnknownEngineFailsCreate},
+      {"OverlayAppearsInStyleBelowLabels", OverlayAppearsInStyleBelowLabels},
+      {"OverlayDataChangeSendsOnlyData", OverlayDataChangeSendsOnlyData},
+      {"OverlayRemoveDeletesLayersThenSource",
+       OverlayRemoveDeletesLayersThenSource},
+      {"InvalidGeoJsonFailsSetData", InvalidGeoJsonFailsSetData},
+      {"InvalidOverlayLayersAreRejected", InvalidOverlayLayersAreRejected},
+      {"OverlaysAtSameAnchorFollowOrderKeyInStyle",
+       OverlaysAtSameAnchorFollowOrderKeyInStyle},
+      {"OverlaysAreInstalledAgainAfterStyleLoad",
+       OverlaysAreInstalledAgainAfterStyleLoad},
+      {"OverlaySetBeforeStyleLoadsIsInstalledWhenItLoads",
+       OverlaySetBeforeStyleLoadsIsInstalledWhenItLoads},
+      {"MissingBelowLayerIsReportedOncePerStyleLoad",
+       MissingBelowLayerIsReportedOncePerStyleLoad},
+      {"OverlayWithTwoSourcesIsDrawnOnceBothExist",
+       OverlayWithTwoSourcesIsDrawnOnceBothExist},
+      {"RejectedLayerJsonIsReportedAsRenderError",
+       RejectedLayerJsonIsReportedAsRenderError},
   };
   // A name as argument runs only the tests whose names contain it.
   const char* only = nullptr;

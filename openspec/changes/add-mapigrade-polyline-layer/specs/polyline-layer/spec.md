@@ -28,7 +28,7 @@ The package SHALL provide `MapigradePolylineLayer`, a widget that takes a list o
 - **THEN** the map draws the polylines when the style has loaded
 
 ### Requirement: Polyline model
-The package SHALL provide `MapigradePolyline`, an immutable value with these properties and defaults: `points`, a list of `LatLng`, required; `color`, default `0xFF00FF00`; `strokeWidth`, default 1.0; `useStrokeWidthInMeter`, default false; `borderStrokeWidth`, default 0.0; `borderColor`, default `0xFFFFFF00`; `strokeCap`, default `StrokeCap.round`; `strokeJoin`, default `StrokeJoin.round`; `dashes`, a list of numbers or null, default null; `gradientColors`, a list of `Color` or null, default null; and `gradientStops`, a list of numbers or null, default null. The names, types and defaults of the properties that `flutter_map`'s `Polyline` also has SHALL equal those of `Polyline`. Two `MapigradePolyline` values with equal properties SHALL be equal. In debug builds the constructor SHALL fail an assertion for a negative `strokeWidth` or `borderStrokeWidth`, for `dashes` with an odd number of entries, a negative entry or only zeros, and for `gradientStops` that is given without `gradientColors`, whose length differs from that of `gradientColors`, or whose entries aren't in increasing order from 0 to 1.
+The package SHALL provide `MapigradePolyline`, an immutable value with these properties and defaults: `points`, a list of `LatLng`, required; `color`, default `0xFF00FF00`; `strokeWidth`, default 1.0; `useStrokeWidthInMeter`, default false; `borderStrokeWidth`, default 0.0; `borderColor`, default `0xFFFFFF00`; `strokeCap`, default `StrokeCap.round`; `strokeJoin`, default `StrokeJoin.round`; `dashes`, a list of numbers or null, default null; `gradientColors`, a list of `Color` or null, default null; and `gradientStops`, a list of numbers or null, default null. The names, types and defaults of the properties that `flutter_map`'s `Polyline` also has SHALL equal those of `Polyline`. Two `MapigradePolyline` values with equal properties SHALL be equal. In debug builds the constructor SHALL fail an assertion for a negative `strokeWidth` or `borderStrokeWidth`, for `dashes` with an odd number of entries, a negative entry or only zeros, for `gradientStops` that is given without `gradientColors`, whose length differs from that of `gradientColors`, or whose entries aren't in non-decreasing order from 0 to 1, and for `gradientColors` given together with `dashes`, because MapLibre can't draw a gradient on a dashed line.
 
 #### Scenario: Defaults
 - **WHEN** an application creates a `MapigradePolyline` with only `points`
@@ -49,7 +49,8 @@ The map SHALL draw each polyline with at least two points as a line through its 
 - `borderStrokeWidth` and `borderColor`: a border on each side of the line, each `borderStrokeWidth` / 2 logical pixels wide, in `borderColor`. The border SHALL NOT be drawn under the line, so a line with a translucent `color` shows the map, not the border, through it.
 - `strokeCap` and `strokeJoin`: the caps at the line's ends and the joins between its segments, as `StrokeCap` and `StrokeJoin` define them.
 - `dashes`: alternating dash and gap lengths, in multiples of the line's width, starting with a dash. A dash of length 0 with a round cap SHALL draw a dot. When `dashes` is null, the line SHALL be solid.
-- `gradientColors` and `gradientStops`: a color gradient along the length of the line, where a stop of 0 is the first point and 1 is the last, measured along the line; the gradient SHALL replace `color`. When `gradientStops` is null, the stops SHALL be spaced evenly from 0 to 1.
+- `gradientColors` and `gradientStops`: a color gradient along the length of the line, where a stop of 0 is the first point and 1 is the last, measured along the line; the gradient SHALL replace `color`. When `gradientStops` is null, the stops SHALL be spaced evenly from 0 to 1. Two equal consecutive stops SHALL give a hard edge between their colors.
+- The border of a dashed line SHALL be solid.
 
 #### Scenario: Translucent line with a border
 - **WHEN** the map draws a polyline 10 logical pixels wide with a `color` of alpha 0.5 and a red border 4 logical pixels wide, over a white background
@@ -84,7 +85,7 @@ Within one polyline layer, a polyline later in the list SHALL be drawn above the
 
 ### Requirement: Placement among the style's layers
 The polyline layer SHALL take a placement, `LayerPlacement`, with three values:
-- `LayerPlacement.belowLabels()`, the default: the polylines SHALL be drawn directly above the last style layer whose type isn't `symbol`, so that every style layer after it is drawn above the polylines. When the style has no layer other than `symbol` layers, the polylines SHALL be drawn below all style layers.
+- `LayerPlacement.belowLabels()`, the default: the polylines SHALL be drawn directly above the last style layer whose type isn't `symbol`, so that every style layer after it is drawn above the polylines, except that when a style layer whose type is `fill-extrusion` comes before that place, the polylines SHALL be drawn directly below the first such layer, so that 3D buildings are drawn above the polylines. When the style has no layer other than `symbol` layers, the polylines SHALL be drawn below all style layers.
 - `LayerPlacement.belowLayer(id)`: the polylines SHALL be drawn directly below the style layer with the ID `id`.
 - `LayerPlacement.top()`: the polylines SHALL be drawn above all style layers.
 
@@ -97,6 +98,10 @@ The style's layers SHALL NOT include the layers that polyline layers add. When t
 #### Scenario: Style with symbol layers between other layers
 - **WHEN** a style has a `symbol` layer of one-way arrows followed by bridge `line` layers and then label `symbol` layers, and a polyline layer has the default placement
 - **THEN** the polylines are drawn above the bridges and below the labels
+
+#### Scenario: Style with 3D buildings
+- **WHEN** a style has a `fill-extrusion` layer of buildings before its last layer whose type isn't `symbol`, and a polyline layer has the default placement
+- **THEN** the polylines are drawn below the buildings, and with the placement `LayerPlacement.top()` above them
 
 #### Scenario: Below a named layer
 - **WHEN** a polyline layer has the placement `LayerPlacement.belowLayer('water')` and the style has a layer `water`
@@ -142,14 +147,3 @@ When the application rebuilds a polyline layer with a list of polylines that isn
 #### Scenario: Polyline layer removed
 - **WHEN** the application removes a polyline layer from the children
 - **THEN** the map no longer draws its polylines
-
-### Requirement: Conversion from flutter_map polylines
-`MapigradePolyline.fromPolyline` SHALL convert a `flutter_map` `Polyline` to a `MapigradePolyline` with the same `points`, `color`, `strokeWidth`, `useStrokeWidthInMeter`, `borderStrokeWidth`, `borderColor`, `strokeCap` and `strokeJoin`. A dashed pattern SHALL be converted to `dashes` of its segment lengths divided by the `strokeWidth`. A dotted pattern SHALL be converted to `dashes` of 0 and the pattern's spacing factor, with `strokeCap` set to `StrokeCap.round`. The pattern's `PatternFit` and the `Polyline`'s `hitValue` SHALL be ignored. A `Polyline` with `gradientColors` SHALL fail an assertion in debug builds, because `flutter_map` draws its gradient in a straight screen direction from the first to the last point, and converted without the gradient in release builds.
-
-#### Scenario: Dashed polyline
-- **WHEN** an application converts a `Polyline` 4 logical pixels wide with the pattern `StrokePattern.dashed(segments: [8, 4])`
-- **THEN** the result has `dashes` of `[2, 1]` and the other properties of the `Polyline`
-
-#### Scenario: Polyline with a gradient
-- **WHEN** an application converts a `Polyline` with `gradientColors` in a debug build
-- **THEN** an assertion fails that states that the gradient can't be converted

@@ -16,12 +16,19 @@ namespace ffi_wrappers {
 void Reset();
 
 // The redirected calls since the last Reset(), in order. For
-// mln_runtime_set_maximum_ambient_cache_size, `size` is the size.
+// mln_runtime_set_maximum_ambient_cache_size, `size` is the size. For the
+// style source and layer commands, `id` is the source or layer ID (for
+// mln_map_add_style_layer_json, the layer JSON's id member) and `before` the
+// layer the layer goes before.
 struct Call {
   std::string name;
   uint64_t size = 0;
+  std::string id;
+  std::string before;
 };
 std::vector<Call> Calls();
+// The names of Calls() that start with `prefix`, in order.
+std::vector<std::string> CallNames(const std::string& prefix = "");
 
 // Makes the next mln_runtime_set_maximum_ambient_cache_size calls return
 // `status` without calling the FFI, until set back to MLN_STATUS_OK.

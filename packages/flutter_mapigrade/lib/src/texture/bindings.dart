@@ -264,6 +264,63 @@ external int mapTextureRemoveFeatureState(
   Pointer<Utf8> key,
 );
 
+/// `MAP_TEXTURE_SOURCE_LINE_METRICS` of `map_texture_overlay_set_source`.
+const mapTextureSourceLineMetrics = 1;
+
+@Native<
+  Int32 Function(
+    Int64,
+    Int64,
+    Int32,
+    Int32,
+    Pointer<Uint8>,
+    Int64,
+    Pointer<Pointer<Utf8>>,
+  )
+>(symbol: 'map_texture_overlay_set_source')
+external int mapTextureOverlaySetSource(
+  int handle,
+  int overlayId,
+  int sourceIndex,
+  int sourceOptions,
+  Pointer<Uint8> geojson,
+  int length,
+  Pointer<Pointer<Utf8>> outError,
+);
+
+@Native<Int32 Function(Int64, Int64, Int32)>(
+  symbol: 'map_texture_overlay_remove_source',
+)
+external int mapTextureOverlayRemoveSource(
+  int handle,
+  int overlayId,
+  int sourceIndex,
+);
+
+@Native<
+  Int32 Function(
+    Int64,
+    Int64,
+    Pointer<Utf8>,
+    Int32,
+    Pointer<Utf8>,
+    Int64,
+    Int64,
+  )
+>(symbol: 'map_texture_overlay_set_layers')
+external int mapTextureOverlaySetLayers(
+  int handle,
+  int overlayId,
+  Pointer<Utf8> layersJson,
+  int placementKind,
+  Pointer<Utf8> belowLayerId,
+  int orderChild,
+  int orderSeq,
+);
+
+@Native<Int32 Function(Int64, Int64)>(symbol: 'map_texture_overlay_remove')
+external int mapTextureOverlayRemove(int handle, int overlayId);
+
 @Native<Int32 Function(Int64, Double, Double, Double)>(
   symbol: 'map_texture_resize',
 )

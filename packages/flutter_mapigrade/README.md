@@ -78,6 +78,36 @@ Place widgets that don't move with the map, such as zoom buttons or a scale bar,
 
 Give `styleUrl` or `styleJson`. To change the style, rebuild the layer with a different one.
 
+## Polylines below the labels
+
+`flutter_map`'s `PolylineLayer` draws its polylines above the map, so a route covers road names and other labels. A `MapigradePolylineLayer` in the layer's `children` gives its polylines to the map, which draws them among the style's own layers, by default below the labels:
+
+```dart
+MapigradeLayer(
+  styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+  children: [
+    MapigradePolylineLayer(
+      polylines: [
+        MapigradePolyline(
+          points: const [LatLng(49.25, -123.1), LatLng(49.28, -123.12)],
+          color: Colors.blue,
+          strokeWidth: 6,
+          borderStrokeWidth: 2,
+          borderColor: Colors.white,
+        ),
+      ],
+    ),
+    MarkerLayer(markers: [
+      Marker(point: const LatLng(49.25, -123.1), child: const Icon(Icons.place)),
+    ]),
+  ],
+)
+```
+
+The map draws the polylines below every Flutter child, such as the markers, whatever the polyline layer's position in `children`. `LayerPlacement.belowLayer` and `LayerPlacement.top` place them below a named style layer or above all style layers.
+
+To switch from `PolylineLayer` and `Polyline`, change the class names to `MapigradePolylineLayer` and `MapigradePolyline`, turn a `pattern` into `dashes` in multiples of the line's width, and replace `colorsStop` with `gradientStops`. A gradient runs along the line, not in a straight screen direction. The documentation of the two classes describes the other differences from `flutter_map`: dots, `PatternFit`, hit testing and translucent polylines that overlap.
+
 ## Identifying and highlighting features
 
 The features that the map draws, such as POIs, trails and roads, are in the map's tiles, not in Dart. To find the feature the user tapped, give the layer a `LayerController` and query it with the tap position:
@@ -195,7 +225,7 @@ android {
 
 ## Limitations
 
-- No API for style layers, sources or pitch. Feature queries cover rendered features at a point or in a rectangle; there are no line-string or source feature queries.
+- No API for style layers, sources or pitch, except the polylines of `MapigradePolylineLayer`. Feature queries cover rendered features at a point or in a rectangle; there are no line-string or source feature queries.
 - While the camera moves, labels and icons are matched where MapLibre placed them last, which can be behind the map on screen.
 - Sprite and glyph density is fixed when the map is created.
 

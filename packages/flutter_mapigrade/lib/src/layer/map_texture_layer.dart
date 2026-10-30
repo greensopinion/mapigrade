@@ -21,6 +21,7 @@ import 'layer_alignment.dart';
 import 'layer_controller.dart';
 import 'layer_exception.dart';
 import 'layer_metrics.dart';
+import 'overlay_host.dart';
 
 /// Creates the map of a [MapTextureLayer]; the signature of
 /// [MapTextureController.create], with [HttpHeaderRule]s.
@@ -127,6 +128,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   bool _creating = false;
   bool _createFailed = false;
   final Set<String> _loadFailures = {};
+  late final OverlayHost _host = OverlayHost(report: _report);
   StreamSubscription<FrameCamera>? _frames;
   StreamSubscription<FrameCamera>? _readyFrames;
   StreamSubscription<MapEvent>? _events;
@@ -209,6 +211,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     // frame.
     _readyFrames = controller.readyFrames.listen((_) => setState(() {}));
     _loadStyle();
+    _host.attach(controller);
     widget.onController?.call(controller);
   }
 
@@ -287,6 +290,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     if (widget.controller case final controller?) {
       releaseLayerController(controller, this);
     }
+    _host.detach();
     _events?.cancel();
     _frames?.cancel();
     _readyFrames?.cancel();
@@ -366,7 +370,22 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
                 camera: childCamera,
                 controller: fm.MapController.of(context),
                 options: fm.MapOptions.of(context),
-                child: Stack(children: widget.children),
+                child: OverlayHostScope(
+                  host: _host,
+                  child: Stack(
+                    children: [
+                      for (var i = 0; i < widget.children.length; i++)
+                        OverlayChildIndex(
+                          key: switch (widget.children[i].key) {
+                            final LocalKey key => ValueKey(key),
+                            _ => null,
+                          },
+                          index: i,
+                          child: widget.children[i],
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
