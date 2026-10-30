@@ -18,6 +18,7 @@ std::vector<HeaderRule> header_rules;
 std::string last_asset_path = "<null>";
 int log_registrations = 0;
 std::optional<mln_log_handler> log_handler;
+std::function<mln_status(const std::string&)> feature_state_hook;
 
 void Record(std::string name, uint64_t size = 0) {
   std::lock_guard lock(mutex);
@@ -63,6 +64,7 @@ void Reset() {
   runtime_create_message.clear();
   header_rules.clear();
   last_asset_path = "<null>";
+  feature_state_hook = nullptr;
 }
 
 std::vector<Call> Calls() {
@@ -88,6 +90,12 @@ void SetRuntimeCreateResult(mln_status status, std::string message) {
   std::lock_guard lock(mutex);
   runtime_create_status = status;
   runtime_create_message = std::move(message);
+}
+
+void SetFeatureStateHook(
+    std::function<mln_status(const std::string& feature_id)> hook) {
+  std::lock_guard lock(mutex);
+  feature_state_hook = std::move(hook);
 }
 
 std::vector<HeaderRule> HeaderRules() {
@@ -262,6 +270,28 @@ mln_status test_mln_map_move_style_layer(mln_map map, mln_buffer_view layer_id,
   RecordStyleCall("mln_map_move_style_layer", layer_id, before_layer_id);
   return mln_map_move_style_layer(map, layer_id, before_layer_id, completion,
                                   out_diagnostic);
+}
+
+mln_status test_mln_map_set_feature_state(
+    mln_map map, const mln_feature_state_selector* selector,
+    mln_buffer_view state, const mln_completion* completion,
+    mln_diagnostic* out_diagnostic) {
+  std::function<mln_status(const std::string&)> hook;
+  {
+    std::lock_guard lock(mutex);
+    hook = feature_state_hook;
+  }
+  if (hook) {
+    bool has_id =
+        (selector->fields & MLN_FEATURE_STATE_SELECTOR_FEATURE_ID) != 0;
+    mln_status status = hook(has_id ? Text(selector->feature_id) : "");
+    if (status != MLN_STATUS_OK) {
+      SetDiagnostic(out_diagnostic, "set by the test");
+      return status;
+    }
+  }
+  return mln_map_set_feature_state(map, selector, state, completion,
+                                   out_diagnostic);
 }
 
 }  // extern "C"
