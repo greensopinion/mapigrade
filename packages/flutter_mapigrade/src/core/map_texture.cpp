@@ -328,11 +328,13 @@ void MapTexture::ReduceMemoryUse() {
 void MapTexture::SetFeatureState(FeatureStateTarget feature,
                                  std::string state) {
   commands_.Push(Command::SetFeatureState(std::move(feature), std::move(state)));
+  feature_state_queued_.fetch_add(1);
   Signal();
 }
 
 void MapTexture::RemoveFeatureState(FeatureStateTarget feature) {
   commands_.Push(Command::RemoveFeatureState(std::move(feature)));
+  feature_state_queued_.fetch_add(1);
   Signal();
 }
 
@@ -367,6 +369,7 @@ void MapTexture::QueryRenderedFeatures(RenderedQuery query) {
   {
     std::lock_guard lock(queries_mutex_);
     queries_.push_back(std::move(query));
+    feature_state_queued_before_queries_ = feature_state_queued_.load();
   }
   Signal();
 }
@@ -926,6 +929,7 @@ void MapTexture::ApplyCommands(bool* stop) {
 }
 
 void MapTexture::ApplyFeatureState(const Command& command) {
+  ++feature_state_applied_;
   const FeatureStateTarget& feature = command.feature;
   mln_feature_state_selector selector{};
   selector.size = sizeof(selector);
@@ -1869,9 +1873,11 @@ void MapTexture::RunQueries() {
     // render.
     if (session_ != MLN_HANDLE_NULL && gate_.paused()) return;
     // The frame that includes the feature state comes after the commands'
-    // repaint.
+    // repaint. A command queued after this pass took the queue is applied in
+    // a later pass.
     if (session_ != MLN_HANDLE_NULL &&
-        (feature_state_completed_.load() < feature_state_submitted_ ||
+        (feature_state_applied_ < feature_state_queued_before_queries_ ||
+         feature_state_completed_.load() < feature_state_submitted_ ||
          rendered_update_generation_ < feature_state_generation_.load())) {
       return;
     }
