@@ -203,7 +203,9 @@ void main() {
       'ENGINES threads: before $before, with the second engine '
       '$during, after it was destroyed $after',
     );
-    expect(after, lessThanOrEqualTo(before));
+    // Threads of the process that the map doesn't own come and go, so the
+    // count drifts by one between runs; a leaked map leaves about 12.
+    expect(after, lessThanOrEqualTo(before + 1));
 
     // The maps of the first engine keep rendering.
     final frame = waitFor<FrameCamera>(

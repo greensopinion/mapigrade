@@ -11,16 +11,27 @@
 
 #include "buffer_state.h"
 #include "command_queue.h"
+#include "overlay.h"
 #include "projection.h"
 #include "render_gate.h"
+#include "style_layer_fixtures.h"
 
+using map_texture::Anchor;
 using map_texture::BufferState;
 using map_texture::Camera;
 using map_texture::Command;
 using map_texture::CommandQueue;
+using map_texture::ComputeAnchor;
 using map_texture::FrameInfo;
+using map_texture::LayerPlan;
+using map_texture::OverlayAction;
+using map_texture::OverlayLayout;
+using map_texture::Placement;
+using map_texture::PlacementKind;
+using map_texture::PlanLayers;
 using map_texture::RenderGate;
 using Slot = map_texture::BufferState::Slot;
+using map_texture::StyleLayer;
 using map_texture::Viewport;
 using map_texture::WorldPoint;
 
@@ -785,6 +796,413 @@ void ScreenBoundsContainRotatedCorners() {
   CHECK(std::abs(box.max.y - (50 + std::sqrt(2.0))) < kTolerance);
 }
 
+// Overlay placement (design D199 of the add-mapigrade-polyline-layer change).
+
+const Placement kBelowLabels{PlacementKind::kBelowLabels, {}};
+const Placement kTop{PlacementKind::kTop, {}};
+
+Placement BelowLayer(const char* id) {
+  return {PlacementKind::kBelowLayer, id};
+}
+
+// The index of the layer `id` in `layers`, or -1.
+int IndexOf(const std::vector<StyleLayer>& layers, const std::string& id) {
+  for (size_t i = 0; i < layers.size(); ++i) {
+    if (layers[i].id == id) return static_cast<int>(i);
+  }
+  return -1;
+}
+
+// Checks that `anchor` is a layer after every non-symbol layer and before
+// every label of `layers`.
+void CheckBelowLabelsAnchor(const std::vector<StyleLayer>& layers,
+                            const std::string& anchor) {
+  int index = IndexOf(layers, anchor);
+  CHECK(index >= 0);
+  for (int i = 0; i < static_cast<int>(layers.size()); ++i) {
+    if (layers[i].type != "symbol") CHECK(i < index);
+  }
+  CHECK(layers[index].type == "symbol");
+}
+
+void BelowLabelsAnchorInLiberty() {
+  const auto& liberty = style_fixtures::kLibertyLayers;
+  Anchor anchor = ComputeAnchor(liberty, kBelowLabels);
+  CHECK(!anchor.missing);
+  // The 3D buildings, which are above the bridge layers that follow the
+  // one-way arrows and below the last non-symbol layer boundary_disputed.
+  CHECK(anchor.before == "building-3d");
+  CHECK(liberty[IndexOf(liberty, anchor.before)].type == "fill-extrusion");
+  CHECK(IndexOf(liberty, "road_one_way_arrow") <
+        IndexOf(liberty, "bridge_motorway"));
+  CHECK(IndexOf(liberty, "bridge_motorway") < IndexOf(liberty, anchor.before));
+  CHECK(IndexOf(liberty, anchor.before) <
+        IndexOf(liberty, "boundary_disputed"));
+}
+
+void BelowLabelsAnchorsOnTheFirstExtrusionBeforeTheLabels() {
+  std::vector<StyleLayer> layers = {
+      {"road", "line"},         {"arrow", "symbol"},
+      {"building", "fill"},     {"building-3d", "fill-extrusion"},
+      {"bridge", "line"},       {"towers-3d", "fill-extrusion"},
+      {"boundary", "line"},     {"label", "symbol"}};
+  CHECK((ComputeAnchor(layers, kBelowLabels) == Anchor{"building-3d", false}));
+  // An extrusion among the labels is above the anchor and doesn't change it.
+  std::vector<StyleLayer> extrusion_after = {
+      {"road", "line"}, {"label", "symbol"}, {"building-3d", "fill-extrusion"},
+      {"poi", "symbol"}};
+  CHECK((ComputeAnchor(extrusion_after, kBelowLabels) ==
+         Anchor{"building-3d", false}));
+  // The last non-symbol layer is an extrusion: the overlay goes below it.
+  std::vector<StyleLayer> extrusion_last = {
+      {"road", "line"}, {"building-3d", "fill-extrusion"}};
+  CHECK((ComputeAnchor(extrusion_last, kBelowLabels) ==
+         Anchor{"building-3d", false}));
+  std::vector<StyleLayer> overlay_extrusion = {
+      {"road", "line"}, {"mapigrade-overlay-1-0", "fill-extrusion"},
+      {"label", "symbol"}};
+  CHECK((ComputeAnchor(overlay_extrusion, kBelowLabels) ==
+         Anchor{"label", false}));
+}
+
+void BelowLabelsAnchorInBright() {
+  const auto& bright = style_fixtures::kBrightLayers;
+  Anchor anchor = ComputeAnchor(bright, kBelowLabels);
+  CHECK(!anchor.missing);
+  CHECK(IndexOf(bright, anchor.before) ==
+        IndexOf(bright, "boundary_disputed") + 1);
+  CHECK(anchor.before == "road_oneway");
+  CheckBelowLabelsAnchor(bright, anchor.before);
+}
+
+void BelowLabelsAnchorInPositron() {
+  const auto& positron = style_fixtures::kPositronLayers;
+  Anchor anchor = ComputeAnchor(positron, kBelowLabels);
+  CHECK(!anchor.missing);
+  CHECK(IndexOf(positron, anchor.before) ==
+        IndexOf(positron, "boundary_disputed") + 1);
+  CHECK(anchor.before == "waterway_line_label");
+  CheckBelowLabelsAnchor(positron, anchor.before);
+}
+
+void BelowLabelsWithOnlySymbolLayersIsBelowAll() {
+  std::vector<StyleLayer> layers = {{"a", "symbol"}, {"b", "symbol"}};
+  CHECK((ComputeAnchor(layers, kBelowLabels) == Anchor{"a", false}));
+}
+
+void BelowLabelsWithoutSymbolLayersIsTop() {
+  std::vector<StyleLayer> layers = {{"a", "background"}, {"b", "line"}};
+  CHECK((ComputeAnchor(layers, kBelowLabels) == Anchor{"", false}));
+  CHECK((ComputeAnchor({}, kBelowLabels) == Anchor{"", false}));
+}
+
+void OverlayLayersAreIgnoredByPlacement() {
+  // Overlay layers after the last style layer that isn't a symbol, and a line
+  // overlay among the labels, change nothing.
+  std::vector<StyleLayer> layers = {
+      {"water", "fill"},           {"mapigrade-overlay-1-0", "line"},
+      {"road", "line"},            {"mapigrade-overlay-2-0", "line"},
+      {"mapigrade-overlay-2-1", "line"}, {"label", "symbol"},
+      {"mapigrade-overlay-3-0", "line"}, {"poi", "symbol"}};
+  CHECK((ComputeAnchor(layers, kBelowLabels) == Anchor{"label", false}));
+  std::vector<StyleLayer> symbols_only = {{"mapigrade-overlay-1-0", "line"},
+                                          {"label", "symbol"}};
+  CHECK((ComputeAnchor(symbols_only, kBelowLabels) == Anchor{"label", false}));
+  std::vector<StyleLayer> lines_then_overlay = {
+      {"road", "line"}, {"mapigrade-overlay-1-0", "line"}};
+  CHECK((ComputeAnchor(lines_then_overlay, kBelowLabels) == Anchor{"", false}));
+  // An overlay layer can't be a belowLayer anchor.
+  CHECK((ComputeAnchor(layers, BelowLayer("mapigrade-overlay-1-0")) ==
+         Anchor{"", true}));
+}
+
+void OverlaySourceIndexParsesOnlyTheOverlaysSourceIds() {
+  using map_texture::OverlaySourceIndex;
+  CHECK(map_texture::OverlaySourceId(7, 0) == "mapigrade-overlay-7-source-0");
+  CHECK(map_texture::OverlayLayerId(7, 0) == "mapigrade-overlay-7-0");
+  CHECK(OverlaySourceIndex(7, "mapigrade-overlay-7-source-0") == 0);
+  CHECK(OverlaySourceIndex(7, "mapigrade-overlay-7-source-12") == 12);
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-7-0"));
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-17-source-0"));
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-7-source-"));
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-7-source-01"));
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-7-source-1x"));
+  CHECK(!OverlaySourceIndex(7, "mapigrade-overlay-7-source-1234567890"));
+  CHECK(!OverlaySourceIndex(7, ""));
+}
+
+void BelowLayerAnchorsOnThatLayer() {
+  const auto& liberty = style_fixtures::kLibertyLayers;
+  CHECK((ComputeAnchor(liberty, BelowLayer("water")) == Anchor{"water", false}));
+  CHECK((ComputeAnchor(liberty, BelowLayer("background")) ==
+         Anchor{"background", false}));
+}
+
+void MissingBelowLayerIsTopAndMissing() {
+  const auto& liberty = style_fixtures::kLibertyLayers;
+  CHECK((ComputeAnchor(liberty, BelowLayer("road-label")) == Anchor{"", true}));
+  CHECK((ComputeAnchor({}, BelowLayer("water")) == Anchor{"", true}));
+}
+
+void TopIsEmptyAnchor() {
+  CHECK((ComputeAnchor(style_fixtures::kLibertyLayers, kTop) ==
+         Anchor{"", false}));
+  CHECK((ComputeAnchor({}, kTop) == Anchor{"", false}));
+}
+
+// Layer plans (design D199): the resulting order after the plan's commands.
+
+std::vector<std::string> OverlayLayerIds(int64_t id, size_t count) {
+  std::vector<std::string> ids;
+  for (size_t i = 0; i < count; ++i) ids.push_back(map_texture::OverlayLayerId(id, i));
+  return ids;
+}
+
+OverlayLayout Layout(int64_t id, int64_t order, size_t layers = 2,
+                     Placement placement = kBelowLabels) {
+  return {id, {order, id}, placement, OverlayLayerIds(id, layers), false};
+}
+
+// Applies `plan` to `current` as the map thread's commands would, and returns
+// the layer list that results.
+std::vector<StyleLayer> Apply(const std::vector<StyleLayer>& current,
+                              const LayerPlan& plan,
+                              const std::vector<OverlayLayout>& overlays) {
+  std::vector<StyleLayer> layers = current;
+  auto remove = [&](const std::string& id) {
+    std::erase_if(layers, [&](const StyleLayer& l) { return l.id == id; });
+  };
+  auto insert_before = [&](const std::string& id, const std::string& before) {
+    auto at = before.empty()
+                  ? layers.end()
+                  : std::find_if(layers.begin(), layers.end(),
+                                 [&](const StyleLayer& l) { return l.id == before; });
+    CHECK(before.empty() || at != layers.end());
+    layers.insert(at, {id, "line"});
+  };
+  for (const std::string& id : plan.remove_stale) remove(id);
+  for (const auto& step : plan.steps) {
+    auto overlay = std::find_if(overlays.begin(), overlays.end(),
+                                [&](const OverlayLayout& o) { return o.id == step.id; });
+    CHECK(overlay != overlays.end());
+    for (const std::string& id : step.remove_first) remove(id);
+    for (const std::string& id : overlay->layer_ids) {
+      if (step.action == OverlayAction::kMove) remove(id);
+      insert_before(id, step.before);
+    }
+  }
+  return layers;
+}
+
+std::vector<std::string> Ids(const std::vector<StyleLayer>& layers) {
+  std::vector<std::string> ids;
+  for (const auto& layer : layers) ids.push_back(layer.id);
+  return ids;
+}
+
+const std::vector<StyleLayer> kStyle = {
+    {"background", "background"}, {"water", "fill"}, {"road", "line"},
+    {"road_label", "symbol"}, {"poi", "symbol"}};
+
+void SingleOverlayIsInstalledBeforeAnchor() {
+  std::vector<OverlayLayout> overlays = {Layout(1, 0)};
+  LayerPlan plan = PlanLayers(kStyle, overlays);
+  CHECK(plan.remove_stale.empty());
+  CHECK(plan.missing_layer_ids.empty());
+  CHECK(plan.steps.size() == 1);
+  CHECK(!plan.steps.empty() && plan.steps[0].action == OverlayAction::kInstall);
+  CHECK(!plan.steps.empty() && plan.steps[0].before == "road_label");
+  auto after = Apply(kStyle, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-1-1", "road_label", "poi"}));
+  // Planned again against the result, nothing is left to do.
+  CHECK(PlanLayers(after, overlays).steps.empty());
+}
+
+void OverlaysAtSameAnchorFollowOrderKey() {
+  // Registered in the order 3, 1, 2; drawn in the order of their keys.
+  std::vector<OverlayLayout> overlays = {Layout(3, 30, 1), Layout(1, 10, 1),
+                                         Layout(2, 20, 1)};
+  LayerPlan plan = PlanLayers(kStyle, overlays);
+  auto after = Apply(kStyle, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-2-0", "mapigrade-overlay-3-0",
+                           "road_label", "poi"}));
+  CHECK(PlanLayers(after, overlays).steps.empty());
+  // The same child index: the registration sequence number sets the order.
+  std::vector<OverlayLayout> same_child = {Layout(2, 5, 1), Layout(1, 5, 1)};
+  after = Apply(kStyle, PlanLayers(kStyle, same_child), same_child);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-2-0", "road_label", "poi"}));
+}
+
+void OverlayAddedLaterGoesBetweenExistingOnes() {
+  std::vector<OverlayLayout> installed = {Layout(1, 10), Layout(3, 30)};
+  auto current = Apply(kStyle, PlanLayers(kStyle, installed), installed);
+  std::vector<OverlayLayout> overlays = installed;
+  overlays.push_back(Layout(2, 20));
+  LayerPlan plan = PlanLayers(current, overlays);
+  // The installed overlays aren't added again.
+  for (const auto& step : plan.steps) {
+    CHECK((step.action == OverlayAction::kInstall) == (step.id == 2));
+  }
+  auto after = Apply(current, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-1-1", "mapigrade-overlay-2-0",
+                           "mapigrade-overlay-2-1", "mapigrade-overlay-3-0",
+                           "mapigrade-overlay-3-1", "road_label", "poi"}));
+  CHECK(PlanLayers(after, overlays).steps.empty());
+}
+
+void OrderKeyChangeMovesLayers() {
+  std::vector<OverlayLayout> overlays = {Layout(1, 10), Layout(2, 20)};
+  auto current = Apply(kStyle, PlanLayers(kStyle, overlays), overlays);
+  overlays[0].order = {30, 1};
+  LayerPlan plan = PlanLayers(current, overlays);
+  CHECK(!plan.steps.empty());
+  for (const auto& step : plan.steps) {
+    CHECK(step.action == OverlayAction::kMove);
+    CHECK(step.remove_first.empty());
+  }
+  auto after = Apply(current, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-2-0",
+                           "mapigrade-overlay-2-1", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-1-1", "road_label", "poi"}));
+  CHECK(PlanLayers(after, overlays).steps.empty());
+}
+
+void OverlaysAtDifferentAnchorsAreIndependent() {
+  std::vector<OverlayLayout> overlays = {
+      Layout(1, 10, 1), Layout(2, 20, 1, BelowLayer("water")),
+      Layout(3, 5, 1, kTop)};
+  auto after = Apply(kStyle, PlanLayers(kStyle, overlays), overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "mapigrade-overlay-2-0", "water", "road",
+                           "mapigrade-overlay-1-0", "road_label", "poi",
+                           "mapigrade-overlay-3-0"}));
+  // A change at one anchor doesn't change the others.
+  overlays.push_back(Layout(4, 1, 1, kTop));
+  LayerPlan plan = PlanLayers(after, overlays);
+  for (const auto& step : plan.steps) CHECK(step.id == 3 || step.id == 4);
+  after = Apply(after, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "mapigrade-overlay-2-0", "water", "road",
+                           "mapigrade-overlay-1-0", "road_label", "poi",
+                           "mapigrade-overlay-4-0", "mapigrade-overlay-3-0"}));
+}
+
+void ChangedLayersAreAddedAgain() {
+  std::vector<OverlayLayout> overlays = {Layout(1, 10, 3)};
+  auto current = Apply(kStyle, PlanLayers(kStyle, overlays), overlays);
+  // Two layers instead of three: the third is stale, the two are replaced.
+  overlays[0].layer_ids = OverlayLayerIds(1, 2);
+  overlays[0].replace = true;
+  LayerPlan plan = PlanLayers(current, overlays);
+  CHECK((plan.remove_stale == std::vector<std::string>{"mapigrade-overlay-1-2"}));
+  CHECK(plan.steps.size() == 1);
+  CHECK(!plan.steps.empty() &&
+        plan.steps[0].action == OverlayAction::kReplaceLayers);
+  CHECK(!plan.steps.empty() &&
+        (plan.steps[0].remove_first ==
+         std::vector<std::string>{"mapigrade-overlay-1-0",
+                                  "mapigrade-overlay-1-1"}));
+  auto after = Apply(current, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-1-1", "road_label", "poi"}));
+}
+
+void PartiallyPresentOverlayIsCompleted() {
+  // A failed add left one of two layers.
+  std::vector<StyleLayer> current = kStyle;
+  current.insert(current.begin() + 3, {"mapigrade-overlay-1-0", "line"});
+  std::vector<OverlayLayout> overlays = {Layout(1, 10)};
+  LayerPlan plan = PlanLayers(current, overlays);
+  CHECK(plan.steps.size() == 1);
+  CHECK(!plan.steps.empty() &&
+        plan.steps[0].action == OverlayAction::kReplaceLayers);
+  auto after = Apply(current, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-1-1", "road_label", "poi"}));
+}
+
+void RemovedOverlayLayersAreStale() {
+  std::vector<OverlayLayout> overlays = {Layout(1, 10), Layout(2, 20)};
+  auto current = Apply(kStyle, PlanLayers(kStyle, overlays), overlays);
+  overlays.erase(overlays.begin());
+  LayerPlan plan = PlanLayers(current, overlays);
+  CHECK((plan.remove_stale == std::vector<std::string>{
+                                  "mapigrade-overlay-1-0", "mapigrade-overlay-1-1"}));
+  CHECK(plan.steps.empty());
+  CHECK((Ids(Apply(current, plan, overlays)) ==
+         std::vector<std::string>{"background", "water", "road",
+                                  "mapigrade-overlay-2-0", "mapigrade-overlay-2-1",
+                                  "road_label", "poi"}));
+  CHECK(PlanLayers(current, {}).remove_stale.size() == 4);
+}
+
+void MissingBelowLayerIsPlacedOnTopAndReported() {
+  std::vector<OverlayLayout> overlays = {
+      Layout(1, 10, 1, BelowLayer("road-label")),
+      Layout(2, 20, 1, BelowLayer("road-label")), Layout(3, 5, 1, kTop)};
+  LayerPlan plan = PlanLayers(kStyle, overlays);
+  CHECK((plan.missing_layer_ids == std::vector<std::string>{"road-label"}));
+  auto after = Apply(kStyle, plan, overlays);
+  CHECK((Ids(after) == std::vector<std::string>{
+                           "background", "water", "road", "road_label", "poi",
+                           "mapigrade-overlay-3-0", "mapigrade-overlay-1-0",
+                           "mapigrade-overlay-2-0"}));
+}
+
+void OverlayWithoutLayersGetsNoStep() {
+  std::vector<OverlayLayout> overlays = {Layout(1, 10, 0)};
+  CHECK(PlanLayers(kStyle, overlays).steps.empty());
+}
+
+// The layer JSON array of map_texture_overlay_set_layers().
+
+void JsonObjectArrayIsSplitIntoObjects() {
+  using map_texture::SplitJsonObjectArray;
+  auto empty = SplitJsonObjectArray(" [ ] ");
+  CHECK(empty && empty->empty());
+  auto two = SplitJsonObjectArray(
+      R"( [{"id": "a", "filter": ["==", ["get", "r"], 0], "paint": {"line-color": "}]\""}} ,
+      {"id":"b","layout":{}}] )");
+  CHECK(two && two->size() == 2);
+  if (two && two->size() == 2) {
+    CHECK((*two)[0].front() == '{' && (*two)[0].back() == '}');
+    CHECK((*two)[0].find("line-color") != std::string::npos);
+    CHECK((*two)[1] == R"({"id":"b","layout":{}})");
+  }
+  CHECK(!SplitJsonObjectArray("{}"));
+  CHECK(!SplitJsonObjectArray("[1]"));
+  CHECK(!SplitJsonObjectArray(R"([{"id": "a"})"));
+  CHECK(!SplitJsonObjectArray(R"([{"id": "a"},])"));
+  CHECK(!SplitJsonObjectArray(R"([{"id": "a"}] x)"));
+  CHECK(!SplitJsonObjectArray(""));
+}
+
+void JsonStringMemberIsFound() {
+  using map_texture::JsonStringMember;
+  std::string_view layer =
+      R"({"type": "line", "source": {"nested": {"id": "wrong"}}, "ids": ["id"],
+          "id": "mapigrade-overlay-7-1", "paint": {"line-width": 2}})";
+  auto id = JsonStringMember(layer, "id");
+  CHECK(id && *id == "mapigrade-overlay-7-1");
+  auto type = JsonStringMember(layer, "type");
+  CHECK(type && *type == "line");
+  CHECK(!JsonStringMember(layer, "missing"));
+  CHECK(!JsonStringMember(R"({"id": 7})", "id"));
+  CHECK(!JsonStringMember(R"({"id": "a\"b"})", "id"));
+  CHECK(!JsonStringMember(R"({"id" "a"})", "id"));
+}
+
 }  // namespace
 
 int main() {
@@ -829,6 +1247,35 @@ int main() {
       {"ScreenPositionWrapsAcrossTheAntimeridian", ScreenPositionWrapsAcrossTheAntimeridian},
       {"ScreenBoundsContainRotatedCorners", ScreenBoundsContainRotatedCorners},
       {"ScreenPositionMatchesMapLibreWhenPitched", ScreenPositionMatchesMapLibreWhenPitched},
+      {"BelowLabelsAnchorInLiberty", BelowLabelsAnchorInLiberty},
+      {"BelowLabelsAnchorsOnTheFirstExtrusionBeforeTheLabels",
+       BelowLabelsAnchorsOnTheFirstExtrusionBeforeTheLabels},
+      {"BelowLabelsAnchorInBright", BelowLabelsAnchorInBright},
+      {"BelowLabelsAnchorInPositron", BelowLabelsAnchorInPositron},
+      {"BelowLabelsWithOnlySymbolLayersIsBelowAll",
+       BelowLabelsWithOnlySymbolLayersIsBelowAll},
+      {"BelowLabelsWithoutSymbolLayersIsTop", BelowLabelsWithoutSymbolLayersIsTop},
+      {"OverlayLayersAreIgnoredByPlacement", OverlayLayersAreIgnoredByPlacement},
+      {"OverlaySourceIndexParsesOnlyTheOverlaysSourceIds",
+       OverlaySourceIndexParsesOnlyTheOverlaysSourceIds},
+      {"BelowLayerAnchorsOnThatLayer", BelowLayerAnchorsOnThatLayer},
+      {"MissingBelowLayerIsTopAndMissing", MissingBelowLayerIsTopAndMissing},
+      {"TopIsEmptyAnchor", TopIsEmptyAnchor},
+      {"SingleOverlayIsInstalledBeforeAnchor", SingleOverlayIsInstalledBeforeAnchor},
+      {"OverlaysAtSameAnchorFollowOrderKey", OverlaysAtSameAnchorFollowOrderKey},
+      {"OverlayAddedLaterGoesBetweenExistingOnes",
+       OverlayAddedLaterGoesBetweenExistingOnes},
+      {"OrderKeyChangeMovesLayers", OrderKeyChangeMovesLayers},
+      {"OverlaysAtDifferentAnchorsAreIndependent",
+       OverlaysAtDifferentAnchorsAreIndependent},
+      {"ChangedLayersAreAddedAgain", ChangedLayersAreAddedAgain},
+      {"PartiallyPresentOverlayIsCompleted", PartiallyPresentOverlayIsCompleted},
+      {"RemovedOverlayLayersAreStale", RemovedOverlayLayersAreStale},
+      {"MissingBelowLayerIsPlacedOnTopAndReported",
+       MissingBelowLayerIsPlacedOnTopAndReported},
+      {"OverlayWithoutLayersGetsNoStep", OverlayWithoutLayersGetsNoStep},
+      {"JsonObjectArrayIsSplitIntoObjects", JsonObjectArrayIsSplitIntoObjects},
+      {"JsonStringMemberIsFound", JsonStringMemberIsFound},
   };
   for (const auto& [name, test] : tests) {
     int before = failures;

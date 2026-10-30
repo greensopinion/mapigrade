@@ -1,3 +1,7 @@
+## 0.0.4
+
+- Added `MapigradePolylineLayer`, which an application places in the `children` of `MapigradeLayer`, and `MapigradePolyline`. The map draws the polylines among the style's own layers, by default below the labels, and keeps them across style loads. `LayerPlacement` places them below the labels, below a named style layer, or above all style layers.
+
 ## 0.0.3
 
 - Lowered the plugin's Android `minSdk` from 29 to 24, so that apps with Flutter's default `minSdk` build without an override. The map still needs API level 29; below it `MapigradeLayer.isSupported` is false.

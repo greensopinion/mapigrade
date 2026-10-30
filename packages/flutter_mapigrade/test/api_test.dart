@@ -30,10 +30,13 @@ const expectedNames = {
   'LayerMetricsSnapshot',
   'LayerController',
   'QueriedFeature',
+  'MapigradePolyline',
+  'MapigradePolylineLayer',
+  'LayerPlacement',
 };
 
-/// Names that `flutter_map` uses for its own types. Exported names don't
-/// start with them, except the name of the layer.
+/// Names that `flutter_map` uses for its own types. Exported names must not
+/// start with them, except names that start with `Mapigrade`.
 const reservedPrefixes = [
   'Map',
   'Camera',
@@ -42,7 +45,7 @@ const reservedPrefixes = [
   'Polyline',
   'Polygon',
 ];
-const prefixExceptions = {'MapigradeLayer'};
+const allowedPrefix = 'Mapigrade';
 
 /// Libraries whose exported names the main library doesn't export.
 const otherLibraries = [
@@ -133,7 +136,7 @@ void main() {
     final violations = <String>[];
     for (final name in exportsOf(library).keys) {
       for (final prefix in reservedPrefixes) {
-        if (name.startsWith(prefix) && !prefixExceptions.contains(name)) {
+        if (name.startsWith(prefix) && !name.startsWith(allowedPrefix)) {
           violations.add(
             '$name starts with $prefix, which flutter_map uses for its own '
             'types',

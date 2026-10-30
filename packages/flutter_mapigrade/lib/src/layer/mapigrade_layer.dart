@@ -101,7 +101,8 @@ final class MapigradeLayer extends StatelessWidget {
   /// `MarkerLayer`. On macOS and iOS the layer draws them at the camera of
   /// the map frame it displays, so that they stay exactly on the map while
   /// the camera moves; they move with the map, about one to two frames behind
-  /// the gesture.
+  /// the gesture. The map draws the polylines of a `MapigradePolylineLayer`
+  /// among them itself; see `MapigradePolylineLayer`.
   ///
   /// Place widgets that change the camera, or that read it to decide what to
   /// do, after this layer among the `FlutterMap` children instead, because

@@ -1,5 +1,6 @@
 #include "map_texture_api.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -292,6 +293,105 @@ int32_t map_texture_remove_feature_state(int64_t handle, const char* source_id,
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
   texture->RemoveFeatureState({source_id, Optional(source_layer_id),
                                Optional(feature_id), Optional(key)});
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_overlay_set_source(int64_t handle, int64_t overlay_id,
+                                       int32_t source_index,
+                                       int32_t source_options,
+                                       const uint8_t* geojson, int64_t length,
+                                       char** out_error) {
+  if (out_error != nullptr) *out_error = nullptr;
+  const char* invalid = nullptr;
+  if (source_index < 0) {
+    invalid = "the source index is negative";
+  } else if ((source_options & ~map_texture::kSourceOptionsMask) != 0) {
+    invalid = "unknown source options";
+  } else if (geojson == nullptr || length <= 0) {
+    invalid = "the GeoJSON is empty";
+  }
+  if (invalid != nullptr) {
+    if (out_error != nullptr) *out_error = strdup(invalid);
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  mln_geojson_source_options options = mln_geojson_source_options_default();
+  options.fields |= MLN_GEOJSON_SOURCE_OPTION_LINE_METRICS;
+  options.line_metrics =
+      (source_options & map_texture::kSourceOptionLineMetrics) != 0;
+  mln_geojson_source_data data = MLN_HANDLE_NULL;
+  mln_diagnostic diagnostic{};
+  diagnostic.size = sizeof(diagnostic);
+  mln_status status = mln_geojson_source_data_create(
+      {geojson, static_cast<size_t>(length)}, &options, &data, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    if (out_error != nullptr) {
+      *out_error = strdup(diagnostic.message[0] != '\0'
+                              ? diagnostic.message
+                              : "mln_geojson_source_data_create failed");
+    }
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  texture->OverlaySetSource(
+      overlay_id, source_index, source_options,
+      std::make_shared<map_texture::PreparedGeoJson>(data));
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_overlay_remove_source(int64_t handle, int64_t overlay_id,
+                                          int32_t source_index) {
+  if (source_index < 0) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->OverlayRemoveSource(overlay_id, source_index);
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_overlay_set_layers(int64_t handle, int64_t overlay_id,
+                                       const char* layers_json,
+                                       int32_t placement_kind,
+                                       const char* below_layer_id,
+                                       int64_t order_child, int64_t order_seq) {
+  using map_texture::PlacementKind;
+  if (layers_json == nullptr || placement_kind < 0 || placement_kind > 2) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  map_texture::Placement placement;
+  placement.kind = static_cast<PlacementKind>(placement_kind);
+  if (placement.kind == PlacementKind::kBelowLayer) {
+    if (below_layer_id == nullptr || below_layer_id[0] == '\0') {
+      return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+    }
+    placement.below_layer_id = below_layer_id;
+  }
+  auto layers = map_texture::SplitJsonObjectArray(layers_json);
+  if (!layers) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  std::vector<int32_t> sources;
+  for (size_t i = 0; i < layers->size(); ++i) {
+    auto id = map_texture::JsonStringMember((*layers)[i], "id");
+    if (!id || *id != map_texture::OverlayLayerId(overlay_id, i)) {
+      return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+    }
+    auto source = map_texture::JsonStringMember((*layers)[i], "source");
+    auto index = source ? map_texture::OverlaySourceIndex(overlay_id, *source)
+                        : std::nullopt;
+    if (!index) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+    if (std::find(sources.begin(), sources.end(), *index) == sources.end()) {
+      sources.push_back(*index);
+    }
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->OverlaySetLayers(overlay_id, std::move(*layers), std::move(sources),
+                            std::move(placement), {order_child, order_seq});
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_overlay_remove(int64_t handle, int64_t overlay_id) {
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  texture->OverlayRemove(overlay_id);
   return MAP_TEXTURE_OK;
 }
 

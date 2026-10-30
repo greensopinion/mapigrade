@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -16,12 +17,19 @@ namespace ffi_wrappers {
 void Reset();
 
 // The redirected calls since the last Reset(), in order. For
-// mln_runtime_set_maximum_ambient_cache_size, `size` is the size.
+// mln_runtime_set_maximum_ambient_cache_size, `size` is the size. For the
+// style source and layer commands, `id` is the source or layer ID (for
+// mln_map_add_style_layer_json, the layer JSON's id member) and `before` the
+// layer the layer goes before.
 struct Call {
   std::string name;
   uint64_t size = 0;
+  std::string id;
+  std::string before;
 };
 std::vector<Call> Calls();
+// The names of Calls() that start with `prefix`, in order.
+std::vector<std::string> CallNames(const std::string& prefix = "");
 
 // Makes the next mln_runtime_set_maximum_ambient_cache_size calls return
 // `status` without calling the FFI, until set back to MLN_STATUS_OK.
@@ -30,6 +38,13 @@ void SetMaximumCacheSizeStatus(mln_status status);
 // Makes the next mln_runtime_create calls fail with `status` and the
 // diagnostic `message`, until set back to MLN_STATUS_OK.
 void SetRuntimeCreateResult(mln_status status, std::string message);
+
+// Makes the next mln_map_set_feature_state calls call `hook` with the
+// selector's feature ID, or "" for none, on the calling thread. A status other
+// than MLN_STATUS_OK is returned without calling the FFI. An empty hook, and
+// Reset(), remove it.
+void SetFeatureStateHook(
+    std::function<mln_status(const std::string& feature_id)> hook);
 
 // The header rules of the header transforms registered since the last Reset().
 struct Header {

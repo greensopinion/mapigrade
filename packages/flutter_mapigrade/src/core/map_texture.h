@@ -15,15 +15,37 @@
 #include <utility>
 #include <vector>
 
+#include <map>
+#include <set>
+
 #include "buffer_state.h"
 #include "command_queue.h"
 #include "map_texture_api.h"
 #include "mln.h"
+#include "overlay.h"
 #include "projection.h"
 #include "render_gate.h"
 #include "render_target.h"
 
 namespace map_texture {
+
+// Owns a prepared GeoJSON handle. The map keeps it as long as its overlay
+// exists, so the source can be added again after each style load.
+struct PreparedGeoJson {
+  explicit PreparedGeoJson(mln_geojson_source_data handle) : handle(handle) {}
+  PreparedGeoJson(const PreparedGeoJson&) = delete;
+  PreparedGeoJson& operator=(const PreparedGeoJson&) = delete;
+  ~PreparedGeoJson() { mln_geojson_source_data_release(handle); }
+
+  const mln_geojson_source_data handle;
+};
+
+// One entry of mln_map_list_style_layers(), for tests.
+struct StyleLayerInfo {
+  std::string id;
+  std::string type;
+  std::string source;
+};
 
 // Headers for requests whose URL matches the glob `url`.
 struct HttpHeaderRule {
@@ -81,6 +103,18 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // `state` is a JSON object whose keys are set on the feature.
   void SetFeatureState(FeatureStateTarget feature, std::string state);
   void RemoveFeatureState(FeatureStateTarget feature);
+  // Overlays (design D198): the map keeps each overlay's sources, style
+  // layers, placement and order key, and installs it in the loaded style and
+  // again in every style loaded later (D201).
+  void OverlaySetSource(int64_t id, int32_t source_index, int32_t source_options,
+                        std::shared_ptr<PreparedGeoJson> data);
+  void OverlayRemoveSource(int64_t id, int32_t source_index);
+  // `layers` are JSON objects with the IDs OverlayLayerId(id, n), in order;
+  // `layer_sources` are the indexes of the overlay's sources they name.
+  void OverlaySetLayers(int64_t id, std::vector<std::string> layers,
+                        std::vector<int32_t> layer_sources, Placement placement,
+                        OrderKey order);
+  void OverlayRemove(int64_t id);
 
   // Any thread except the map thread. While paused, the map thread submits no
   // GPU work; pausing returns after a render in progress has ended. Resuming
@@ -141,6 +175,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // For tests: the view of the last frame the session rendered, or nothing
   // before the first.
   std::optional<RenderedView> LastRenderedViewForTesting();
+  // For tests, any thread: the style's layers in style order, as
+  // mln_map_list_style_layers() reports them after every command accepted so
+  // far, or nothing if the query doesn't complete within five seconds.
+  std::optional<std::vector<StyleLayerInfo>> ListStyleLayersForTesting();
 
  private:
   MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
@@ -163,6 +201,35 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Map thread: submits the set or remove of a kSetFeatureState or
   // kRemoveFeatureState command, and reports a failure as a render error.
   void ApplyFeatureState(const Command& command);
+  // Map thread: updates the overlay state from a kOverlay* command.
+  void ApplyOverlayCommand(Command& command);
+  // Map thread: notes a style load, reconciles the overlays with a layer list
+  // that has arrived, and queries the list when the overlays changed
+  // (designs D199 and D201).
+  void SyncOverlays();
+  void RequestLayerList();
+  // Map thread: submits the commands that install the overlays in the style,
+  // whose layers are `layers`.
+  void ReconcileOverlays(const std::vector<StyleLayer>& layers);
+  // A completion for an overlay command on `target` (a source or layer ID)
+  // that reports a failure as a render error naming `what` (design D203).
+  // With `ignore_not_found`, MLN_STATUS_NOT_FOUND isn't reported: removing
+  // what a style load removed already, or updating a source it removed, is
+  // no failure.
+  mln_completion OverlayCompletion(const char* what, const std::string& target,
+                                   bool ignore_not_found);
+  void RemoveOverlayLayer(const std::string& id);
+  void RemoveOverlaySource(const std::string& id);
+  struct Overlay;
+  struct OverlaySource;
+  // Map thread: adds the source `index` of the overlay `id` from its data,
+  // after removing it when it is submitted.
+  void AddOverlaySource(int64_t id, int32_t index, OverlaySource& source);
+  // Map thread: adds every source of the overlay that isn't submitted, and
+  // with `readd_changed_options`, which needs the overlay's layers removed
+  // from the style, every source whose options changed since it was submitted.
+  void AddOverlaySources(int64_t id, Overlay& overlay,
+                         bool readd_changed_options);
   void DestroySession();
   // Map thread: attaches a render session to the map at size_; returns
   // whether the attachment completed.
@@ -329,14 +396,74 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::mutex queries_mutex_;
   std::vector<RenderedQuery> queries_;
   // A query returns the feature state of the last rendered frame, so queries
-  // wait until a frame includes every feature-state command submitted before
-  // them: the commands submitted (map thread) and completed (any thread), the
-  // newest render update generation that a completed one is part of, and the
-  // map update generation of the last rendered frame (map thread).
+  // wait until a frame includes every feature-state command queued before
+  // them: the commands queued (any thread), the commands queued before the
+  // newest query (queries_mutex_), the commands applied, including the ones
+  // the FFI rejected (map thread), the commands submitted (map thread) and
+  // completed (any thread), the newest render update generation that a
+  // completed one is part of, and the map update generation of the last
+  // rendered frame (map thread).
+  std::atomic<int64_t> feature_state_queued_{0};
+  int64_t feature_state_queued_before_queries_ = 0;
+  int64_t feature_state_applied_ = 0;
   int64_t feature_state_submitted_ = 0;
   std::atomic<int64_t> feature_state_completed_{0};
   std::atomic<uint64_t> feature_state_generation_{0};
   uint64_t rendered_update_generation_ = 0;
+
+  // The overlays (design D198), map thread. Each is what Dart asked for, and
+  // what the map thread last submitted for it: the versions count the
+  // changes, and a version equal to its submitted value is installed, or
+  // being installed. `submitted` is cleared by a style load, which removes
+  // every runtime source.
+  struct OverlaySource {
+    std::shared_ptr<PreparedGeoJson> data;
+    int32_t options = 0;
+    uint64_t data_version = 0;
+    uint64_t data_submitted = 0;
+    bool submitted = false;
+    int32_t submitted_options = 0;
+  };
+  struct Overlay {
+    std::map<int32_t, OverlaySource> sources;
+    // IDs of sources removed from `sources` that may still be in the style.
+    std::vector<std::string> sources_to_remove;
+    std::vector<std::string> layers;
+    std::vector<int32_t> layer_sources;
+    uint64_t layers_version = 0;
+    uint64_t layers_submitted = 0;
+    Placement placement;
+    OrderKey order;
+  };
+  std::map<int64_t, Overlay> overlays_;
+  // Sources of removed overlays that may still be in the style.
+  std::vector<std::string> overlay_sources_to_remove_;
+  // Whether the overlays changed since the layer list was last queried.
+  bool overlays_dirty_ = false;
+  // Whether a style has loaded; before that, there is nothing to place the
+  // overlays in.
+  bool style_loaded_ = false;
+  // The kBelowLayer IDs reported missing since the last style load.
+  std::set<std::string> missing_anchors_reported_;
+  // Style loads the runtime reported (OnEvents) and the map thread has seen.
+  std::atomic<uint64_t> style_loads_{0};
+  uint64_t style_loads_seen_ = 0;
+  // Style commands the map thread submitted.
+  uint64_t style_commands_ = 0;
+  // The pending layer list query: whether there is one, and the style
+  // commands and loads at its submission, so that a list from before a style
+  // change is dropped.
+  bool layer_list_pending_ = false;
+  uint64_t layer_list_style_commands_ = 0;
+  uint64_t layer_list_style_loads_ = 0;
+  struct LayerList {
+    int32_t status = 0;
+    std::string diagnostic;
+    std::vector<StyleLayer> layers;
+  };
+  // Written by the query's completion, on any thread.
+  std::mutex layer_list_mutex_;
+  std::optional<LayerList> layer_list_;
   // The sequence number of the newest camera that a rendered frame includes,
   // and when Dart set it.
   int64_t applied_seq_ = 0;

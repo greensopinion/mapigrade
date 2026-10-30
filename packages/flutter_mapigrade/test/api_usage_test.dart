@@ -37,6 +37,13 @@ void main() {
     const feature = QueriedFeature(sourceId: 'roads', id: 1);
     expect(feature.sourceLayerId, isNull);
     expect(exception, isA<LayerRenderException>());
+    const placement = LayerPlacement.belowLabels();
+    final polyline = MapigradePolyline(points: const [LatLng(0, 0)]);
+    final polylineLayer = MapigradePolylineLayer(
+      polylines: [polyline],
+      placement: placement,
+    );
+    expect(polylineLayer.polylines, [polyline]);
     final LayerMetricsSnapshot snapshot = metrics.snapshot();
     expect(snapshot.renderedFrames, 0);
     expect(<Type>[
@@ -49,8 +56,11 @@ void main() {
       LayerQueryException,
       LayerController,
       QueriedFeature,
+      MapigradePolyline,
+      MapigradePolylineLayer,
+      LayerPlacement,
       MaterialApp,
       HttpHeaderRule,
-    ], hasLength(11));
+    ], hasLength(14));
   });
 }

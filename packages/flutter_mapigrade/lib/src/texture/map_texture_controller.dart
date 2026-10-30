@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'map_texture_controller_ffi.dart'
@@ -450,6 +451,52 @@ abstract interface class MapTextureController {
     String? featureId,
     String? key,
   });
+
+  /// Gives the source [sourceIndex] of the overlay [overlayId] the UTF-8
+  /// GeoJSON [geoJson], with line metrics when [lineMetrics]. The map
+  /// prepares the data on the calling thread. Throws [MapTextureException]
+  /// with the map's message for GeoJSON it can't use.
+  void setOverlaySource(
+    int overlayId,
+    int sourceIndex,
+    Uint8List geoJson, {
+    required bool lineMetrics,
+  });
+
+  /// Like [setOverlaySource] with the bytes that [encode] returns, but runs
+  /// [encode] and the call on a background isolate, so that neither blocks
+  /// the calling isolate. [encode] must be sendable to another isolate: it
+  /// must not capture the widget tree or anything else that is bound to the
+  /// calling isolate. Completes with a [MapTextureException] on failure.
+  Future<void> setOverlaySourceInBackground(
+    int overlayId,
+    int sourceIndex,
+    Uint8List Function() encode, {
+    required bool lineMetrics,
+  });
+
+  /// Removes the source [sourceIndex] of the overlay [overlayId] from the
+  /// map. Nothing happens when the overlay has no such source.
+  void removeOverlaySource(int overlayId, int sourceIndex);
+
+  /// Sets the style layers, placement and order key of the overlay
+  /// [overlayId]; see `map_texture_overlay_set_layers` in
+  /// `map_texture_api.h`. Each style layer's `source` names a source of the
+  /// overlay. [placementKind] is 0
+  /// for below the labels, 1 for below the style layer [belowLayerId], 2 for
+  /// the top.
+  void setOverlayLayers(
+    int overlayId, {
+    required String layersJson,
+    required int placementKind,
+    String? belowLayerId,
+    required int orderChild,
+    required int orderSeq,
+  });
+
+  /// Removes the overlay [overlayId], its style layers and sources, from the
+  /// map.
+  void removeOverlay(int overlayId);
 
   /// Sets the viewport's logical size and device pixel ratio. Repeated calls
   /// with the same values do nothing.

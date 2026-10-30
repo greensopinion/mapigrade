@@ -31,6 +31,7 @@ const styles = [
     'https://tiles.openfreemap.org/styles/liberty',
   ),
   MapStyle('MapLibre demo tiles', 'https://demotiles.maplibre.org/style.json'),
+  MapStyle('Polyline test style', 'asset://assets/polyline_style.json'),
   MapStyle('Invalid URL', 'https://invalid.example.invalid/style.json'),
 ];
 

@@ -207,6 +207,21 @@ mln_buffer_view View(const std::string& text) {
   return mln_buffer_view{text.data(), text.size()};
 }
 
+std::string_view ViewOf(const mln_buffer_view& view) {
+  return {static_cast<const char*>(view.data), view.size};
+}
+
+std::string StatusMessage(const char* what, mln_status status,
+                          const char* detail) {
+  std::string message = std::string(what) + " failed with status " +
+                        std::to_string(static_cast<int>(status));
+  if (detail != nullptr && detail[0] != '\0') {
+    message += ": ";
+    message += detail;
+  }
+  return message;
+}
+
 }  // namespace
 
 std::shared_ptr<MapTexture> MapTexture::Create(
@@ -319,11 +334,40 @@ void MapTexture::ReduceMemoryUse() {
 void MapTexture::SetFeatureState(FeatureStateTarget feature,
                                  std::string state) {
   commands_.Push(Command::SetFeatureState(std::move(feature), std::move(state)));
+  feature_state_queued_.fetch_add(1);
   Signal();
 }
 
 void MapTexture::RemoveFeatureState(FeatureStateTarget feature) {
   commands_.Push(Command::RemoveFeatureState(std::move(feature)));
+  feature_state_queued_.fetch_add(1);
+  Signal();
+}
+
+void MapTexture::OverlaySetSource(int64_t id, int32_t source_index,
+                                  int32_t source_options,
+                                  std::shared_ptr<PreparedGeoJson> data) {
+  commands_.Push(
+      Command::OverlaySetSource(id, source_index, source_options, std::move(data)));
+  Signal();
+}
+
+void MapTexture::OverlayRemoveSource(int64_t id, int32_t source_index) {
+  commands_.Push(Command::OverlayRemoveSource(id, source_index));
+  Signal();
+}
+
+void MapTexture::OverlaySetLayers(int64_t id, std::vector<std::string> layers,
+                                  std::vector<int32_t> layer_sources,
+                                  Placement placement, OrderKey order) {
+  commands_.Push(Command::OverlaySetLayers(id, std::move(layers),
+                                           std::move(layer_sources),
+                                           std::move(placement), order));
+  Signal();
+}
+
+void MapTexture::OverlayRemove(int64_t id) {
+  commands_.Push(Command::OverlayRemove(id));
   Signal();
 }
 
@@ -331,6 +375,7 @@ void MapTexture::QueryRenderedFeatures(RenderedQuery query) {
   {
     std::lock_guard lock(queries_mutex_);
     queries_.push_back(std::move(query));
+    feature_state_queued_before_queries_ = feature_state_queued_.load();
   }
   Signal();
 }
@@ -593,10 +638,14 @@ bool MapTexture::RunOnce() {
   bool stop = false;
   ApplyCommands(&stop);
   if (stop) return true;
+  SyncOverlays();
   ApplyCamera();
   WaitForCamera();
   ServiceDriver();
   RunQueries();
+  // A layer list that arrived while the camera was waited for or the driver
+  // serviced is reconciled before the frame is requested.
+  SyncOverlays();
   MaybeRender();
   // A newly armed demand renders at once if the map has an update.
   ServiceDriver();
@@ -858,6 +907,7 @@ void MapTexture::ApplyCommands(bool* stop) {
         if (status != MLN_STATUS_OK) {
           ReportStatus("mln_map_set_style_url", status, &diagnostic);
         }
+        ++style_commands_;
         break;
       }
       case Command::Kind::kStyleJson: {
@@ -867,6 +917,7 @@ void MapTexture::ApplyCommands(bool* stop) {
         if (status != MLN_STATUS_OK) {
           ReportStatus("mln_map_set_style_json", status, &diagnostic);
         }
+        ++style_commands_;
         break;
       }
       case Command::Kind::kResize:
@@ -879,6 +930,12 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kRemoveFeatureState:
         ApplyFeatureState(command);
         break;
+      case Command::Kind::kOverlaySetSource:
+      case Command::Kind::kOverlayRemoveSource:
+      case Command::Kind::kOverlaySetLayers:
+      case Command::Kind::kOverlayRemove:
+        ApplyOverlayCommand(command);
+        break;
       case Command::Kind::kTargetTask:
         command.task();
         break;
@@ -890,6 +947,7 @@ void MapTexture::ApplyCommands(bool* stop) {
 }
 
 void MapTexture::ApplyFeatureState(const Command& command) {
+  ++feature_state_applied_;
   const FeatureStateTarget& feature = command.feature;
   mln_feature_state_selector selector{};
   selector.size = sizeof(selector);
@@ -934,6 +992,344 @@ void MapTexture::ApplyFeatureState(const Command& command) {
     return;
   }
   ++feature_state_submitted_;
+}
+
+void MapTexture::ApplyOverlayCommand(Command& command) {
+  OverlayCommand& update = command.overlay;
+  overlays_dirty_ = true;
+  if (command.kind == Command::Kind::kOverlayRemove) {
+    auto it = overlays_.find(update.id);
+    if (it == overlays_.end()) return;
+    Overlay& overlay = it->second;
+    for (auto& [index, source] : overlay.sources) {
+      if (source.submitted) {
+        overlay_sources_to_remove_.push_back(OverlaySourceId(update.id, index));
+      }
+    }
+    overlay_sources_to_remove_.insert(overlay_sources_to_remove_.end(),
+                                      overlay.sources_to_remove.begin(),
+                                      overlay.sources_to_remove.end());
+    overlays_.erase(it);
+    return;
+  }
+  if (command.kind == Command::Kind::kOverlayRemoveSource) {
+    auto it = overlays_.find(update.id);
+    if (it == overlays_.end()) return;
+    auto source = it->second.sources.find(update.source_index);
+    if (source == it->second.sources.end()) return;
+    if (source->second.submitted) {
+      it->second.sources_to_remove.push_back(
+          OverlaySourceId(update.id, update.source_index));
+    }
+    it->second.sources.erase(source);
+    return;
+  }
+  Overlay& overlay = overlays_[update.id];
+  if (command.kind == Command::Kind::kOverlaySetSource) {
+    OverlaySource& source = overlay.sources[update.source_index];
+    source.data = std::move(update.data);
+    source.options = update.source_options;
+    ++source.data_version;
+    return;
+  }
+  // Unchanged layers with a new placement or order are moved, not added again.
+  if (overlay.layers != update.layers) {
+    overlay.layers = std::move(update.layers);
+    overlay.layer_sources = std::move(update.layer_sources);
+    ++overlay.layers_version;
+  }
+  overlay.placement = std::move(update.placement);
+  overlay.order = update.order;
+}
+
+namespace {
+
+// The layer IDs and types of a completed mln_map_list_style_layers().
+std::vector<StyleLayer> LayersOf(const mln_completion_result& result) {
+  std::vector<StyleLayer> layers;
+  const auto* base = static_cast<const char*>(result.value);
+  for (size_t i = 0; i < result.value_count; ++i) {
+    const auto& info = *reinterpret_cast<const mln_style_layer_info*>(
+        base + i * result.value_size);
+    layers.push_back({std::string(ViewOf(info.id)), std::string(ViewOf(info.type))});
+  }
+  return layers;
+}
+
+}  // namespace
+
+void MapTexture::SyncOverlays() {
+  uint64_t loads = style_loads_.load();
+  if (loads != style_loads_seen_) {
+    style_loads_seen_ = loads;
+    style_loaded_ = true;
+    missing_anchors_reported_.clear();
+    for (auto& [id, overlay] : overlays_) {
+      for (auto& [index, source] : overlay.sources) source.submitted = false;
+      overlay.sources_to_remove.clear();
+    }
+    overlay_sources_to_remove_.clear();
+    overlays_dirty_ = true;
+  }
+  std::optional<LayerList> list;
+  {
+    std::lock_guard lock(layer_list_mutex_);
+    list = std::exchange(layer_list_, std::nullopt);
+  }
+  if (list) {
+    layer_list_pending_ = false;
+    if (layer_list_style_commands_ != style_commands_ ||
+        layer_list_style_loads_ != style_loads_seen_) {
+      overlays_dirty_ = true;
+    } else if (list->status != MLN_STATUS_OK) {
+      Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+           StatusMessage("mln_map_list_style_layers",
+                         static_cast<mln_status>(list->status),
+                         list->diagnostic.c_str())
+               .c_str());
+    } else {
+      ReconcileOverlays(list->layers);
+    }
+  }
+  bool work = !overlays_.empty() || !overlay_sources_to_remove_.empty();
+  if (overlays_dirty_ && !layer_list_pending_ && style_loaded_ && work) {
+    overlays_dirty_ = false;
+    RequestLayerList();
+  }
+}
+
+void MapTexture::RequestLayerList() {
+  mln_completion done =
+      FunctionCompletion([this](const mln_completion_result& result) {
+        LayerList list;
+        list.status = result.status;
+        if (result.status == MLN_STATUS_OK) {
+          list.layers = LayersOf(result);
+        } else {
+          list.diagnostic = std::string(ViewOf(result.diagnostic));
+        }
+        {
+          std::lock_guard lock(layer_list_mutex_);
+          layer_list_ = std::move(list);
+        }
+        Signal();
+      });
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status = mln_map_list_style_layers(map_, &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_map_list_style_layers", status, &diagnostic);
+    return;
+  }
+  layer_list_pending_ = true;
+  layer_list_style_commands_ = style_commands_;
+  layer_list_style_loads_ = style_loads_seen_;
+}
+
+void MapTexture::ReconcileOverlays(const std::vector<StyleLayer>& layers) {
+  std::vector<OverlayLayout> layouts;
+  for (auto& [id, overlay] : overlays_) {
+    bool shown = !overlay.layers.empty();
+    for (int32_t index : overlay.layer_sources) {
+      shown = shown && overlay.sources.count(index) > 0;
+    }
+    if (shown) {
+      // Layers are added again when they changed, and when a submitted
+      // source needs adding again, which needs the layers that name it
+      // removed.
+      bool readd = overlay.layers_version != overlay.layers_submitted;
+      for (auto& [index, source] : overlay.sources) {
+        readd = readd || (source.submitted &&
+                          source.submitted_options != source.options);
+      }
+      OverlayLayout layout{id, overlay.order, overlay.placement, {}, readd};
+      for (size_t i = 0; i < overlay.layers.size(); ++i) {
+        layout.layer_ids.push_back(OverlayLayerId(id, i));
+      }
+      layouts.push_back(std::move(layout));
+    } else {
+      for (auto& [index, source] : overlay.sources) {
+        if (!source.submitted) continue;
+        overlay_sources_to_remove_.push_back(OverlaySourceId(id, index));
+        source.submitted = false;
+      }
+      overlay_sources_to_remove_.insert(overlay_sources_to_remove_.end(),
+                                        overlay.sources_to_remove.begin(),
+                                        overlay.sources_to_remove.end());
+      overlay.sources_to_remove.clear();
+    }
+  }
+  LayerPlan plan = PlanLayers(layers, layouts);
+
+  // Layers first: a source with a layer can't be removed.
+  for (const std::string& id : plan.remove_stale) RemoveOverlayLayer(id);
+  for (const std::string& id : overlay_sources_to_remove_) RemoveOverlaySource(id);
+  overlay_sources_to_remove_.clear();
+
+  for (const std::string& id : plan.missing_layer_ids) {
+    if (missing_anchors_reported_.insert(id).second) {
+      Emit(MAP_TEXTURE_EVENT_LOADING_FAILED,
+           ("the style has no layer \"" + id + "\" to place an overlay below")
+               .c_str());
+    }
+  }
+
+  // New sources before the layers that name them.
+  for (const OverlayLayout& layout : layouts) {
+    AddOverlaySources(layout.id, overlays_.at(layout.id), false);
+  }
+
+  for (const OverlayStep& step : plan.steps) {
+    Overlay& overlay = overlays_.at(step.id);
+    for (const std::string& id : step.remove_first) RemoveOverlayLayer(id);
+    // The overlay's layers aren't in the style after an install or a
+    // replacement, so a source whose options changed can be added again.
+    if (step.action != OverlayAction::kMove) {
+      AddOverlaySources(step.id, overlay, true);
+    }
+    for (size_t i = 0; i < overlay.layers.size(); ++i) {
+      std::string layer_id = OverlayLayerId(step.id, i);
+      bool move = step.action == OverlayAction::kMove;
+      const char* what =
+          move ? "mln_map_move_style_layer" : "mln_map_add_style_layer_json";
+      mln_completion done = OverlayCompletion(what, layer_id, false);
+      mln_diagnostic diagnostic = NewDiagnostic();
+      mln_status status =
+          move ? mln_map_move_style_layer(map_, View(layer_id), View(step.before),
+                                          &done, &diagnostic)
+               : mln_map_add_style_layer_json(map_, View(overlay.layers[i]),
+                                              View(step.before), &done,
+                                              &diagnostic);
+      if (status != MLN_STATUS_OK) {
+        DiscardFunctionCompletion(done);
+        ReportStatus(what, status, &diagnostic);
+      }
+    }
+    overlay.layers_submitted = overlay.layers_version;
+  }
+
+  // Sources that no layer names any more, after the layers that named them
+  // were removed above, and data of the sources that stay.
+  for (const OverlayLayout& layout : layouts) {
+    Overlay& overlay = overlays_.at(layout.id);
+    for (const std::string& id : overlay.sources_to_remove) RemoveOverlaySource(id);
+    overlay.sources_to_remove.clear();
+    for (auto& [index, source] : overlay.sources) {
+      if (source.data_version == source.data_submitted) continue;
+      std::string source_id = OverlaySourceId(layout.id, index);
+      mln_completion done =
+          OverlayCompletion("mln_map_set_geojson_source_data", source_id, true);
+      mln_diagnostic diagnostic = NewDiagnostic();
+      mln_status status = mln_map_set_geojson_source_data(
+          map_, View(source_id), source.data->handle, &done, &diagnostic);
+      if (status != MLN_STATUS_OK) {
+        DiscardFunctionCompletion(done);
+        ReportStatus("mln_map_set_geojson_source_data", status, &diagnostic);
+      }
+      source.data_submitted = source.data_version;
+    }
+  }
+}
+
+void MapTexture::AddOverlaySources(int64_t id, Overlay& overlay,
+                                   bool readd_changed_options) {
+  for (auto& [index, source] : overlay.sources) {
+    bool again =
+        readd_changed_options && source.submitted_options != source.options;
+    if (!source.submitted || again) AddOverlaySource(id, index, source);
+  }
+}
+
+void MapTexture::AddOverlaySource(int64_t id, int32_t index,
+                                  OverlaySource& source) {
+  std::string source_id = OverlaySourceId(id, index);
+  if (source.submitted) RemoveOverlaySource(source_id);
+  mln_completion done =
+      OverlayCompletion("mln_map_add_geojson_source_data", source_id, false);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status = mln_map_add_geojson_source_data(
+      map_, View(source_id), source.data->handle, &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_map_add_geojson_source_data", status, &diagnostic);
+  }
+  source.submitted = true;
+  source.submitted_options = source.options;
+  source.data_submitted = source.data_version;
+}
+
+mln_completion MapTexture::OverlayCompletion(const char* what,
+                                             const std::string& target,
+                                             bool ignore_not_found) {
+  std::string operation = std::string(what) + " (" + target + ")";
+  return FunctionCompletion([this, operation = std::move(operation),
+                             ignore_not_found](const mln_completion_result& result) {
+    if (result.status == MLN_STATUS_OK ||
+        (ignore_not_found && result.status == MLN_STATUS_NOT_FOUND)) {
+      return;
+    }
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR,
+         StatusMessage(operation.c_str(), static_cast<mln_status>(result.status),
+                       std::string(ViewOf(result.diagnostic)).c_str())
+             .c_str());
+  });
+}
+
+void MapTexture::RemoveOverlayLayer(const std::string& id) {
+  mln_completion done = OverlayCompletion("mln_map_remove_style_layer", id, true);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status = mln_map_remove_style_layer(map_, View(id), &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_map_remove_style_layer", status, &diagnostic);
+  }
+}
+
+void MapTexture::RemoveOverlaySource(const std::string& id) {
+  mln_completion done = OverlayCompletion("mln_map_remove_style_source", id, true);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_map_remove_style_source(map_, View(id), &done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    ReportStatus("mln_map_remove_style_source", status, &diagnostic);
+  }
+}
+
+std::optional<std::vector<StyleLayerInfo>>
+MapTexture::ListStyleLayersForTesting() {
+  struct Result {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    std::optional<std::vector<StyleLayerInfo>> layers;
+  };
+  auto result = std::make_shared<Result>();
+  mln_completion done =
+      FunctionCompletion([result](const mln_completion_result& completed) {
+        std::vector<StyleLayerInfo> layers;
+        const auto* base = static_cast<const char*>(completed.value);
+        for (size_t i = 0; i < completed.value_count; ++i) {
+          const auto& info = *reinterpret_cast<const mln_style_layer_info*>(
+              base + i * completed.value_size);
+          layers.push_back({std::string(ViewOf(info.id)),
+                            std::string(ViewOf(info.type)),
+                            std::string(ViewOf(info.source_id))});
+        }
+        {
+          std::lock_guard lock(result->mutex);
+          if (completed.status == MLN_STATUS_OK) result->layers = std::move(layers);
+          result->done = true;
+        }
+        result->cv.notify_all();
+      });
+  if (mln_map_list_style_layers(map_, &done, nullptr) != MLN_STATUS_OK) {
+    DiscardFunctionCompletion(done);
+    return std::nullopt;
+  }
+  std::unique_lock lock(result->mutex);
+  result->cv.wait_for(lock, std::chrono::seconds(5), [&] { return result->done; });
+  return result->layers;
 }
 
 void MapTexture::ApplyReduceMemoryUse() {
@@ -1160,6 +1556,10 @@ void MapTexture::OnEvents(void* user_data, const mln_event_batch_view* events) {
     }
     switch (event->type) {
       case MLN_RUNTIME_EVENT_MAP_STYLE_LOADED:
+        // The map thread installs the overlays in the new style (design
+        // D201) before it renders.
+        self->style_loads_.fetch_add(1);
+        self->Signal();
         self->Emit(MAP_TEXTURE_EVENT_STYLE_LOADED);
         break;
       case MLN_RUNTIME_EVENT_MAP_LOADING_FAILED:
@@ -1422,10 +1822,6 @@ void AppendJsonString(std::string& out, std::string_view text) {
   out += '"';
 }
 
-std::string_view ViewOf(const mln_buffer_view& view) {
-  return {static_cast<const char*>(view.data), view.size};
-}
-
 // The JSON array that MAP_TEXTURE_EVENT_QUERY_RESULT carries, from the
 // features of a query's completion. The FFI's feature and state are JSON
 // already, so nothing is parsed.
@@ -1497,9 +1893,11 @@ void MapTexture::RunQueries() {
     // render.
     if (session_ != MLN_HANDLE_NULL && gate_.paused()) return;
     // The frame that includes the feature state comes after the commands'
-    // repaint.
+    // repaint. A command queued after this pass took the queue is applied in
+    // a later pass.
     if (session_ != MLN_HANDLE_NULL &&
-        (feature_state_completed_.load() < feature_state_submitted_ ||
+        (feature_state_applied_ < feature_state_queued_before_queries_ ||
+         feature_state_completed_.load() < feature_state_submitted_ ||
          rendered_update_generation_ < feature_state_generation_.load())) {
       return;
     }
@@ -1901,21 +2299,6 @@ void MapTexture::Emit(int32_t type, const char* message,
   if (message != nullptr) event->message = strdup(message);
   callback_(event);
 }
-
-namespace {
-
-std::string StatusMessage(const char* what, mln_status status,
-                          const char* detail) {
-  std::string message = std::string(what) + " failed with status " +
-                        std::to_string(static_cast<int>(status));
-  if (detail != nullptr && detail[0] != '\0') {
-    message += ": ";
-    message += detail;
-  }
-  return message;
-}
-
-}  // namespace
 
 // MapLibre may hold its logging lock here, so this only queues an event for
 // Dart and calls no FFI function. Returning 0 lets MapLibre's platform logger

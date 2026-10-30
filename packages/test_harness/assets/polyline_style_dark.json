@@ -1,0 +1,342 @@
+{
+  "version": 8,
+  "glyphs": "asset://assets/fonts/{fontstack}/{range}.pbf",
+  "sources": {
+    "water": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0.0308990478515625,
+                    0.044631953494023664
+                  ],
+                  [
+                    0.0583648681640625,
+                    0.044631953494023664
+                  ],
+                  [
+                    0.0583648681640625,
+                    0.013732910024760457
+                  ],
+                  [
+                    0.0308990478515625,
+                    0.013732910024760457
+                  ],
+                  [
+                    0.0308990478515625,
+                    0.044631953494023664
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "road": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  -1,
+                  0
+                ],
+                [
+                  1,
+                  0
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "arrow": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.0240325927734375,
+                -0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "bridge": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  -0.0274658203125,
+                  -1
+                ],
+                [
+                  -0.0274658203125,
+                  1
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "building": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0.053558349609375,
+                    0.009613037064274087
+                  ],
+                  [
+                    0.0611114501953125,
+                    0.009613037064274087
+                  ],
+                  [
+                    0.0611114501953125,
+                    0.0048065185490498855
+                  ],
+                  [
+                    0.053558349609375,
+                    0.0048065185490498855
+                  ],
+                  [
+                    0.053558349609375,
+                    0.009613037064274087
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "boundary": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  0.04119873046875,
+                  -0.04634856672244476
+                ],
+                [
+                  0.06866455078125,
+                  -0.04634856672244476
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "road_name": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.0,
+                -0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "place": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0.020599365234375,
+                -0.025749205676216424
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#14181c"
+      }
+    },
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "water",
+      "paint": {
+        "fill-color": "#1a237e",
+        "fill-antialias": false
+      }
+    },
+    {
+      "id": "road",
+      "type": "line",
+      "source": "road",
+      "layout": {
+        "line-cap": "butt"
+      },
+      "paint": {
+        "line-width": 24,
+        "line-color": "#505050"
+      }
+    },
+    {
+      "id": "road_one_way_arrow",
+      "type": "symbol",
+      "source": "arrow",
+      "layout": {
+        "text-field": ">",
+        "text-font": [
+          "Test"
+        ],
+        "text-size": 14,
+        "text-offset": [
+          0,
+          0.9625000000000001
+        ],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#ffffff"
+      }
+    },
+    {
+      "id": "bridge",
+      "type": "line",
+      "source": "bridge",
+      "layout": {
+        "line-cap": "butt"
+      },
+      "paint": {
+        "line-width": 16,
+        "line-color": "#006464"
+      }
+    },
+    {
+      "id": "building_3d",
+      "type": "fill-extrusion",
+      "source": "building",
+      "paint": {
+        "fill-extrusion-color": "#a05000",
+        "fill-extrusion-height": 20
+      }
+    },
+    {
+      "id": "boundary",
+      "type": "line",
+      "source": "boundary",
+      "layout": {
+        "line-cap": "butt"
+      },
+      "paint": {
+        "line-width": 2,
+        "line-color": "#780078"
+      }
+    },
+    {
+      "id": "road_label",
+      "type": "symbol",
+      "source": "road_name",
+      "layout": {
+        "text-field": "ROAD",
+        "text-font": [
+          "Test"
+        ],
+        "text-size": 16,
+        "text-offset": [
+          0,
+          1.1
+        ],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#ffffff"
+      }
+    },
+    {
+      "id": "place_label",
+      "type": "symbol",
+      "source": "place",
+      "layout": {
+        "text-field": "CITY",
+        "text-font": [
+          "Test"
+        ],
+        "text-size": 16,
+        "text-offset": [
+          0,
+          1.1
+        ],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
+      },
+      "paint": {
+        "text-color": "#ffffff"
+      }
+    }
+  ]
+}

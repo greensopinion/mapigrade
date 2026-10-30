@@ -1,11 +1,10 @@
 // Commands from Dart to the map thread.
 //
-// Style loads, resizes, memory reduction, feature state, target tasks and
-// dispose go into an
-// ordered queue and are never dropped or reordered. Consecutive resizes are
-// coalesced so that a window drag doesn't allocate a buffer set per
-// intermediate size. Camera updates go into a single slot where the latest
-// update wins, with its sequence number.
+// Style loads, resizes, memory reduction, feature state, overlays, target
+// tasks and dispose go into an ordered queue and are never dropped or
+// reordered. Consecutive resizes are coalesced so that a window drag doesn't
+// allocate a buffer set per intermediate size. Camera updates go into a single
+// slot where the latest update wins, with its sequence number.
 //
 // All methods are safe to call from any thread.
 #pragma once
@@ -13,12 +12,20 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "overlay.h"
 
 namespace map_texture {
+
+// GeoJSON that map_texture_overlay_set_source() prepared; defined and
+// released in map_texture.h.
+struct PreparedGeoJson;
 
 struct Camera {
   double latitude = 0;
@@ -56,6 +63,21 @@ struct FeatureStateTarget {
   std::optional<std::string> key;
 };
 
+// An overlay command (design D198): the overlay; for kOverlaySetSource and
+// kOverlayRemoveSource the source's index, and for the former its options and
+// prepared data; for kOverlaySetLayers its style layers as JSON objects, the
+// indexes of the sources they name, placement and order key.
+struct OverlayCommand {
+  int64_t id = 0;
+  int32_t source_index = 0;
+  int32_t source_options = 0;
+  std::shared_ptr<PreparedGeoJson> data;
+  std::vector<std::string> layers;
+  std::vector<int32_t> layer_sources;
+  Placement placement;
+  OrderKey order;
+};
+
 struct Command {
   enum class Kind {
     kStyleUrl,
@@ -64,6 +86,10 @@ struct Command {
     kReduceMemoryUse,
     kSetFeatureState,
     kRemoveFeatureState,
+    kOverlaySetSource,
+    kOverlayRemoveSource,
+    kOverlaySetLayers,
+    kOverlayRemove,
     // Work of the platform render target on the map thread.
     kTargetTask,
     kDispose,
@@ -79,31 +105,53 @@ struct Command {
   std::function<void()> task;
   // Set for kSetFeatureState and kRemoveFeatureState.
   FeatureStateTarget feature;
+  // Set for the kOverlay* kinds.
+  OverlayCommand overlay;
 
   static Command StyleUrl(std::string url) {
-    return {Kind::kStyleUrl, std::move(url), {}, {}, {}};
+    return {Kind::kStyleUrl, std::move(url), {}, {}, {}, {}};
   }
   static Command StyleJson(std::string json) {
-    return {Kind::kStyleJson, std::move(json), {}, {}, {}};
+    return {Kind::kStyleJson, std::move(json), {}, {}, {}, {}};
   }
   static Command Resize(Viewport viewport) {
-    return {Kind::kResize, {}, viewport, {}, {}};
+    return {Kind::kResize, {}, viewport, {}, {}, {}};
   }
   static Command ReduceMemoryUse() {
-    return {Kind::kReduceMemoryUse, {}, {}, {}, {}};
+    return {Kind::kReduceMemoryUse, {}, {}, {}, {}, {}};
   }
   static Command SetFeatureState(FeatureStateTarget feature,
                                  std::string state) {
     return {Kind::kSetFeatureState, std::move(state), {}, {},
-            std::move(feature)};
+            std::move(feature), {}};
   }
   static Command RemoveFeatureState(FeatureStateTarget feature) {
-    return {Kind::kRemoveFeatureState, {}, {}, {}, std::move(feature)};
+    return {Kind::kRemoveFeatureState, {}, {}, {}, std::move(feature), {}};
+  }
+  static Command OverlaySetSource(int64_t id, int32_t source_index,
+                                  int32_t source_options,
+                                  std::shared_ptr<PreparedGeoJson> data) {
+    return {Kind::kOverlaySetSource, {}, {}, {}, {},
+            {id, source_index, source_options, std::move(data), {}, {}, {}, {}}};
+  }
+  static Command OverlayRemoveSource(int64_t id, int32_t source_index) {
+    return {Kind::kOverlayRemoveSource, {}, {}, {}, {},
+            {id, source_index, 0, nullptr, {}, {}, {}, {}}};
+  }
+  static Command OverlaySetLayers(int64_t id, std::vector<std::string> layers,
+                                  std::vector<int32_t> layer_sources,
+                                  Placement placement, OrderKey order) {
+    return {Kind::kOverlaySetLayers, {}, {}, {}, {},
+            {id, 0, 0, nullptr, std::move(layers), std::move(layer_sources),
+             std::move(placement), order}};
+  }
+  static Command OverlayRemove(int64_t id) {
+    return {Kind::kOverlayRemove, {}, {}, {}, {}, {id, 0, 0, nullptr, {}, {}, {}, {}}};
   }
   static Command TargetTask(std::function<void()> task) {
-    return {Kind::kTargetTask, {}, {}, std::move(task), {}};
+    return {Kind::kTargetTask, {}, {}, std::move(task), {}, {}};
   }
-  static Command Dispose() { return {Kind::kDispose, {}, {}, {}, {}}; }
+  static Command Dispose() { return {Kind::kDispose, {}, {}, {}, {}, {}}; }
 };
 
 class CommandQueue {
