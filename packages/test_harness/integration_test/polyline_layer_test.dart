@@ -1730,7 +1730,10 @@ void main() {
                 ? _isWhite(shot.rgb(label.dx, label.dy))
                 : _isDark(shot.rgb(label.dx, label.dy)),
             isTrue,
-            reason: 'the road name has the label color of the new style',
+            reason:
+                'the road name has the label color of the new style; the '
+                'pixels from 3 left to 3 right of $label are '
+                '${[for (var dx = -3; dx <= 3; dx++) shot.rgb(label.dx + dx, label.dy)]}',
           );
         }
         expect(
