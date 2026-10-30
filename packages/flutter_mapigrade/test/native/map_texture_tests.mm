@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -922,16 +923,7 @@ std::array<double, 8> QuerySquare(double half, double offset = 0) {
 
 std::atomic<int64_t> next_request_id{0};
 
-// Queries and waits for the result event.
-Event Query(int64_t handle, const std::array<double, 8>& corners,
-            const std::vector<const char*>* layer_ids = nullptr,
-            const char* filter = nullptr) {
-  int64_t id = ++next_request_id;
-  CHECK(map_texture_query_rendered_features(
-            handle, id, corners.data(),
-            layer_ids == nullptr ? nullptr : layer_ids->data(),
-            layer_ids == nullptr ? 0 : static_cast<int32_t>(layer_ids->size()),
-            filter) == MAP_TEXTURE_OK);
+Event WaitForQueryResult(int64_t id) {
   Event result{};
   result.status = -1;
   CHECK(WaitFor([&] {
@@ -944,6 +936,19 @@ Event Query(int64_t handle, const std::array<double, 8>& corners,
     return false;
   }));
   return result;
+}
+
+// Queries and waits for the result event.
+Event Query(int64_t handle, const std::array<double, 8>& corners,
+            const std::vector<const char*>* layer_ids = nullptr,
+            const char* filter = nullptr) {
+  int64_t id = ++next_request_id;
+  CHECK(map_texture_query_rendered_features(
+            handle, id, corners.data(),
+            layer_ids == nullptr ? nullptr : layer_ids->data(),
+            layer_ids == nullptr ? 0 : static_cast<int32_t>(layer_ids->size()),
+            filter) == MAP_TEXTURE_OK);
+  return WaitForQueryResult(id);
 }
 
 bool FindsLine(const Event& result) {
@@ -1069,6 +1074,41 @@ void FeatureStateIsReturnedByQuery() {
   // A failed command doesn't hold back later queries.
   map_texture_set_feature_state(handle, kLineSource, nullptr, "1", "not json");
   CHECK(Query(handle, QuerySquare(2)).status == 0);
+  map_texture_dispose(handle);
+}
+
+// The map thread takes the queued commands before it runs the queued queries,
+// so a set and a query can both be queued while it applies an earlier
+// command. The map thread is held in the set of feature 2, which then fails,
+// so that no submitted set holds the query back.
+void QueryWaitsForFeatureStateQueuedBeforeIt() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  std::promise<void> entered;
+  std::promise<void> release;
+  std::shared_future<void> released = release.get_future().share();
+  ffi_wrappers::SetFeatureStateHook(
+      [&entered, released](const std::string& feature_id) {
+        if (feature_id != "2") return MLN_STATUS_OK;
+        entered.set_value();
+        released.wait();
+        return MLN_STATUS_INVALID_ARGUMENT;
+      });
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "2",
+                                R"({"selected":true})");
+  CHECK(entered.get_future().wait_for(std::chrono::seconds(5)) ==
+        std::future_status::ready);
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                R"({"selected":true})");
+  int64_t id = ++next_request_id;
+  auto corners = QuerySquare(2);
+  map_texture_query_rendered_features(handle, id, corners.data(), nullptr, 0,
+                                      nullptr);
+  release.set_value();
+  CHECK(HasState(WaitForQueryResult(id), R"({"selected":true})"));
+  ffi_wrappers::SetFeatureStateHook(nullptr);
   map_texture_dispose(handle);
 }
 
@@ -2290,6 +2330,8 @@ int main(int argc, char** argv) {
       {"InvalidFilterFailsQuery", InvalidFilterFailsQuery},
       {"QueryResultsArriveInRequestOrder", QueryResultsArriveInRequestOrder},
       {"FeatureStateIsReturnedByQuery", FeatureStateIsReturnedByQuery},
+      {"QueryWaitsForFeatureStateQueuedBeforeIt",
+       QueryWaitsForFeatureStateQueuedBeforeIt},
       {"FeatureStateFailureIsReported", FeatureStateFailureIsReported},
       {"InvalidQueryArgumentsAreRejected", InvalidQueryArgumentsAreRejected},
       {"ReadyEventPrecedesDisplayedEvent", ReadyEventPrecedesDisplayedEvent},
