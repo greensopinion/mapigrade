@@ -125,7 +125,8 @@ final class OverlayRegistration {
   }
 
   /// Sets the overlay's style layers, as a JSON array, and their placement.
-  /// Does nothing when the map already has these.
+  /// Does nothing when these are the style layers, placement and child index
+  /// that were last sent.
   void setLayers(String layersJson, LayerPlacement placement) {
     if (_removed) return;
     _layersJson = layersJson;

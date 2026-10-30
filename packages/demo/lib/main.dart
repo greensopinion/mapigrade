@@ -5,6 +5,7 @@ import 'src/flyover/flyover_screen.dart';
 import 'src/flyover/recording.dart';
 import 'src/gallery.dart';
 import 'src/inspect/inspect_screen.dart';
+import 'src/polylines/polyline_screen.dart';
 
 void main() {
   final recording = Recording.fromEnvironment();
@@ -22,6 +23,12 @@ final _showcases = [
     'Inspect features',
     'Tap a road, building or label to highlight it and see its properties.',
     (context) => const InspectScreen(),
+  ),
+  Showcase(
+    'Polylines',
+    'See routes through downtown New York drawn in the map below its 3D '
+        'buildings and labels, and draw them on top instead.',
+    (context) => const PolylineScreen(),
   ),
 ];
 
