@@ -1,4 +1,4 @@
-## Unreleased
+## 0.0.4
 
 - Added `MapigradePolylineLayer`, which an application places in the `children` of `MapigradeLayer`, and `MapigradePolyline`. The map draws the polylines among the style's own layers, by default below the labels, and keeps them across style loads. `LayerPlacement` places them below the labels, below a named style layer, or above all style layers.
 
