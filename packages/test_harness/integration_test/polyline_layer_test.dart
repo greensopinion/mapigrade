@@ -48,6 +48,7 @@ bool _isRed(_Rgb c) => c[0] > 200 && c[1] < 90 && c[2] < 90;
 bool _isBlue(_Rgb c) => c[2] > 200 && c[0] < 90 && c[1] < 90;
 bool _isGreen(_Rgb c) => c[1] > 130 && c[0] < 90 && c[2] < 90;
 bool _isDark(_Rgb c) => c.every((v) => v < 70);
+bool _isBlack(_Rgb c) => c.every((v) => v < 20);
 bool _isWhite(_Rgb c) => c.every((v) => v > 235);
 bool _isGrey(_Rgb c) =>
     (c[0] - 128).abs() < 24 &&
@@ -330,7 +331,9 @@ Future<_Shot> _eventually(
 }
 
 /// The logical position of a pixel of the glyph block nearest [near] whose
-/// surrounding 3 by 3 logical pixels are all dark.
+/// surrounding 3 by 3 logical pixels are all black, so that the glyph covers
+/// it fully: a white glyph then passes [_isWhite] there, which a glyph edge
+/// that is merely [_isDark] doesn't.
 Offset _blockPixel(_Shot shot, Offset near) {
   Offset? best;
   for (var y = near.dy - 14; y <= near.dy + 14; y += 0.5) {
@@ -338,7 +341,7 @@ Offset _blockPixel(_Shot shot, Offset near) {
       var solid = true;
       for (var dy = -1.0; dy <= 1 && solid; dy += 0.5) {
         for (var dx = -1.0; dx <= 1 && solid; dx += 0.5) {
-          solid = _isDark(shot.rgb(x + dx, y + dy));
+          solid = _isBlack(shot.rgb(x + dx, y + dy));
         }
       }
       if (!solid) continue;
@@ -520,12 +523,18 @@ void main() {
           _pixel(347, 119, _isOrange, 'the orange building'),
           _pixel(330, 275, _isPurple, 'the purple boundary'),
           (s) {
+            var brightest = s.rgb(240, 130);
             for (var y = 130.0; y < 150; y += 1) {
               for (var x = 240.0; x < 262; x += 1) {
-                if (_isWhite(s.rgb(x, y))) return null;
+                final c = s.rgb(x, y);
+                if (_isWhite(c)) return null;
+                if (c.reduce(math.min) > brightest.reduce(math.min)) {
+                  brightest = c;
+                }
               }
             }
-            return 'the one-way arrow is not drawn above the road';
+            return 'the one-way arrow is not drawn above the road; the '
+                'brightest pixel is $brightest';
           },
           (s) => _blockPixel2(s, const Offset(180, 140))
               ? null
