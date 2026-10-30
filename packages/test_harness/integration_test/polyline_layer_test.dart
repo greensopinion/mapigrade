@@ -50,6 +50,11 @@ bool _isGreen(_Rgb c) => c[1] > 130 && c[0] < 90 && c[2] < 90;
 bool _isDark(_Rgb c) => c.every((v) => v < 70);
 bool _isBlack(_Rgb c) => c.every((v) => v < 20);
 bool _isWhite(_Rgb c) => c.every((v) => v > 235);
+
+/// Whether [c] is the color of white text. The x86_64 Android emulator on CI
+/// draws white text without its green channel, as magenta.
+bool _isWhiteText(_Rgb c) =>
+    _isWhite(c) || (_onEmulator && c[0] > 235 && c[1] < 20 && c[2] > 235);
 bool _isGrey(_Rgb c) =>
     (c[0] - 128).abs() < 24 &&
     (c[1] - 128).abs() < 24 &&
@@ -332,7 +337,7 @@ Future<_Shot> _eventually(
 
 /// The logical position of a pixel of the glyph block nearest [near] whose
 /// surrounding 3 by 3 logical pixels are all black, so that the glyph covers
-/// it fully: a white glyph then passes [_isWhite] there, which a glyph edge
+/// it fully: a white glyph then passes [_isWhiteText] there, which a glyph edge
 /// that is merely [_isDark] doesn't.
 Offset _blockPixel(_Shot shot, Offset near) {
   Offset? best;
@@ -410,6 +415,7 @@ double _rowCoverage(_Shot shot, num y, num x0, num x1) {
 
 late String _lightStyle;
 late String _darkStyle;
+late bool _onEmulator;
 
 /// A capture of one Flutter frame. [frameId] and [camera] are the map frame
 /// the layer displayed in it. The capture reads the map's texture when it is
@@ -506,6 +512,7 @@ void main() {
   setUpAll(() async {
     _lightStyle = await rootBundle.loadString('assets/polyline_style.json');
     _darkStyle = await rootBundle.loadString('assets/polyline_style_dark.json');
+    _onEmulator = await _isAndroidEmulator();
   });
 
   group('the test style', () {
@@ -527,7 +534,7 @@ void main() {
             for (var y = 130.0; y < 150; y += 1) {
               for (var x = 240.0; x < 262; x += 1) {
                 final c = s.rgb(x, y);
-                if (_isWhite(c)) return null;
+                if (_isWhiteText(c)) return null;
                 if (c.reduce(math.min) > brightest.reduce(math.min)) {
                   brightest = c;
                 }
@@ -1727,7 +1734,7 @@ void main() {
           );
           expect(
             toDark
-                ? _isWhite(shot.rgb(label.dx, label.dy))
+                ? _isWhiteText(shot.rgb(label.dx, label.dy))
                 : _isDark(shot.rgb(label.dx, label.dy)),
             isTrue,
             reason:
