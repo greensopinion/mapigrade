@@ -102,3 +102,23 @@ final List<DemoRoute> demoRoutes = [
 final List<MapigradePolyline> demoRoutePolylines = [
   for (final route in demoRoutes) route.polyline,
 ];
+
+/// A pin at one end of a route.
+typedef DemoPin = ({LatLng point, Color color});
+
+/// A pin at the start and at the end of each of [demoRoutes], in the route's
+/// color at that end, opaque so that the translucent route's pins show.
+final List<DemoPin> demoRoutePins = [
+  for (final route in demoRoutes)
+    for (final (point, color) in [
+      (
+        route.polyline.points.first,
+        route.polyline.gradientColors?.first ?? route.polyline.color,
+      ),
+      (
+        route.polyline.points.last,
+        route.polyline.gradientColors?.last ?? route.polyline.color,
+      ),
+    ])
+      (point: point, color: color.withAlpha(255)),
+];

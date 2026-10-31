@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Makes packages/demo/build/readme_demo.mp4, the video in README.md: records
-# the demo's flyover in its recording mode on macOS and adds a title card. It
+# Makes packages/demo/build/readme_demo.mp4, the video in README.md, or
+# packages/demo/build/readme_3d_routes.mp4: records the demo's flyover or its
+# 3D routes orbit in its recording mode on macOS and adds a title card. It
 # needs no input while it runs. CONTRIBUTING.md describes the one-time setup
 # and how to upload the video to GitHub; the script doesn't upload it.
 #
-#   packages/demo/tool/record_readme.sh              makes the video
-#   packages/demo/tool/record_readme.sh card <png>   writes only the title card
+#   packages/demo/tool/record_readme.sh [flyover|3d-routes]
+#       makes the video; the flyover without the argument
+#   packages/demo/tool/record_readme.sh card <png> [flyover|3d-routes]
+#       writes only the title card
 #
-# Design: openspec/changes/readme-demo-recording/design.md, D148 to D151.
+# Design: openspec/changes/readme-demo-recording/design.md, D148 to D151, and
+# design D213 of the add-demo-3d-routes change.
 set -euo pipefail
 
 # The clip length in seconds; the demo's warm-up pass covers 1 s more.
@@ -21,7 +25,6 @@ readonly MAX_BYTES=10000000
 readonly CRFS=(24 25 26)
 
 readonly TITLE="Mapigrade demo"
-readonly SUBTITLE="Flyover of the Tour de France Femmes avec Zwift 2026, stage 9, Nice"
 
 TOOL_DIR=$(cd "$(dirname "$0")" && pwd)
 readonly TOOL_DIR
@@ -29,16 +32,35 @@ DEMO_DIR=$(cd "$TOOL_DIR/.." && pwd)
 readonly DEMO_DIR
 REPO_DIR=$(cd "$TOOL_DIR/../../.." && pwd)
 readonly REPO_DIR
-readonly OUTPUT="$DEMO_DIR/build/readme_demo.mp4"
 readonly LOGO="$REPO_DIR/assets/mapigrade.svg"
 readonly DEMO_BINARY="$DEMO_DIR/build/macos/Build/Products/Release/mapigrade_demo.app/Contents/MacOS/mapigrade_demo"
 
 work=""
 helper_pid=""
+# Set by choose_showcase: the card's subtitle and the video file.
+SUBTITLE=""
+OUTPUT=""
 
 fail() {
   echo "record_readme: $*" >&2
   exit 1
+}
+
+# Sets the values that differ between the showcases, and the showcase that
+# the demo records.
+choose_showcase() {
+  case "$1" in
+    flyover)
+      SUBTITLE="Flyover of the Tour de France Femmes avec Zwift 2026, stage 9, Nice"
+      OUTPUT="$DEMO_DIR/build/readme_demo.mp4"
+      ;;
+    3d-routes)
+      SUBTITLE="Orbit of downtown New York, with routes drawn below its 3D buildings and labels"
+      OUTPUT="$DEMO_DIR/build/readme_3d_routes.mp4"
+      ;;
+    *) fail "the showcase is \"$1\"; it must be flyover or 3d-routes" ;;
+  esac
+  export MAPIGRADE_DEMO_RECORDING_SHOWCASE=$1
 }
 
 cleanup() {
@@ -83,11 +105,15 @@ check_permission() {
 
 # Writes the title card to $1: a transparent PNG of WIDTH x HEIGHT.
 make_card() {
-  local out=$1 dir
+  local out=$1 dir subtitle_width half
   dir=$(mktemp -d)
   rsvg-convert -h 130 "$LOGO" -o "$dir/logo.png"
+  # The card is 920 px wide, or wider with 24 px on each side of a longer
+  # subtitle, centered.
+  subtitle_width=$(magick -font Helvetica-Neue -pointsize 28 label:"$SUBTITLE" -format %w info:)
+  half=$((subtitle_width / 2 + 24 > 460 ? subtitle_width / 2 + 24 : 460))
   magick -size "${WIDTH}x${HEIGHT}" xc:none \
-    -fill "rgba(244,242,246,0.97)" -draw "roundrectangle 180,262 1100,574 24,24" \
+    -fill "rgba(244,242,246,0.97)" -draw "roundrectangle $((WIDTH / 2 - half)),262 $((WIDTH / 2 + half)),574 24,24" \
     \( +clone -background black -shadow 35x12+0+6 \) +swap \
     -background none -layers merge +repage \
     \( "$dir/logo.png" \) -gravity north -geometry +0+284 -composite \
@@ -149,12 +175,17 @@ main() {
 }
 
 case "${1:-}" in
-  "") main ;;
+  "") choose_showcase flyover && main ;;
+  flyover | 3d-routes)
+    [[ $# -eq 1 ]] || fail "usage: $0 [flyover|3d-routes]"
+    choose_showcase "$1" && main
+    ;;
   card)
-    [[ $# -eq 2 ]] || fail "usage: $0 card <png>"
+    [[ $# -eq 2 || $# -eq 3 ]] || fail "usage: $0 card <png> [flyover|3d-routes]"
     command -v magick >/dev/null || fail "magick is missing: brew install imagemagick"
     command -v rsvg-convert >/dev/null || fail "rsvg-convert is missing: brew install librsvg"
+    choose_showcase "${3:-flyover}"
     make_card "$2"
     ;;
-  *) fail "usage: $0 [card <png>]" ;;
+  *) fail "usage: $0 [flyover|3d-routes] or $0 card <png> [flyover|3d-routes]" ;;
 esac

@@ -95,7 +95,7 @@ The benchmark and the memory and color measurements are described, with their co
 
 ## README video
 
-The video in the [README](README.md) is a 20 s recording of the demo's flyover on macOS. `packages/demo/tool/record_readme.sh` makes it without input: it builds the demo in release mode, starts it in its recording mode, captures the demo's window, adds a title card, and writes `packages/demo/build/readme_demo.mp4`. Make it again when a change to the demo or the styles changes what the video shows.
+The video in the [README](README.md) is a 20 s recording of the demo's flyover on macOS. `packages/demo/tool/record_readme.sh` makes it without input: it builds the demo in release mode, starts it in its recording mode, captures the demo's window, adds a title card, and writes `packages/demo/build/readme_demo.mp4`. Make it again when a change to the demo or the styles changes what the video shows. With the argument `3d-routes`, the script records the 3D routes orbit instead, with its own subtitle, and writes `packages/demo/build/readme_3d_routes.mp4`; the README doesn't show that video.
 
 Before the first run:
 
@@ -105,10 +105,11 @@ Before the first run:
 Run the script from the repository root:
 
 ```sh
-packages/demo/tool/record_readme.sh
+packages/demo/tool/record_readme.sh             # the flyover
+packages/demo/tool/record_readme.sh 3d-routes   # the 3D routes orbit
 ```
 
-A run takes about 3 minutes: about 1 minute to build, 21 s of warm-up, 20 s of recording and about 1 minute to encode. The demo's window opens without a title bar. You can use the Mac during the run, because the capture records the demo's window even where other windows cover it. The script stops without changing the video when a tool or the permission is missing, or when the video is over 10,000,000 bytes at CRF 24, 25 and 26; 10 MB is the limit for a video attachment on GitHub's free plan.
+A run takes about 3 minutes: about 1 minute to build, 21 s of warm-up, 20 s of recording and about 1 minute to encode. The demo's window opens without a title bar. You can use the Mac during the run, because the capture records the demo's window even where other windows cover it, but don't click in the demo's window: a click stops the flyover or the orbit. The script stops without changing the video when a tool or the permission is missing, or when the video is over 10,000,000 bytes at CRF 24, 25 and 26; 10 MB is the limit for a video attachment on GitHub's free plan.
 
 To publish the video, edit `README.md` on github.com, drag `packages/demo/build/readme_demo.mp4` into the editor, and replace the earlier video's URL with the `https://github.com/user-attachments/assets/...` URL that GitHub inserts, on a line of its own. GitHub doesn't list or delete attachments, so the earlier video stays at its URL.
 

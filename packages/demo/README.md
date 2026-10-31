@@ -8,7 +8,7 @@ The demo isn't published, and there are no built apps to download: build it from
 
 - **Flyover**: a drone's-eye flight along three stages of the Tour de France Femmes avec Zwift 2026, with route and pin overlays that stay on the map while it moves, and the map's and Flutter's frame rates. The video in the repository's README is a recording of it. A split view compares the map with OpenStreetMap raster tiles.
 - **Inspect features**: tap the map to highlight the feature on top with feature state, and see its style layer, source, ID and properties, and the other features at the tap.
-- **Polylines**: routes through downtown New York drawn in the map below its 3D buildings and labels, or on top.
+- **3D routes**: tilt or orbit downtown New York to see routes drawn in the map below its 3D buildings and labels, with upright pins at their ends.
 
 Each screen offers four styles that need no API key: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles. The routes are approximate.
 
@@ -36,6 +36,8 @@ The styles and tiles come from OpenFreeMap and demotiles.maplibre.org, so the de
 ## Recording mode
 
 On macOS, the environment variable `MAPIGRADE_DEMO_RECORDING_SECONDS=<L>` starts the demo in the recording mode that `tool/record_readme.sh` uses for the video in the repository's README. In this mode the demo opens the flyover without the gallery, the window has no title bar and a content area of 1280 × 720 points, the settings are collapsed, and when the style and the stages have loaded, the demo plays the first L + 1 s of the flyover as a warm-up pass and moves the camera back to the start. When the map is at rest there, the demo writes `ready` to standard output, and it starts the flyover when it reads `go` on standard input. It exits with an error when the map isn't at rest within 30 s, when `go` doesn't arrive within 30 s, or when the map reports a failure.
+
+With `MAPIGRADE_DEMO_RECORDING_SHOWCASE=3d-routes` as well, the demo opens 3D routes instead, plays L + 1 s of the orbit as the warm-up pass, moves the camera back to the orbit's start facing north, and starts the orbit when it reads `go`. `tool/record_readme.sh 3d-routes` uses this mode.
 
 To try it, start the binary in the app bundle from a shell, and type `go` after `ready`:
 

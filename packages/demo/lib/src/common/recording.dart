@@ -4,10 +4,27 @@ import 'dart:io';
 
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
+/// The showcase that the recording mode records (design D213).
+enum RecordingShowcase {
+  flyover('flyover'),
+  routes3d('3d-routes');
+
+  const RecordingShowcase(this.value);
+
+  /// The value of `MAPIGRADE_DEMO_RECORDING_SHOWCASE`.
+  final String value;
+
+  /// The showcase for [value]: the flyover when [value] is null, and null when
+  /// it names no showcase.
+  static RecordingShowcase? parse(String? value) => value == null
+      ? flyover
+      : values.where((s) => s.value == value).firstOrNull;
+}
+
 /// The recording mode, in which `tool/record_readme.sh` records the README
 /// image (designs D144 to D147 of the readme-demo-recording change).
 class Recording {
-  Recording._(this.seconds);
+  Recording._(this.seconds, this.showcase);
 
   /// The recording mode when `MAPIGRADE_DEMO_RECORDING_SECONDS` is set on
   /// macOS, otherwise null. Exits for a value that isn't a whole number
@@ -20,10 +37,19 @@ class Recording {
     if (seconds == null || seconds <= 0) {
       fail('$_variable is "$value"; it must be a whole number greater than 0');
     }
-    return Recording._(seconds);
+    final showcaseValue = Platform.environment[_showcaseVariable];
+    final showcase = RecordingShowcase.parse(showcaseValue);
+    if (showcase == null) {
+      fail(
+        '$_showcaseVariable is "$showcaseValue"; it must be one of '
+        '${RecordingShowcase.values.map((s) => s.value).join(', ')}',
+      );
+    }
+    return Recording._(seconds, showcase);
   }
 
   static const _variable = 'MAPIGRADE_DEMO_RECORDING_SECONDS';
+  static const _showcaseVariable = 'MAPIGRADE_DEMO_RECORDING_SHOWCASE';
 
   /// How long the map has to render no frame to be at rest.
   static const _rest = Duration(seconds: 1);
@@ -33,6 +59,8 @@ class Recording {
 
   /// The clip length in seconds.
   final int seconds;
+
+  final RecordingShowcase showcase;
 
   /// The warm-up pass covers the clip and 1 s more.
   Duration get warmUp => Duration(seconds: seconds + 1);

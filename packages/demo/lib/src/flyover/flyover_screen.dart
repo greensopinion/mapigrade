@@ -11,7 +11,7 @@ import '../common/styles.dart';
 import 'flyover.dart';
 import 'flyover_player.dart';
 import 'metrics_panel.dart';
-import 'recording.dart';
+import '../common/recording.dart';
 import 'split_view.dart';
 import 'stage_layers.dart';
 import 'stages.dart';

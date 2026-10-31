@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
 import 'src/flyover/flyover_screen.dart';
-import 'src/flyover/recording.dart';
+import 'src/common/recording.dart';
 import 'src/gallery.dart';
 import 'src/inspect/inspect_screen.dart';
-import 'src/polylines/polyline_screen.dart';
-import 'src/three_d/three_d_screen.dart';
+import 'src/routes/routes_screen.dart';
 
 void main() {
   final recording = Recording.fromEnvironment();
@@ -26,16 +25,10 @@ final _showcases = [
     (context) => const InspectScreen(),
   ),
   Showcase(
-    'Polylines',
-    'See routes through downtown New York drawn in the map below its 3D '
-        'buildings and labels, and draw them on top instead.',
-    (context) => const PolylineScreen(),
-  ),
-  Showcase(
-    '3D view',
-    'Tilt Midtown Manhattan with the slider to see its buildings in 3D, '
-        'with a route and markers that stay on the map.',
-    (context) => const ThreeDScreen(),
+    '3D routes',
+    'Tilt downtown New York to see routes drawn below its 3D buildings and '
+        'labels, with pins that stand upright.',
+    (context) => const RoutesScreen(),
   ),
 ];
 
@@ -50,12 +43,15 @@ class DemoApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     theme: ThemeData(colorSchemeSeed: Colors.indigo),
     // Where the native library isn't available, the layer would draw nothing.
-    // The recording mode opens the flyover without the gallery (design D190).
+    // The recording mode opens its showcase without the gallery (design
+    // D190, D213).
     home: !MapigradeLayer.isSupported
         ? const _UnsupportedScreen()
-        : recording != null
-        ? FlyoverScreen(recording: recording)
-        : Gallery(showcases: _showcases),
+        : switch (recording?.showcase) {
+            null => Gallery(showcases: _showcases),
+            RecordingShowcase.flyover => FlyoverScreen(recording: recording),
+            RecordingShowcase.routes3d => RoutesScreen(recording: recording),
+          },
   );
 }
 
