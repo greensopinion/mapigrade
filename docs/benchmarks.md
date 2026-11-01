@@ -714,6 +714,33 @@ The change's camera latency in the alignment benchmark was 6.8–8.5 ms on the M
 
 On the Mac and the iPhone 13 a frame renders faster with the change than with the FFI before #760, and the lag is the same or lower. On the iPhone 15 Pro Max a frame renders 0.1 to 0.6 ms slower and the displayed map frame rate is about 2% lower, because iOS runs the map thread mostly on the efficiency cores once no per-frame allocation happens (design D188, `maplibre-pr-760-port-findings.md`); the lag is the same in every phase but stop and fling, where its median is up to 1.3 px larger. On the Pixel the change and `main` don't differ beyond the variation between runs.
 
+## FFI release 0.202610.3 (update-ffi-0-202610-3 change, task 6.3)
+
+Measured 2026-11-01 on the Mac only: `main` at `bbbc764` (MapLibre Native FFI 0.202610.2) against the change (FFI 0.202610.3), 3 runs each, alternating, release builds of the test harness, copy-free, rendering ahead at its default. MacBook Pro (M2 Max), macOS 26.6.2, Flutter 3.47.7, window 1600x1000 on the built-in display (`MLT_WINDOW_SCREEN=builtin`) at 120 Hz, scaled to 1800x1169 ("More Space"), AC power, `caffeinate -dims`. The built-in display was the only display, and the Android emulator and the iOS simulator that the test runs used were shut down. The thermal state was nominal at the end of every alignment phase, and `pmset` recorded no thermal warning.
+
+Frame-rate benchmark (30 s pan, 3200x2000 physical):
+
+| Build | Displayed map fps | Service call (ms) | Longest service call (ms) | Camera latency avg (ms) | Skipped renders |
+| --- | --- | --- | --- | --- | --- |
+| `main` | 97.9–102.2 | 6.93–6.94 | 20.2–201.5 | 7.21–7.43 | 0 |
+| change | 99.2–100.1 | 6.89–6.97 | 15.3–18.2 | 7.23–7.43 | 0 |
+
+Alignment benchmark with children (`ALIGNMENT_CHILDREN=1`, mode `predict1`, 20 s per phase, viewport 1600x1000). The drawn error was 0 px at max in every phase of every run of both builds, and no phase skipped a render. Ranges over 3 runs:
+
+| Phase | Service (ms), `main` | change | Lag p50 / p95 (px), `main` | change | Map fps, `main` | change |
+| --- | --- | --- | --- | --- | --- | --- |
+| pan100 | 7.12–7.17 | 7.14–7.21 | 0.83 / 1.67 | 0.83 / 1.67 | 93.0–93.5 | 90.7–94.3 |
+| pan500 | 6.93–7.07 | 6.90–7.00 | 0 / 8.33 | 0 / 8.33 | 95.5–98.7 | 98.0–99.5 |
+| pan1000 | 6.96–7.18 | 6.93–7.16 | 0–8.33 / 16.67 | 0–8.33 / 16.67 | 94.3–98.5 | 94.9–99.0 |
+| stop | 7.13–7.27 | 7.18–7.22 | 0 / 16.67 | 0 / 16.67 | 74.5–75.3 | 74.0–74.8 |
+| fling | 7.18–7.25 | 7.18–7.27 | 0.23–0.44 / 16.67 | 0.22–0.39 / 16.67 | 86.6–88.0 | 86.4–89.2 |
+| reverse | 7.18–7.26 | 7.23–7.26 | 8.33 / 16.67 | 8.33 / 16.67 | 89.7–91.0 | 89.2–90.5 |
+
+- The ranges of the two builds overlap in every measure: the update changed neither the frame rate, the service call time, the camera latency nor the alignment on the Mac.
+- The longest service call of 201.5 ms was in the first run of `main`; the other runs of both builds had at most 20.2 ms.
+- The camera latency in the alignment benchmark was 7.82–8.67 ms with the change and 7.48–8.89 ms on `main`. At most 3 display slots were in use in any phase of either build.
+- The displayed map frame rate of both builds was lower than on 2026-10-22 (108.5–116.8 then). We didn't investigate the cause; one known difference is the Flutter version, 3.47.7 here and 3.47.5 then.
+
 ## No CPU readback on the frame path
 
 ### macOS (Stage 1, task 7.3)

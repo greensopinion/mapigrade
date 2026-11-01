@@ -28,8 +28,8 @@ On iOS and macOS the plugin supports Swift Package Manager only; it has no podsp
 
 The package contains no native libraries of MapLibre Native FFI. The first build on a machine downloads them from the FFI release that the package pins, so it needs network access:
 
-- Android: the runtime AAR `org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android` from Maven Central, 34 MB. The `android/build.gradle.kts` that `flutter create` writes includes `mavenCentral()` in the repositories of every project.
-- iOS and macOS: `MaplibreNativeC.xcframework.zip` from the FFI's GitHub release, 28 MB. Swift Package Manager checks it against the checksum that the package states.
+- Android: the runtime AAR `org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android` from Maven Central, 29 MB. The `android/build.gradle.kts` that `flutter create` writes includes `mavenCentral()` in the repositories of every project.
+- iOS and macOS: `MaplibreNativeC.xcframework.zip` from the FFI's GitHub release, 38 MB. Swift Package Manager checks it against the checksum that the package states.
 
 Gradle and Swift Package Manager cache the downloads for later builds.
 
@@ -51,6 +51,7 @@ An application created with `flutter create` needs these changes before it build
   ```
 
   To load styles and tiles over the network, add the `com.apple.security.network.client` entitlement with the value `true` to `macos/Runner/DebugProfile.entitlements` and `macos/Runner/Release.entitlements`.
+- Android: the map sends HTTP requests through the platform's HTTP client, which applies the app's [network security configuration](https://developer.android.com/privacy-and-security/security-config). Android blocks cleartext HTTP by default, so to load `http://` URLs, allow cleartext traffic to their hosts in that configuration. `https://` and `asset://` URLs need no change.
 
 ## Usage
 

@@ -1,3 +1,9 @@
+## Unreleased
+
+- Updated MapLibre Native FFI to 0.202610.3.
+- Breaking change on Android: the map sends HTTP requests through the platform's HTTP client, which applies the app's network security configuration. Android blocks cleartext HTTP by default, so a style URL or a URL in a style that starts with `http://` needs the app to allow cleartext traffic to its host. `https://` and `asset://` URLs work as before.
+- The Android license entries for Kotlin and rustls-platform-verifier are removed, because the FFI's Android library no longer contains that code.
+
 ## 0.0.4
 
 - Added `MapigradePolylineLayer`, which an application places in the `children` of `MapigradeLayer`, and `MapigradePolyline`. The map draws the polylines among the style's own layers, by default below the labels, and keeps them across style loads. `LayerPlacement` places them below the labels, below a named style layer, or above all style layers.

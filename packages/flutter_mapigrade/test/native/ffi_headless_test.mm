@@ -114,7 +114,8 @@ int main() {
     if (!Check(device != nil, "MTLCreateSystemDefaultDevice")) return 1;
 
     mln_diagnostic diagnostic = NewDiagnostic();
-    mln_runtime_options runtime_options = mln_runtime_options_default();
+    mln_runtime_options runtime_options{};
+    runtime_options.size = sizeof(runtime_options);
     mln_runtime runtime = MLN_HANDLE_NULL;
     mln_status status =
         mln_runtime_create(&runtime_options, &runtime, &diagnostic);
@@ -123,26 +124,27 @@ int main() {
       return 1;
     }
 
-    mln_map_options map_options = mln_map_options_default();
+    mln_map_options map_options{};
+    map_options.size = sizeof(map_options);
     map_options.initial_extent.width = 256;
     map_options.initial_extent.height = 256;
     map_options.initial_extent.scale_factor = 1;
     Waiter created;
     mln_completion create_done = created.Completion();
-    status = mln_runtime_create_map(runtime, &map_options, &create_done,
-                                    &diagnostic);
     mln_map map = MLN_HANDLE_NULL;
-    if (Check(status == MLN_STATUS_OK, "mln_runtime_create_map", status,
+    status = mln_runtime_create_map(runtime, &map_options, &map, &create_done,
+                                    &diagnostic);
+    // An accepted creation writes the map, which is released below whether or
+    // not creation succeeds.
+    bool map_ready =
+        Check(status == MLN_STATUS_OK, "mln_runtime_create_map", status,
               diagnostic) &&
         Check(created.WaitFor(std::chrono::seconds(30)) &&
-                  created.status == MLN_STATUS_OK &&
-                  created.value.size() >= sizeof(mln_map),
-              "map creation completes")) {
-      std::memcpy(&map, created.value.data(), sizeof(mln_map));
-    }
+                  created.status == MLN_STATUS_OK,
+              "map creation completes");
 
     mln_render_session session = MLN_HANDLE_NULL;
-    if (map != MLN_HANDLE_NULL) {
+    if (map_ready) {
       Waiter styled;
       mln_completion style_done = styled.Completion();
       mln_buffer_view json{kStyle, std::strlen(kStyle)};
@@ -151,14 +153,15 @@ int main() {
                 styled.status == MLN_STATUS_OK,
             "mln_map_set_style_json", status, diagnostic);
 
-      mln_metal_owned_texture_descriptor descriptor =
-          mln_metal_owned_texture_descriptor_default();
+      mln_metal_owned_texture_descriptor descriptor{};
+      descriptor.size = sizeof(descriptor);
       descriptor.extent.width = 256;
       descriptor.extent.height = 256;
       descriptor.extent.scale_factor = 1;
       descriptor.context.device = (__bridge void*)device;
-      mln_render_session_attach_options options =
-          mln_render_session_attach_options_default();
+      descriptor.pixel_format = MTLPixelFormatRGBA8Unorm;
+      mln_render_session_attach_options options{};
+      options.size = sizeof(options);
       options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
       Waiter attached;
       mln_completion attach_done = attached.Completion();
@@ -174,8 +177,9 @@ int main() {
     }
 
     if (session != MLN_HANDLE_NULL) {
-      mln_frame_demand demand = mln_frame_demand_default();
-      demand.flags = 0;  // Render unconditionally.
+      mln_frame_demand demand{};
+      demand.size = sizeof(demand);
+      demand.flags = MLN_FRAME_DEMAND_FORCE;
       demand.token = 1;
       status = mln_render_session_request_frame(session, &demand, &diagnostic);
       Check(status == MLN_STATUS_OK, "mln_render_session_request_frame",
@@ -186,24 +190,22 @@ int main() {
       while (!rendered && std::chrono::steady_clock::now() < deadline) {
         mln_render_session_service_driver_work(session, nullptr);
         mln_render_frame_batch batch = MLN_HANDLE_NULL;
-        if (mln_render_session_drain_frame_results(session, &batch, nullptr) !=
-            MLN_STATUS_OK) {
-          continue;
-        }
         mln_render_frame_batch_view view{};
         view.size = sizeof(view);
-        if (mln_render_frame_batch_get(batch, &view, nullptr) == MLN_STATUS_OK) {
-          const auto* base = reinterpret_cast<const char*>(view.results);
-          for (size_t i = 0; i < view.result_count; ++i) {
-            const auto* result = reinterpret_cast<const mln_render_frame_result*>(
-                base + i * view.result_size);
-            std::printf("frame result: token %llu disposition %u\n",
-                        static_cast<unsigned long long>(result->token),
-                        result->disposition);
-            if (result->token == 1 &&
-                result->disposition == MLN_RENDER_RESULT_RENDERED) {
-              rendered = true;
-            }
+        if (mln_render_session_drain_frame_results(session, &batch, &view,
+                                                   nullptr) != MLN_STATUS_OK) {
+          continue;
+        }
+        const auto* base = reinterpret_cast<const char*>(view.results);
+        for (size_t i = 0; i < view.result_count; ++i) {
+          const auto* result = reinterpret_cast<const mln_render_frame_result*>(
+              base + i * view.result_size);
+          std::printf("frame result: token %llu disposition %u\n",
+                      static_cast<unsigned long long>(result->token),
+                      static_cast<unsigned>(result->disposition));
+          if (result->token == 1 &&
+              result->disposition == MLN_RENDER_RESULT_RENDERED) {
+            rendered = true;
           }
         }
         mln_render_frame_batch_release(batch);
@@ -215,7 +217,7 @@ int main() {
       status = mln_render_session_detach(session, &detach_done, &diagnostic);
       Check(status == MLN_STATUS_OK && ServiceUntil(session, detached),
             "mln_render_session_detach", status, diagnostic);
-      mln_render_session_release(session, nullptr);
+      mln_render_session_dispose(session, nullptr, nullptr);
     }
 
     if (map != MLN_HANDLE_NULL) {

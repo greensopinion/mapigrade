@@ -108,10 +108,11 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
                     mln_render_session* out_session,
                     const AsyncCall& call) override {
     attached_size = size;
-    mln_metal_owned_texture_descriptor descriptor =
-        mln_metal_owned_texture_descriptor_default();
+    mln_metal_owned_texture_descriptor descriptor{};
+    descriptor.size = sizeof(descriptor);
     descriptor.extent = size.extent;
     descriptor.context.device = (__bridge void*)Device();
+    descriptor.pixel_format = MTLPixelFormatRGBA8Unorm;
     return mln_map_attach_metal_owned_texture(map, &descriptor, &options,
                                               out_session, call.completion,
                                               call.diagnostic);
@@ -253,8 +254,8 @@ class FakeBufferTarget : public BufferRenderTarget {
 
   mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
                                                    Ring* ring) {
-    mln_metal_borrowed_texture_descriptor descriptor =
-        mln_metal_borrowed_texture_descriptor_default();
+    mln_metal_borrowed_texture_descriptor descriptor{};
+    descriptor.size = sizeof(descriptor);
     descriptor.extent = size.extent;
     descriptor.physical_width = size.physical_width;
     descriptor.physical_height = size.physical_height;
@@ -949,6 +950,60 @@ void InvalidMaxPitchFailsCreation() {
   }
 }
 
+// A style transition's frames ask for another frame, so the demands after
+// them render unconditionally (design D210 of the update-ffi-0-202610-3
+// change). MapLibre also publishes a map update for each of them, so the
+// frame count alone doesn't show whether the demands force a render.
+void StyleTransitionRendersMoreThanOneFrame() {
+  int64_t handle = CreateMap();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(Settled(handle, 1));
+  int64_t rendered = Stats(handle).rendered_frames;
+  size_t demands = ffi_wrappers::DemandFlags().size();
+  std::string style = NextStyle();
+  const std::string no_transition = R"("duration": 0)";
+  style.replace(style.find(no_transition), no_transition.size(),
+                R"("duration": 500)");
+  map_texture_load_style_json(handle, style.c_str());
+  CHECK(Settled(handle, rendered + 3));
+  auto flags = ffi_wrappers::DemandFlags();
+  int forced = 0;
+  for (size_t i = demands; i < flags.size(); ++i) {
+    if (flags[i] & MLN_FRAME_DEMAND_FORCE) {
+      ++forced;
+      CHECK(!(flags[i] & MLN_FRAME_DEMAND_WAIT_FOR_UPDATE));
+    }
+  }
+  CHECK(forced > 0);
+  map_texture_dispose(handle);
+}
+
+// The map queues only the event types that the core handles (design D211 of
+// the update-ffi-0-202610-3 change).
+void CameraChangesDeliverNoCameraEvents() {
+  int64_t handle = CreateMap();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(Settled(handle, 1));
+  for (int zoom = 1; zoom <= 5; ++zoom) {
+    map_texture_set_camera(handle, 0, 0, zoom, 0, 0, zoom);
+  }
+  CHECK(WaitFor([] {
+    auto frames = FrameEvents();
+    return !frames.empty() && frames.back().zoom == 5;
+  }));
+  auto types = ffi_wrappers::EventTypes();
+  CHECK(std::count(types.begin(), types.end(),
+                   MLN_RUNTIME_EVENT_MAP_STYLE_LOADED) == 1);
+  for (uint32_t type : types) {
+    CHECK(type != MLN_RUNTIME_EVENT_MAP_CAMERA_WILL_CHANGE &&
+          type != MLN_RUNTIME_EVENT_MAP_CAMERA_IS_CHANGING &&
+          type != MLN_RUNTIME_EVENT_MAP_CAMERA_DID_CHANGE);
+  }
+  map_texture_dispose(handle);
+}
+
 // A style with one GeoJSON line along the meridian from 20 degrees south to
 // 20 degrees north, 1 logical pixel wide, so that the map renders it without
 // network access. The source ID, `lines "a\b"`, needs escaping in JSON.
@@ -1612,7 +1667,7 @@ void HeaderRulesAreCopiedAndRegistered() {
   CHECK(rules.size() == 2);
   if (rules.size() == 2) {
     for (const auto& rule : rules) {
-      CHECK(rule.kinds == MLN_RESOURCE_KIND_MASK_ALL);
+      CHECK(rule.kinds == MLN_RESOURCE_KIND_FLAG_ALL);
       CHECK(rule.flags == MLN_URL_MATCH_GLOB);
     }
     CHECK(rules[0].url == "https://tiles.example.com/v2/**");
@@ -1917,7 +1972,7 @@ void OverlayAppearsInStyleBelowLabels() {
   auto calls = ffi_wrappers::Calls();
   CHECK(calls.size() == 3);
   if (calls.size() == 3) {
-    CHECK(calls[0].name == "mln_map_add_geojson_source_data");
+    CHECK(calls[0].name == "mln_map_add_geo_json_source_data");
     CHECK(calls[0].id == "mapigrade-overlay-1-source-0");
     CHECK(calls[1].name == "mln_map_add_style_layer_json");
     CHECK(calls[1].id == "mapigrade-overlay-1-0");
@@ -1947,11 +2002,11 @@ void OverlayDataChangeSendsOnlyData() {
   ffi_wrappers::Reset();
   CHECK(SetOverlaySource(handle, 1, LineGeoJson(2)) == MAP_TEXTURE_OK);
   CHECK(WaitFor([] {
-    return !ffi_wrappers::CallNames("mln_map_set_geojson_source_data").empty();
+    return !ffi_wrappers::CallNames("mln_map_set_geo_json_source_data").empty();
   }));
   Sleep(200);
   CHECK((ffi_wrappers::CallNames() ==
-         std::vector<std::string>{"mln_map_set_geojson_source_data"}));
+         std::vector<std::string>{"mln_map_set_geo_json_source_data"}));
   // The same layers again, with the same placement and order key, submit
   // nothing.
   SetOverlayLayers(handle, 1, LineLayersJson(1, 2));
@@ -2082,7 +2137,7 @@ void OverlaysAtSameAnchorFollowOrderKeyInStyle() {
                        "mapigrade-overlay-1-0", "road_label", "poi"})));
   CHECK(!ffi_wrappers::CallNames("mln_map_move_style_layer").empty());
   CHECK(ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty());
-  CHECK(ffi_wrappers::CallNames("mln_map_add_geojson_source_data").empty());
+  CHECK(ffi_wrappers::CallNames("mln_map_add_geo_json_source_data").empty());
   // A placement change moves them too.
   ffi_wrappers::Reset();
   SetOverlayLayers(handle, 2, LineLayersJson(2, 2), 1, "water", 2, 2);
@@ -2215,7 +2270,7 @@ void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
                        "mapigrade-overlay-1-1", "road_label", "poi"})));
   CHECK((ffi_wrappers::CallNames() ==
          std::vector<std::string>{
-             "mln_map_add_geojson_source_data", "mln_map_add_geojson_source_data",
+             "mln_map_add_geo_json_source_data", "mln_map_add_geo_json_source_data",
              "mln_map_add_style_layer_json", "mln_map_add_style_layer_json"}));
   CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == source0);
   CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-1") == source1);
@@ -2233,7 +2288,7 @@ void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
   Sleep(200);
   auto calls = ffi_wrappers::Calls();
   CHECK(calls.size() == 1);
-  CHECK(!calls.empty() && calls[0].name == "mln_map_set_geojson_source_data" &&
+  CHECK(!calls.empty() && calls[0].name == "mln_map_set_geo_json_source_data" &&
         calls[0].id == source0);
 
   // Layers that name only source 0, then the removal of source 1, as Dart
@@ -2271,7 +2326,7 @@ void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
   CHECK((ffi_wrappers::CallNames() ==
          std::vector<std::string>{
              "mln_map_remove_style_layer", "mln_map_remove_style_source",
-             "mln_map_add_geojson_source_data", "mln_map_add_style_layer_json"}));
+             "mln_map_add_geo_json_source_data", "mln_map_add_style_layer_json"}));
   CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
                        "road_label", "poi"})));
   {
@@ -2377,6 +2432,10 @@ int main(int argc, char** argv) {
       {"PitchIsSetAndReported", PitchIsSetAndReported},
       {"MaxPitchLimitsThePitch", MaxPitchLimitsThePitch},
       {"InvalidMaxPitchFailsCreation", InvalidMaxPitchFailsCreation},
+      {"StyleTransitionRendersMoreThanOneFrame",
+       StyleTransitionRendersMoreThanOneFrame},
+      {"CameraChangesDeliverNoCameraEvents",
+       CameraChangesDeliverNoCameraEvents},
       {"QueryBeforeFirstRenderIsEmpty", QueryBeforeFirstRenderIsEmpty},
       {"QueryFindsLineAtRest", QueryFindsLineAtRest},
       {"QueryReadsLastRenderedFrameWhileCameraMoves",

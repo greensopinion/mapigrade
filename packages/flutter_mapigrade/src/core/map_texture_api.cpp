@@ -316,20 +316,21 @@ int32_t map_texture_overlay_set_source(int64_t handle, int64_t overlay_id,
   }
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
-  mln_geojson_source_options options = mln_geojson_source_options_default();
-  options.fields |= MLN_GEOJSON_SOURCE_OPTION_LINE_METRICS;
+  mln_geo_json_source_options options{};
+  options.size = sizeof(options);
+  options.fields |= MLN_GEO_JSON_SOURCE_OPTION_LINE_METRICS;
   options.line_metrics =
       (source_options & map_texture::kSourceOptionLineMetrics) != 0;
-  mln_geojson_source_data data = MLN_HANDLE_NULL;
+  mln_geo_json_source_data data = MLN_HANDLE_NULL;
   mln_diagnostic diagnostic{};
   diagnostic.size = sizeof(diagnostic);
-  mln_status status = mln_geojson_source_data_create(
+  mln_status status = mln_geo_json_source_data_create(
       {geojson, static_cast<size_t>(length)}, &options, &data, &diagnostic);
   if (status != MLN_STATUS_OK) {
     if (out_error != nullptr) {
       *out_error = strdup(diagnostic.message[0] != '\0'
                               ? diagnostic.message
-                              : "mln_geojson_source_data_create failed");
+                              : "mln_geo_json_source_data_create failed");
     }
     return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   }

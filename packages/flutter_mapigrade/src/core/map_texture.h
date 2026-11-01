@@ -32,12 +32,12 @@ namespace map_texture {
 // Owns a prepared GeoJSON handle. The map keeps it as long as its overlay
 // exists, so the source can be added again after each style load.
 struct PreparedGeoJson {
-  explicit PreparedGeoJson(mln_geojson_source_data handle) : handle(handle) {}
+  explicit PreparedGeoJson(mln_geo_json_source_data handle) : handle(handle) {}
   PreparedGeoJson(const PreparedGeoJson&) = delete;
   PreparedGeoJson& operator=(const PreparedGeoJson&) = delete;
-  ~PreparedGeoJson() { mln_geojson_source_data_release(handle); }
+  ~PreparedGeoJson() { mln_geo_json_source_data_release(handle); }
 
-  const mln_geojson_source_data handle;
+  const mln_geo_json_source_data handle;
 };
 
 // One entry of mln_map_list_style_layers(), for tests.
@@ -320,9 +320,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // The process-global MapLibre log callback. MapLibre reports a failed glyph
   // load only as an error record, not as a map event; the record is passed to
   // the map whose thread logged it, as a load failure.
-  static uint32_t OnLogRecord(void* user_data, uint32_t severity,
-                              uint32_t event, int64_t code,
-                              const char* message);
+  static bool OnLogRecord(void* user_data, mln_log_severity severity,
+                          mln_log_event event, int64_t code,
+                          mln_buffer_view message);
 
   void Emit(int32_t type, const char* message = nullptr,
             const FrameInfo* frame = nullptr, int64_t display_time_us = 0,

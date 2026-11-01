@@ -19,8 +19,8 @@ let maplibreNativeC: Target =
     ? .binaryTarget(name: "MaplibreNativeC", path: localFramework)
     : .binaryTarget(
         name: "MaplibreNativeC",
-        url: "https://github.com/maplibre/maplibre-native-ffi/releases/download/v0.202610.2/MaplibreNativeC.xcframework.zip",
-        checksum: "a4d2f8b2367842f41fddb9232d08c3af0b83d993d66661b0285e2620a9767746"
+        url: "https://github.com/maplibre/maplibre-native-ffi/releases/download/v0.202610.3/MaplibreNativeC.xcframework.zip",
+        checksum: "985d9005e34adc3823a61fe56629d056337432303f3e65d539f8284522c31a7d"
     )
 
 let package = Package(

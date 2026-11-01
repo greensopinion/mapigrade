@@ -33,7 +33,7 @@ third_party/                             fetched FFI release, and the local FFI 
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | release 0.202610.2, commit `a27e607357aef2cc9c9c89d10ebba7b3bde26fe8`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
+| MapLibre Native FFI | release 0.202610.3, commit `6c065d9613438bea56ad67d706c4893df14a2b32`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.0 |
 | Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 24 (the map needs API level 29), ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
@@ -167,4 +167,4 @@ To update MapLibre Native FFI to a new upstream release:
 4. Run `scripts/copy_ffi_notices.sh`, which copies the notices of the tarballs into `packages/flutter_mapigrade/notices/`.
 5. Run the tests. If you keep a local build (below), run `scripts/build_maplibre_ffi.sh` to rebuild it at the new commit.
 
-`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of the fetched release. `scripts/copy_ffi_notices.sh` fails when a tarball has a notice file that the script doesn't list; add the file to the script, to `lib/src/notices/third_party_notices.dart` and, for a new directory, to the package's `pubspec.yaml`.
+`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of the fetched release. The script copies every notice file of the tarballs, and the package lists the notice files that an app's build contains, so a release that adds or removes a notice file needs no change to the code or the tests. Review such a change in the diff of `notices/`: check that a removed notice's component is gone from the release's libraries, and what an added notice covers. To give a new notice's entry a name other than its file name, add the file to `noticeNames` in `lib/src/notices/third_party_notices.dart`.
