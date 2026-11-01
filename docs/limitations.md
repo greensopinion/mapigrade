@@ -50,22 +50,14 @@ Since the publish-readiness change the APK contains the libraries of the FFI rel
 
 The package is licensed under the BSD 3-Clause License (`packages/flutter_mapigrade/LICENSE`, and an identical `LICENSE` at the repository root).
 
-Apps built with the package show the notices of MapLibre Native FFI in Flutter's license registry, so `showLicensePage` lists them without code in the app (third-party-notices change). Each tarball of an FFI release has the notices in `share/maplibre-native-c/`. `scripts/copy_ffi_notices.sh` copies them from the pinned release unchanged into `packages/flutter_mapigrade/notices/`, and the package registers one entry per file:
+Apps built with the package show the notices of MapLibre Native FFI in Flutter's license registry, so `showLicensePage` lists them without code in the app (third-party-notices change). Each tarball of an FFI release has the notices in `share/maplibre-native-c/`: its `LICENSE` and the files in `licenses/`. `scripts/copy_ffi_notices.sh` copies every one of them from the pinned release unchanged into `packages/flutter_mapigrade/notices/`, and the package registers one entry per file. The set of files follows the release, without a list in the package (design D217 of the update-ffi-0-202610-3 change):
 
-| File | Entry | Component | License | Platforms |
-| --- | --- | --- | --- | --- |
-| `LICENSE` | MapLibre Native FFI | MapLibre Native FFI | BSD 2-Clause | all |
-| `licenses/maplibre-native.md` | MapLibre Native | MapLibre Native and the third-party code it includes (Boost, RapidJSON, earcut.hpp, protozero, geojson-vt-cpp and others; 1,347 lines) | BSD 2-Clause plus the listed notices | all |
-| `licenses/icu.txt` | ICU | ICU | Unicode license | all |
-| `licenses/fastpfor.txt` | FastPFOR | FastPFOR | Apache 2.0 | all |
-| `licenses/nunicode.txt` | nunicode | nunicode | MIT | all |
-| `licenses/pmtiles.txt` | PMTiles | PMTiles | BSD 3-Clause | all |
-| `licenses/rust.md` | MapLibre Native FFI Rust crates | 62 Rust crates of the FFI's platform component, including `rustls-platform-verifier-android` | MIT, Apache 2.0, BSD, ISC, 0BSD, CDLA-Permissive-2.0, Unicode-3.0 | Android |
-| `licenses/cxx-runtime.txt` | Android NDK C++ runtime | the NDK's C++ runtime | Apache 2.0 and the other licenses that the NDK's notice file lists | Android |
+- A file that only the Android tarballs have goes to `notices/android/`, which only Android apps contain. Every other file goes to `notices/common/`, which every app contains.
+- An entry is named after the component that the package knows the file covers, for example "MapLibre Native FFI Rust crates" for `rust.md`, or otherwise after the file's name without its extension.
 
-The Apple builds of the FFI (macOS and iOS) don't link its Rust platform component or the NDK's C++ runtime, so their apps neither contain nor list those two notices.
+With FFI release 0.202610.3 (2026-11-01), every app lists the FFI's `LICENSE`, MapLibre Native (with the third-party code it includes), ICU, FastPFOR, nunicode and PMTiles, and Android apps also list the Rust crates of the FFI's image decoding and the NDK's C++ runtime. Release 0.202610.2 also had Android notices for Kotlin and the patched rustls-platform-verifier, which the FFI's Android HTTP client used until maplibre/maplibre-native-ffi#1184.
 
-No review has been done of whether each license is acceptable for a given app, for example CDLA-Permissive-2.0 and Unicode-3.0 among the Rust crates. The notices are shown; their acceptability is the app's decision.
+No review has been done of whether each license is acceptable for a given app. The notices are shown; their acceptability is the app's decision.
 
 On the license page:
 
@@ -185,6 +177,7 @@ On 2026-10-18, an app installed from TestFlight reported `LayerCreateException`:
 - On Android, frame reports have no display time (`FrameCamera.displayTime` is null), and a frame counts as displayed when Dart chooses it, because Flutter gives the plugin no call when it takes an image. The display-time and released-buffer integration tests and the timing probe are skipped or exit on Android.
 - On Android, a frame becomes finished only when its GPU work has completed: `ImageReader.acquireNextImage` waits on the frame's GPU fence, about 11 ms after the swap. During a pan, frames therefore finish 10 to 16 ms after a vsync. When a frame finishes in the last 1 to 2 ms before the next vsync and nothing else changed, its finished-frame report reaches Dart after Flutter has started the next Flutter frame, which then has no build, and the map can replace the frame before the build after it. On the Pixel, Dart chose 52.7 to 53.2 map frames per second while the map rendered 58, about 9% of the rendered frames were never displayed, and the longest displayed map frame interval was 45 to 47 ms; the pan showed no stutter in a manual check (`benchmarks.md`, "Choice of the newest finished frame"; `camera-alignment-options.md`).
 - On Android, Flutter doesn't report when it has finished with an image, so a display slot is freed when Dart has chosen three later frames (design D133 of the android-layer-children-alignment change). No tearing was seen on the Pixel; a device whose GPU lags further behind could show it.
+- On Android, the map's HTTP requests follow the app's network security configuration, which blocks cleartext HTTP by default: an `http://` URL loads only if the app allows cleartext traffic to its host, and otherwise the layer reports a load failure. The FFI sends Android HTTP requests through `HttpURLConnection` since release 0.202610.3 (maplibre/maplibre-native-ffi#1184). The test harness allows cleartext traffic to `127.0.0.1` only (design D215 of the update-ffi-0-202610-3 change).
 - On Android, `copyFree: false` has no effect: every map renders directly into the buffers of its `ImageReader`, which Flutter displays.
 - On Android, the plugin's own frame path has no CPU readback by design, which we did not trace. When Impeller uses OpenGL ES, Flutter may copy the `HardwareBuffer` on the GPU while it samples it.
 - The plugin exposes only style, camera (center, zoom, bearing), resize and dispose. There are no gestures, pitch or animations.

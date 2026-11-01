@@ -1,6 +1,10 @@
-// Integration tests for HTTP header rules and asset:// URLs (map-layer spec
-// requirements "HTTP headers" and "Flutter assets", design D84 of the
-// http-headers-and-assets change).
+// Integration tests for HTTP header rules, asset:// URLs and the Android
+// network security configuration (map-layer spec requirements "HTTP headers",
+// "Flutter assets" and "Android network security configuration", design D84 of
+// the http-headers-and-assets change and D215 of the update-ffi-0-202610-3
+// change). The harness's Android network security configuration allows
+// cleartext traffic to 127.0.0.1, which the local servers use, and not to
+// localhost.
 //
 //   cd packages/test_harness && flutter test integration_test/resource_test.dart -d macos
 import 'dart:async';
@@ -392,5 +396,39 @@ void main() {
       );
       expect(exception, isA<LayerLoadException>());
     });
+  });
+
+  group('Android network security configuration', () {
+    testWidgets(
+      'a cleartext request that the configuration blocks reports a load '
+      'failure and reaches no server',
+      (tester) async {
+        final server = await LoopbackServer.start({
+          '/style.json': json({'version': 8, 'sources': {}, 'layers': []}),
+        });
+        addTearDown(server.close);
+        final failed = Completer<LayerException>();
+        await tester.pumpWidget(
+          appWith(
+            MapigradeLayer(
+              styleUrl: server
+                  .url('/style.json')
+                  .replaceFirst('127.0.0.1', 'localhost'),
+              onError: (e) {
+                if (!failed.isCompleted) failed.complete(e);
+              },
+            ),
+          ),
+        );
+        final exception = await failed.future.timeout(
+          const Duration(seconds: 20),
+        );
+        debugPrint('blocked cleartext request: ${exception.message}');
+        expect(exception, isA<LayerLoadException>());
+        expect(exception.message, isNotEmpty);
+        expect(server.requests, isEmpty);
+      },
+      skip: !Platform.isAndroid,
+    );
   });
 }

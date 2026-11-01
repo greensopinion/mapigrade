@@ -4,75 +4,71 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// A notice file in the package's `notices/` directory, and the package name
-/// of its license entry.
-typedef Notice = ({String packageName, String path});
+/// The asset key prefix of the package's notice files, which
+/// `scripts/copy_ffi_notices.sh` copies from the FFI release. `pubspec.yaml`
+/// leaves the files in `notices/android/` out of the other platforms' builds.
+const noticeKeyPrefix = 'packages/flutter_mapigrade/notices/';
 
-/// The notices that applications on every platform show.
-/// `scripts/copy_ffi_notices.sh` copies the same files.
-const commonNotices = <Notice>[
-  (
-    packageName: 'MapLibre Native FFI',
-    path: 'notices/common/maplibre-native-ffi.txt',
-  ),
-  (packageName: 'MapLibre Native', path: 'notices/common/maplibre-native.md'),
-  (packageName: 'ICU', path: 'notices/common/icu.txt'),
-  (packageName: 'FastPFOR', path: 'notices/common/fastpfor.txt'),
-  (packageName: 'nunicode', path: 'notices/common/nunicode.txt'),
-  (packageName: 'PMTiles', path: 'notices/common/pmtiles.txt'),
-];
+/// The package names of the license entries of known notice files, by file
+/// name, in the order the entries are listed. A notice file that isn't here
+/// gets its file name without the extension, after the known ones.
+const noticeNames = {
+  'maplibre-native-ffi.txt': 'MapLibre Native FFI',
+  'maplibre-native.md': 'MapLibre Native',
+  'icu.txt': 'ICU',
+  'fastpfor.txt': 'FastPFOR',
+  'nunicode.txt': 'nunicode',
+  'pmtiles.txt': 'PMTiles',
+  'rust.md': 'MapLibre Native FFI Rust crates',
+  'cxx-runtime.txt': 'Android NDK C++ runtime',
+};
 
-/// The notices that only Android applications show: the FFI's Android build
-/// links Rust crates, the NDK's C++ runtime, Kotlin code and the FFI's patched
-/// rustls-platform-verifier component, which the Apple builds don't.
-/// `pubspec.yaml` leaves these files out of the other platforms' builds.
-const androidNotices = <Notice>[
-  (
-    packageName: 'MapLibre Native FFI Rust crates',
-    path: 'notices/android/rust.md',
-  ),
-  (
-    packageName: 'Android NDK C++ runtime',
-    path: 'notices/android/cxx-runtime.txt',
-  ),
-  (packageName: 'Kotlin', path: 'notices/android/kotlin.txt'),
-  (packageName: 'Kotlin NOTICE', path: 'notices/android/kotlin-notice.txt'),
-  (
-    packageName: 'rustls-platform-verifier',
-    path: 'notices/android/rustls-platform-verifier-notice.txt',
-  ),
-];
+/// The package name of the license entry of the notice file at [key].
+String noticeName(String key) {
+  final fileName = key.substring(key.lastIndexOf('/') + 1);
+  final extension = fileName.lastIndexOf('.');
+  return noticeNames[fileName] ??
+      (extension > 0 ? fileName.substring(0, extension) : fileName);
+}
+
+/// The keys of the notice files in [bundle]'s asset manifest.
+Future<List<String>> noticeKeys(AssetBundle bundle) async {
+  final manifest = await AssetManifest.loadFromAssetBundle(bundle);
+  return [
+    for (final key in manifest.listAssets())
+      if (key.startsWith(noticeKeyPrefix)) key,
+  ];
+}
 
 /// Yields one license entry per notice file, with the file's text unchanged.
-/// The files are loaded from [bundle] as the registry reads the entries, not
-/// before.
+/// [keys] lists the notice files; the files are loaded from [bundle] as the
+/// registry reads the entries, not before.
 Stream<LicenseEntry> thirdPartyNotices(
   AssetBundle bundle, {
-  required bool android,
+  Future<List<String>> Function(AssetBundle bundle) keys = noticeKeys,
 }) async* {
-  for (final notice in [...commonNotices, if (android) ...androidNotices]) {
+  final names = noticeNames.keys.toList();
+  int rank(String key) {
+    final index = names.indexOf(key.substring(key.lastIndexOf('/') + 1));
+    return index < 0 ? names.length : index;
+  }
+
+  final ordered = (await keys(bundle)).toList()
+    ..sort((a, b) {
+      final byRank = rank(a).compareTo(rank(b));
+      return byRank != 0 ? byRank : a.compareTo(b);
+    });
+  for (final key in ordered) {
     yield LicenseEntryWithLineBreaks([
-      notice.packageName,
-    ], await bundle.loadString('packages/flutter_mapigrade/${notice.path}'));
+      noticeName(key),
+    ], await bundle.loadString(key));
   }
 }
 
-/// Registers the notices of Android applications.
-abstract final class MapigradeAndroidNotices {
+/// Registers the notices of the files that the application's build contains.
+abstract final class MapigradeNotices {
   /// Called by the generated plugin registrant before `main`.
   static void registerWith() {
-    LicenseRegistry.addLicense(
-      () => thirdPartyNotices(rootBundle, android: true),
-    );
-  }
-}
-
-/// Registers the notices of macOS and iOS applications.
-abstract final class MapigradeDarwinNotices {
-  /// Called by the generated plugin registrant before `main`.
-  static void registerWith() {
-    LicenseRegistry.addLicense(
-      () => thirdPartyNotices(rootBundle, android: false),
-    );
+    LicenseRegistry.addLicense(() => thirdPartyNotices(rootBundle));
   }
 }

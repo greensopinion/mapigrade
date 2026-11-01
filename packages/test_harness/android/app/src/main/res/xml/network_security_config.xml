@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Allows cleartext HTTP to 127.0.0.1 only, for the local HTTP server of
+     integration_test/resource_test.dart. A request to localhost stays blocked,
+     which that test checks (design D215 of the update-ffi-0-202610-3 change). -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

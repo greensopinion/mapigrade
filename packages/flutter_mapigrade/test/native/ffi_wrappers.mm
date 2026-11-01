@@ -19,6 +19,28 @@ std::string last_asset_path = "<null>";
 int log_registrations = 0;
 std::optional<mln_log_handler> log_handler;
 std::function<mln_status(const std::string&)> feature_state_hook;
+std::vector<uint32_t> event_types;
+std::vector<uint32_t> demand_flags;
+
+// The core's event handler, which RecordEvents forwards each batch to.
+struct EventHandler {
+  mln_runtime_event_callback callback;
+  void* user_data;
+};
+
+void RecordEvents(void* user_data, const mln_event_batch_view* events) {
+  {
+    std::lock_guard lock(mutex);
+    const auto* base = reinterpret_cast<const char*>(events->events);
+    for (size_t i = 0; i < events->event_count; ++i) {
+      event_types.push_back(reinterpret_cast<const mln_runtime_event*>(
+                                base + i * events->event_size)
+                                ->type);
+    }
+  }
+  auto* handler = static_cast<EventHandler*>(user_data);
+  handler->callback(handler->user_data, events);
+}
 
 void Record(std::string name, uint64_t size = 0) {
   std::lock_guard lock(mutex);
@@ -65,6 +87,18 @@ void Reset() {
   header_rules.clear();
   last_asset_path = "<null>";
   feature_state_hook = nullptr;
+  event_types.clear();
+  demand_flags.clear();
+}
+
+std::vector<uint32_t> DemandFlags() {
+  std::lock_guard lock(mutex);
+  return demand_flags;
+}
+
+std::vector<uint32_t> EventTypes() {
+  std::lock_guard lock(mutex);
+  return event_types;
 }
 
 std::vector<Call> Calls() {
@@ -120,8 +154,9 @@ bool Log(const LogRecord& record) {
     handler = log_handler;
   }
   if (!handler || handler->callback == nullptr) return false;
+  // As the FFI does, the message has a NUL byte after its bytes.
   handler->callback(handler->user_data, record.severity, record.event, 0,
-                    record.message.c_str());
+                    {record.message.c_str(), record.message.size()});
   return true;
 }
 
@@ -187,12 +222,49 @@ mln_status test_mln_runtime_set_http_header_transform(
                                                out_diagnostic);
 }
 
+// Interposes RecordEvents for a handler without release_user_data, as the
+// core's is; RecordEvents' own user_data is released with the registration.
+mln_status test_mln_runtime_set_event_handler(
+    mln_runtime runtime, const mln_runtime_event_handler* handler,
+    const mln_completion* completion, mln_diagnostic* out_diagnostic) {
+  if (handler == nullptr || handler->callback == nullptr ||
+      handler->release_user_data != nullptr) {
+    return mln_runtime_set_event_handler(runtime, handler, completion,
+                                         out_diagnostic);
+  }
+  mln_runtime_event_handler recording = *handler;
+  recording.callback = &RecordEvents;
+  recording.user_data = new EventHandler{handler->callback, handler->user_data};
+  recording.release_user_data = [](void* user_data) {
+    delete static_cast<EventHandler*>(user_data);
+  };
+  mln_status status = mln_runtime_set_event_handler(
+      runtime, &recording, completion, out_diagnostic);
+  // A rejected call leaves user_data with the caller.
+  if (status != MLN_STATUS_OK) {
+    delete static_cast<EventHandler*>(recording.user_data);
+  }
+  return status;
+}
+
+mln_status test_mln_render_session_request_frame(
+    mln_render_session session, const mln_frame_demand* demand,
+    mln_diagnostic* out_diagnostic) {
+  if (demand != nullptr) {
+    std::lock_guard lock(mutex);
+    demand_flags.push_back(demand->flags);
+  }
+  return mln_render_session_request_frame(session, demand, out_diagnostic);
+}
+
 mln_status test_mln_runtime_create_map(mln_runtime runtime,
                                        const mln_map_options* options,
+                                       mln_map* out_map,
                                        const mln_completion* completion,
                                        mln_diagnostic* out_diagnostic) {
   Record("mln_runtime_create_map");
-  return mln_runtime_create_map(runtime, options, completion, out_diagnostic);
+  return mln_runtime_create_map(runtime, options, out_map, completion,
+                                out_diagnostic);
 }
 
 mln_status test_mln_map_set_style_url(mln_map map, mln_buffer_view url,
@@ -219,19 +291,19 @@ mln_status test_mln_log_set_callback(const mln_log_handler* handler,
   return mln_log_set_callback(handler, out_diagnostic);
 }
 
-mln_status test_mln_map_add_geojson_source_data(
-    mln_map map, mln_buffer_view source_id, mln_geojson_source_data data,
+mln_status test_mln_map_add_geo_json_source_data(
+    mln_map map, mln_buffer_view source_id, mln_geo_json_source_data data,
     const mln_completion* completion, mln_diagnostic* out_diagnostic) {
-  RecordStyleCall("mln_map_add_geojson_source_data", source_id);
-  return mln_map_add_geojson_source_data(map, source_id, data, completion,
+  RecordStyleCall("mln_map_add_geo_json_source_data", source_id);
+  return mln_map_add_geo_json_source_data(map, source_id, data, completion,
                                          out_diagnostic);
 }
 
-mln_status test_mln_map_set_geojson_source_data(
-    mln_map map, mln_buffer_view source_id, mln_geojson_source_data data,
+mln_status test_mln_map_set_geo_json_source_data(
+    mln_map map, mln_buffer_view source_id, mln_geo_json_source_data data,
     const mln_completion* completion, mln_diagnostic* out_diagnostic) {
-  RecordStyleCall("mln_map_set_geojson_source_data", source_id);
-  return mln_map_set_geojson_source_data(map, source_id, data, completion,
+  RecordStyleCall("mln_map_set_geo_json_source_data", source_id);
+  return mln_map_set_geo_json_source_data(map, source_id, data, completion,
                                          out_diagnostic);
 }
 

@@ -166,6 +166,21 @@ The layer SHALL resolve URLs with the `asset://` scheme against the application'
 - **WHEN** the layer's style URL is `asset://assets/missing.json` and no such asset exists
 - **THEN** the application's failure handler receives a load failure
 
+### Requirement: Android network security configuration
+On Android, the map SHALL send its HTTP requests in accordance with the application's network security configuration. The package SHALL NOT add or change a network security configuration of the application. When the configuration blocks a request, for example a cleartext `http://` request to a host for which the application doesn't allow cleartext traffic, the map SHALL NOT send the request, and the layer SHALL report a load failure as the requirement "Failure reporting" describes. Requests that the map serves from its cache, from local files or from Flutter assets SHALL NOT be affected.
+
+#### Scenario: Cleartext request that the application allows
+- **WHEN** an Android application whose network security configuration allows cleartext traffic to `127.0.0.1` places the layer with a style URL `http://127.0.0.1:<port>/style.json` that a local HTTP server serves
+- **THEN** the map renders the style
+
+#### Scenario: Cleartext request that the configuration blocks
+- **WHEN** the application from the previous scenario places the layer with the style URL `http://localhost:<port>/style.json`, where its network security configuration doesn't allow cleartext traffic to `localhost`
+- **THEN** the application's failure handler receives a load failure, and the local HTTP server receives no request
+
+#### Scenario: Header rules on Android
+- **WHEN** the application from the first scenario places the layer with that style and a header rule that matches the style URL
+- **THEN** the style request that the server receives carries the rule's headers
+
 ### Requirement: Unsupported platforms and architectures
 An application that depends on the package SHALL build, start and run where the package's native library isn't available: on an Android device whose process can't load the native library, for example because the device has none of the ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64`, on Android below API level 29, and on web, for which the package has no native library. An Android application with a `minSdk` of 24 or later SHALL build with the package. An application built for web SHALL build with the package with both web compilers, to JavaScript and to WebAssembly. The package SHALL then not call native code for the life of the process. The layer SHALL offer a static property, `MapigradeLayer.isSupported`, that is true when the native library is available in the process and false otherwise, and that an application can read before it places the layer. When the native library isn't available and an application places the layer, the layer SHALL report a creation failure whose message states that the native library isn't available, as the requirement "Failure reporting" describes, and SHALL NOT throw into the application's code.
 

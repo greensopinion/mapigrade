@@ -32,10 +32,10 @@ namespace {
 
 // The FFI has no render-update-available event: an armed frame demand waits
 // for the map's next update instead.
-constexpr uint64_t kMapEventMask =
-    MLN_RUNTIME_EVENT_MASK_MAP_STYLE_LOADED |
-    MLN_RUNTIME_EVENT_MASK_MAP_LOADING_FAILED |
-    MLN_RUNTIME_EVENT_MASK_MAP_RENDER_ERROR | MLN_RUNTIME_EVENT_MASK_MAP_IDLE;
+constexpr mln_runtime_event_flags kMapEventMask =
+    MLN_RUNTIME_EVENT_FLAG_MAP_STYLE_LOADED |
+    MLN_RUNTIME_EVENT_FLAG_MAP_LOADING_FAILED |
+    MLN_RUNTIME_EVENT_FLAG_MAP_RENDER_ERROR | MLN_RUNTIME_EVENT_FLAG_MAP_IDLE;
 
 // Park bound with nothing to do. Wakes come from the session's wakes and from
 // commands, so this only bounds a missed wake.
@@ -669,7 +669,8 @@ bool MapTexture::Init() {
   std::string cache_path = PlatformCachePath();
   // Without a path, MapLibre's default root makes asset:// URLs fail.
   std::string asset_path = PlatformAssetPath();
-  mln_runtime_options runtime_options = mln_runtime_options_default();
+  mln_runtime_options runtime_options{};
+  runtime_options.size = sizeof(runtime_options);
   if (!cache_path.empty()) runtime_options.cache_path = View(cache_path);
   if (!asset_path.empty()) runtime_options.asset_path = View(asset_path);
 
@@ -739,8 +740,9 @@ bool MapTexture::Init() {
     std::vector<mln_http_header_rule> rules;
     size_t first_header = 0;
     for (const auto& rule : header_rules_) {
-      mln_http_header_rule transform_rule = mln_http_header_rule_default();
-      transform_rule.kinds = MLN_RESOURCE_KIND_MASK_ALL;
+      mln_http_header_rule transform_rule{};
+      transform_rule.size = sizeof(transform_rule);
+      transform_rule.kinds = MLN_RESOURCE_KIND_FLAG_ALL;
       transform_rule.flags = MLN_URL_MATCH_GLOB;
       transform_rule.url = View(rule.url);
       transform_rule.headers =
@@ -765,14 +767,19 @@ bool MapTexture::Init() {
     }
   }
 
-  mln_map_options map_options = mln_map_options_default();
+  mln_map_options map_options{};
+  map_options.size = sizeof(map_options);
   map_options.initial_extent.width = 256;
   map_options.initial_extent.height = 256;
   map_options.initial_extent.scale_factor = initial_pixel_ratio_;
+  // Without the field bit, the map queues every event type.
+  map_options.fields = MLN_MAP_OPTION_EVENT_MASK;
   map_options.event_mask = kMapEventMask;
   auto created = std::make_shared<Waiter>();
   mln_completion create_done = Waiter::For(created);
-  status = mln_runtime_create_map(runtime_, &map_options, &create_done,
+  // An accepted creation writes the map before it completes; Teardown()
+  // releases it whether or not creation succeeds.
+  status = mln_runtime_create_map(runtime_, &map_options, &map_, &create_done,
                                   &diagnostic);
   if (status != MLN_STATUS_OK) {
     Waiter::Discard(create_done);
@@ -780,13 +787,11 @@ bool MapTexture::Init() {
     return false;
   }
   created->WaitFor(30'000'000'000);
-  if (!created->Done() || created->status != MLN_STATUS_OK ||
-      created->value.size() < sizeof(mln_map)) {
+  if (!created->Done() || created->status != MLN_STATUS_OK) {
     init_error_ = "mln_runtime_create_map failed: " + created->diagnostic;
     Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
     return false;
   }
-  std::memcpy(&map_, created->value.data(), sizeof(mln_map));
   return true;
 }
 
@@ -826,7 +831,7 @@ void MapTexture::DestroySession() {
       abandoned.size = sizeof(abandoned);
       mln_render_session_abandon(session_, &abandoned, nullptr);
     }
-    mln_render_session_release(session_, nullptr);
+    mln_render_session_dispose(session_, nullptr, nullptr);
     session_ = MLN_HANDLE_NULL;
     demand_outstanding_ = false;
     demand_slot_ = -1;
@@ -935,17 +940,13 @@ void MapTexture::ApplyFeatureState(const Command& command) {
   selector.size = sizeof(selector);
   selector.source_id = View(feature.source_id);
   if (feature.source_layer_id) {
-    selector.fields |= MLN_FEATURE_STATE_SELECTOR_SOURCE_LAYER_ID;
     selector.source_layer_id = View(*feature.source_layer_id);
   }
   if (feature.feature_id) {
     selector.fields |= MLN_FEATURE_STATE_SELECTOR_FEATURE_ID;
     selector.feature_id = View(*feature.feature_id);
   }
-  if (feature.key) {
-    selector.fields |= MLN_FEATURE_STATE_SELECTOR_STATE_KEY;
-    selector.state_key = View(*feature.key);
-  }
+  if (feature.key) selector.state_key = View(*feature.key);
   bool set = command.kind == Command::Kind::kSetFeatureState;
   const char* what =
       set ? "mln_map_set_feature_state" : "mln_map_remove_feature_state";
@@ -1199,14 +1200,14 @@ void MapTexture::ReconcileOverlays(const std::vector<StyleLayer>& layers) {
     for (auto& [index, source] : overlay.sources) {
       if (source.data_version == source.data_submitted) continue;
       std::string source_id = OverlaySourceId(layout.id, index);
-      mln_completion done =
-          OverlayCompletion("mln_map_set_geojson_source_data", source_id, true);
+      mln_completion done = OverlayCompletion(
+          "mln_map_set_geo_json_source_data", source_id, true);
       mln_diagnostic diagnostic = NewDiagnostic();
-      mln_status status = mln_map_set_geojson_source_data(
+      mln_status status = mln_map_set_geo_json_source_data(
           map_, View(source_id), source.data->handle, &done, &diagnostic);
       if (status != MLN_STATUS_OK) {
         DiscardFunctionCompletion(done);
-        ReportStatus("mln_map_set_geojson_source_data", status, &diagnostic);
+        ReportStatus("mln_map_set_geo_json_source_data", status, &diagnostic);
       }
       source.data_submitted = source.data_version;
     }
@@ -1227,13 +1228,13 @@ void MapTexture::AddOverlaySource(int64_t id, int32_t index,
   std::string source_id = OverlaySourceId(id, index);
   if (source.submitted) RemoveOverlaySource(source_id);
   mln_completion done =
-      OverlayCompletion("mln_map_add_geojson_source_data", source_id, false);
+      OverlayCompletion("mln_map_add_geo_json_source_data", source_id, false);
   mln_diagnostic diagnostic = NewDiagnostic();
-  mln_status status = mln_map_add_geojson_source_data(
+  mln_status status = mln_map_add_geo_json_source_data(
       map_, View(source_id), source.data->handle, &done, &diagnostic);
   if (status != MLN_STATUS_OK) {
     DiscardFunctionCompletion(done);
-    ReportStatus("mln_map_add_geojson_source_data", status, &diagnostic);
+    ReportStatus("mln_map_add_geo_json_source_data", status, &diagnostic);
   }
   source.submitted = true;
   source.submitted_options = source.options;
@@ -1407,11 +1408,12 @@ void MapTexture::EndDemands() {
 
 bool MapTexture::AttachSession() {
   mln_diagnostic diagnostic = NewDiagnostic();
-  mln_render_session_attach_options options =
-      mln_render_session_attach_options_default();
+  mln_render_session_attach_options options{};
+  options.size = sizeof(options);
   options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
-  options.frame_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
-  options.driver_work_wake = mln_wake{&MapTexture::OnWake, this, nullptr};
+  const mln_wake wake{&MapTexture::OnWake, this, nullptr, MLN_HANDLE_NULL};
+  options.frame_wake = wake;
+  options.driver_work_wake = wake;
   auto attached = std::make_shared<Waiter>();
   mln_completion attach_done = Waiter::For(attached);
   mln_status status = target_->Attach(map_, size_, options, &session_,
@@ -1456,7 +1458,7 @@ bool MapTexture::RecoverLostTarget() {
     abandoned.size = sizeof(abandoned);
     mln_render_session_abandon(session_, &abandoned, nullptr);
   }
-  mln_render_session_release(session_, nullptr);
+  mln_render_session_dispose(session_, nullptr, nullptr);
   session_ = MLN_HANDLE_NULL;
   if (demand_outstanding_ && !demand_stale_ && demand_slot_ >= 0) {
     buffers_.Release(demand_slot_);
@@ -1472,9 +1474,10 @@ void MapTexture::ApplyCamera() {
   auto update = commands_.TakeCamera();
   if (!update) return;
   const Camera& camera = update->camera;
-  mln_camera_update camera_update = mln_camera_update_default();
+  mln_camera_update camera_update{};
+  camera_update.size = sizeof(camera_update);
   camera_update.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
-  camera_update.camera = mln_camera_options_default();
+  camera_update.camera.size = sizeof(camera_update.camera);
   camera_update.camera.fields =
       MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_BEARING;
   camera_update.camera.center = {camera.latitude, camera.longitude};
@@ -1695,12 +1698,12 @@ void MapTexture::RenderIntoSurface(SurfaceRenderTarget& target) {
 }
 
 bool MapTexture::ArmDemand(int slot, bool render_ahead) {
-  mln_frame_demand demand = mln_frame_demand_default();
+  mln_frame_demand demand{};
+  demand.size = sizeof(demand);
   // After a frame that asked for another without a map update, as during a
   // paint transition, the next frame renders unconditionally.
-  demand.flags = repaint_wanted_ ? 0u
-                                 : MLN_FRAME_DEMAND_IF_NEEDED |
-                                       MLN_FRAME_DEMAND_WAIT_FOR_UPDATE;
+  demand.flags = repaint_wanted_ ? MLN_FRAME_DEMAND_FORCE
+                                 : MLN_FRAME_DEMAND_WAIT_FOR_UPDATE;
   if (target_->AsSurfaceTarget() != nullptr) {
     demand.flags |= MLN_FRAME_DEMAND_PRESENT;
   }
@@ -1756,22 +1759,20 @@ void MapTexture::ServiceDriver() {
 void MapTexture::DrainFrameResults(int64_t service_start, int64_t service_ns) {
   mln_diagnostic diagnostic = NewDiagnostic();
   mln_render_frame_batch batch = MLN_HANDLE_NULL;
-  mln_status status =
-      mln_render_session_drain_frame_results(session_, &batch, &diagnostic);
+  mln_render_frame_batch_view view{};
+  view.size = sizeof(view);
+  mln_status status = mln_render_session_drain_frame_results(
+      session_, &batch, &view, &diagnostic);
   if (status == MLN_STATUS_NOT_READY) return;
   if (status != MLN_STATUS_OK) {
     ReportStatus("mln_render_session_drain_frame_results", status, &diagnostic);
     return;
   }
-  mln_render_frame_batch_view view{};
-  view.size = sizeof(view);
-  if (mln_render_frame_batch_get(batch, &view, &diagnostic) == MLN_STATUS_OK) {
-    const auto* base = reinterpret_cast<const char*>(view.results);
-    for (size_t i = 0; i < view.result_count; ++i) {
-      HandleFrameResult(*reinterpret_cast<const mln_render_frame_result*>(
-                            base + i * view.result_size),
-                        service_start, service_ns);
-    }
+  const auto* base = reinterpret_cast<const char*>(view.results);
+  for (size_t i = 0; i < view.result_count; ++i) {
+    HandleFrameResult(*reinterpret_cast<const mln_render_frame_result*>(
+                          base + i * view.result_size),
+                      service_start, service_ns);
   }
   mln_render_frame_batch_release(batch);
 }
@@ -1809,25 +1810,26 @@ std::string QueryResultJson(const mln_completion_result& result) {
   std::string json = "[";
   const auto* base = static_cast<const char*>(result.value);
   for (size_t i = 0; i < result.value_count; ++i) {
-    const auto& feature = *reinterpret_cast<const mln_queried_feature*>(
+    const auto& feature = *reinterpret_cast<const mln_rendered_feature*>(
         base + i * result.value_size);
     if (i > 0) json += ',';
     json += "{\"feature\":";
     json += ViewOf(feature.feature);
+    // The FFI leaves an absent value empty.
     json += ",\"source\":";
-    if (feature.fields & MLN_QUERIED_FEATURE_SOURCE_ID) {
+    if (feature.source_id.size > 0) {
       AppendJsonString(json, ViewOf(feature.source_id));
     } else {
       json += "null";
     }
     json += ",\"sourceLayer\":";
-    if (feature.fields & MLN_QUERIED_FEATURE_SOURCE_LAYER_ID) {
+    if (feature.source_layer_id.size > 0) {
       AppendJsonString(json, ViewOf(feature.source_layer_id));
     } else {
       json += "null";
     }
     json += ",\"state\":";
-    if (feature.fields & MLN_QUERIED_FEATURE_STATE) {
+    if (feature.state.size > 0) {
       json += ViewOf(feature.state);
     } else {
       json += "{}";
@@ -1926,8 +1928,8 @@ void MapTexture::RunQueries() {
     geometry.size = sizeof(geometry);
     geometry.type = MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX;
     geometry.data.box = {{box.min.x, box.min.y}, {box.max.x, box.max.y}};
-    mln_rendered_feature_query_options options =
-        mln_rendered_feature_query_options_default();
+    mln_rendered_feature_query_options options{};
+    options.size = sizeof(options);
     std::vector<mln_buffer_view> layer_ids;
     if (query.layer_ids) {
       for (const std::string& id : *query.layer_ids) layer_ids.push_back(View(id));
@@ -1935,10 +1937,7 @@ void MapTexture::RunQueries() {
       options.layer_ids = layer_ids.data();
       options.layer_id_count = layer_ids.size();
     }
-    if (query.filter) {
-      options.fields |= MLN_RENDERED_FEATURE_QUERY_OPTION_FILTER;
-      options.filter = View(*query.filter);
-    }
+    if (query.filter) options.filter = View(*query.filter);
     mln_completion done =
         FunctionCompletion([outcome](const mln_completion_result& result) {
           if (result.status == MLN_STATUS_OK) {
@@ -2101,8 +2100,7 @@ namespace {
 // wait on, so a frame is released without consumer synchronization.
 void ReleaseFrame(mln_acquired_frame frame) {
   mln_diagnostic diagnostic = NewDiagnostic();
-  mln_gpu_sync sync = mln_gpu_sync_default();
-  mln_status status = mln_acquired_frame_release(frame, &sync, &diagnostic);
+  mln_status status = mln_acquired_frame_release(frame, nullptr, &diagnostic);
   if (status != MLN_STATUS_OK) {
     std::fprintf(stderr, "flutter_mapigrade: mln_acquired_frame_release: %d\n",
                  status);
@@ -2205,7 +2203,7 @@ FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   info.physical_height = size_.physical_height;
   info.scale_factor = size_.extent.scale_factor;
   // The view that the frame drew. Its center longitude is unwrapped.
-  const mln_camera_options& camera = result.view.camera;
+  const mln_camera& camera = result.view.camera;
   info.camera = {camera.center.latitude, camera.center.longitude, camera.zoom,
                  camera.bearing};
   {
@@ -2280,18 +2278,21 @@ void MapTexture::Emit(int32_t type, const char* message,
 }
 
 // MapLibre may hold its logging lock here, so this only queues an event for
-// Dart and calls no FFI function. Returning 0 lets MapLibre's platform logger
-// write the record as well.
-uint32_t MapTexture::OnLogRecord(void*, uint32_t severity, uint32_t event,
-                                 int64_t, const char* message) {
+// Dart and calls no FFI function. Returning false lets MapLibre's platform
+// logger write the record as well.
+bool MapTexture::OnLogRecord(void*, mln_log_severity severity,
+                             mln_log_event event, int64_t,
+                             mln_buffer_view message) {
   MapTexture* map = map_thread_owner;
-  if (map == nullptr || message == nullptr ||
-      severity != MLN_LOG_SEVERITY_ERROR || event != MLN_LOG_EVENT_STYLE ||
-      !std::string_view(message).starts_with(kGlyphFailurePrefix)) {
-    return 0;
+  if (map == nullptr || severity != MLN_LOG_SEVERITY_ERROR ||
+      event != MLN_LOG_EVENT_STYLE ||
+      !ViewOf(message).starts_with(kGlyphFailurePrefix)) {
+    return false;
   }
-  map->Emit(MAP_TEXTURE_EVENT_LOADING_FAILED, message);
-  return 0;
+  // The FFI lends the message with a NUL byte after its bytes.
+  map->Emit(MAP_TEXTURE_EVENT_LOADING_FAILED,
+            static_cast<const char*>(message.data));
+  return false;
 }
 
 void MapTexture::ReportStatus(const char* what, mln_status status,

@@ -60,6 +60,14 @@ struct HeaderRule {
 };
 std::vector<HeaderRule> HeaderRules();
 
+// The types of the runtime events that the FFI delivered to the core's event
+// handler since the last Reset(), in order.
+std::vector<uint32_t> EventTypes();
+
+// The flags of the frame demands that the core requested since the last
+// Reset(), in order.
+std::vector<uint32_t> DemandFlags();
+
 // The asset path of the last runtime created, or "<null>" for none.
 std::string LastAssetPath();
 
@@ -69,8 +77,8 @@ int LogCallbackRegistrations();
 // Calls the log handler that the core registered, on the calling thread, as
 // the FFI does when MapLibre logs. Returns false if no handler is registered.
 struct LogRecord {
-  uint32_t severity = MLN_LOG_SEVERITY_ERROR;
-  uint32_t event = MLN_LOG_EVENT_STYLE;
+  mln_log_severity severity = MLN_LOG_SEVERITY_ERROR;
+  mln_log_event event = MLN_LOG_EVENT_STYLE;
   std::string message;
 };
 bool Log(const LogRecord& record);

@@ -18,58 +18,47 @@ The package SHALL be licensed under the BSD 3-Clause License. Its `LICENSE` file
 - **THEN** it has the same content as `packages/flutter_mapigrade/LICENSE`
 
 ### Requirement: Native notices in the license registry
-An application that depends on the package SHALL list, in Flutter's license registry, one license entry for each notice file of the MapLibre Native FFI that applies to the platform the application runs on, without calling any code of the package. Each entry SHALL contain the notice file's text unchanged and SHALL name the component that the file covers.
+An application that depends on the package SHALL list, in Flutter's license registry, one license entry for each notice file of the MapLibre Native FFI that applies to the platform the application runs on, without calling any code of the package. A notice file applies to Android when the release tarball of an Android preset contains it, and to macOS and iOS when the release tarball of an Apple preset contains it. Each entry SHALL contain the notice file's text unchanged, and SHALL name the component that the file covers, or the notice file's name when the package doesn't know the component.
 
-On every supported platform the entries SHALL be:
+Applications for macOS and iOS SHALL NOT list a notice file that only the tarballs of Android presets contain, and SHALL NOT contain it. A notice file that only the tarballs of Apple presets contain MAY also be listed on Android.
 
-| Package name in the entry | Notice file |
-| --- | --- |
-| MapLibre Native FFI | the FFI's `LICENSE` |
-| MapLibre Native | `licenses/maplibre-native.md` |
-| ICU | `licenses/icu.txt` |
-| FastPFOR | `licenses/fastpfor.txt` |
-| nunicode | `licenses/nunicode.txt` |
-| PMTiles | `licenses/pmtiles.txt` |
-
-On Android the entries SHALL also include:
-
-| Package name in the entry | Notice file |
-| --- | --- |
-| MapLibre Native FFI Rust crates | `licenses/rust.md` |
-| Android NDK C++ runtime | `licenses/cxx-runtime.txt` |
-| Kotlin | `licenses/kotlin.txt` |
-| Kotlin NOTICE | `licenses/kotlin-notice.txt` |
-| rustls-platform-verifier | `licenses/rustls-platform-verifier-notice.txt` |
-
-Applications for macOS and iOS SHALL NOT list the five Android entries, and SHALL NOT contain their notice files.
+A notice file that a release adds or removes SHALL NOT require a change to the package's code or tests for the entries to follow the release.
 
 The package SHALL NOT read the notice files before an application reads the license registry.
 
 #### Scenario: License page on Android
 - **WHEN** an application that depends on the package and contains no code that refers to licenses opens `showLicensePage` on Android
-- **THEN** the page lists the six entries for every platform and the five Android entries, and each entry shows the text of its notice file
+- **THEN** the page lists one entry for each notice file of the release's Android tarballs, and each entry shows the text of its notice file
 
 #### Scenario: License page on macOS and iOS
 - **WHEN** such an application opens `showLicensePage` on macOS or iOS
-- **THEN** the page lists the six entries for every platform, and none of the five Android entries
+- **THEN** the page lists one entry for each notice file of the release's Apple tarballs, and no entry for a notice file that only the Android tarballs contain
 
 #### Scenario: Apple app bundle
 - **WHEN** an application that depends on the package is built for macOS or iOS
-- **THEN** the application bundle contains the six notice files for every platform and none of the five Android notice files
+- **THEN** the application bundle contains the notice files of the release's Apple tarballs, and no notice file that only the Android tarballs contain
+
+#### Scenario: Release removes a notice file
+- **WHEN** a developer updates the package to an FFI release whose Android tarball no longer contains a notice file, and runs the script that copies the notice files
+- **THEN** the package no longer contains the file, applications no longer list its entry, and the package's tests pass without other changes
+
+#### Scenario: Release adds a notice file
+- **WHEN** a developer updates the package to an FFI release whose tarballs contain a notice file that no earlier release contained, and runs the script
+- **THEN** the package contains the file, applications on the platforms it applies to list an entry for it, and the package's tests pass without other changes
 
 #### Scenario: Registry not read
 - **WHEN** an application starts and never reads the license registry
 - **THEN** the package doesn't load any notice file
 
 ### Requirement: Notices equal to the FFI build
-The notice files of the MapLibre Native FFI are the files that the release tarballs of the FFI version the package states contain as `share/maplibre-native-c/LICENSE` and in `share/maplibre-native-c/licenses/`, for the presets whose libraries applications built with the package contain. Other files in `share/maplibre-native-c/`, such as `artifact.json`, are not notice files. The notice files in the package SHALL be byte-identical to the notice files of that release, and the package SHALL contain one for every notice file of every such preset. A script SHALL update the notice files in the package from the release. A test SHALL fail when a notice file in the package differs from, or is missing for, a notice file of the release, and SHALL be skipped when the release tarballs aren't available to it.
+The notice files of the MapLibre Native FFI are the files that the release tarballs of the FFI version the package states contain as `share/maplibre-native-c/LICENSE` and in `share/maplibre-native-c/licenses/`, for the presets whose libraries applications built with the package contain. Other files in `share/maplibre-native-c/`, such as `artifact.json`, are not notice files. The notice files in the package SHALL be byte-identical to the notice files of that release, and the package SHALL contain one for every notice file of every such preset, and no other. A script SHALL update the notice files in the package from the release, without a list of expected notice files. A test SHALL fail when a notice file in the package differs from, or is missing for, a notice file of the release, or has no notice file in the release, and SHALL be skipped when the release tarballs aren't available to it.
 
 #### Scenario: FFI update changes a notice
 - **WHEN** a developer changes the FFI version that the package states and runs the script, and the new release adds a Rust crate
 - **THEN** the package's `rust.md` contains the new crate's notice, and the diff of the change shows it
 
 #### Scenario: Notice files out of date
-- **WHEN** a release tarball of the stated version has a notice file that differs from the package's copy, or that the package doesn't contain
+- **WHEN** a release tarball of the stated version has a notice file that differs from the package's copy, or that the package doesn't contain, or the package contains a notice file that no release tarball of the stated version has
 - **THEN** the package's tests fail and name the file
 
 #### Scenario: No FFI build present

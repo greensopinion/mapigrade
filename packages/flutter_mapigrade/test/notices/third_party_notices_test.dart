@@ -1,9 +1,10 @@
 // Tests the license entries of the third-party notices (design D96 of the
-// third-party-notices change, first item): their names and texts, that the
-// files in notices/, the Dart lists and the table of
-// scripts/copy_ffi_notices.sh agree, and the plugin and asset entries in
-// pubspec.yaml. The entries are read through a test AssetBundle, because
-// `flutter test` bundles every asset and doesn't apply the platform filter.
+// third-party-notices change, first item, and D217 of the update-ffi-0-202610-3
+// change): one entry with the file's text for each file in notices/, and the
+// plugin and asset entries in pubspec.yaml. The entries are read through a test
+// AssetBundle, because `flutter test` bundles every asset and doesn't apply the
+// platform filter. The tests name no notice file, so an FFI update that adds or
+// removes one needs no change here.
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -38,13 +39,37 @@ class PackageFilesBundle extends AssetBundle {
   ) async => parser(await loadString(key));
 }
 
-/// The files in `notices/`, as paths relative to the package directory.
-Set<String> noticeFiles() =>
-    Directory('notices')
-        .listSync(recursive: true)
+/// The files in `notices/<directory>/`, as paths relative to the package
+/// directory.
+List<String> noticeFiles(String directory) =>
+    Directory(p.join('notices', directory))
+        .listSync()
         .whereType<File>()
         .map((file) => p.posix.joinAll(p.split(file.path)))
-        .toSet();
+        .toList()
+      ..sort();
+
+/// The asset keys of an Android build ([android]) or a macOS or iOS build,
+/// which `pubspec.yaml` leaves the files in `notices/android/` out of.
+Future<List<String>> Function(AssetBundle) buildKeys({required bool android}) =>
+    (_) async => [
+      for (final file in [
+        ...noticeFiles('common'),
+        if (android) ...noticeFiles('android'),
+      ])
+        '$keyPrefix$file',
+    ];
+
+Future<Map<String, String>> entryTexts({required bool android}) async {
+  final entries = await thirdPartyNotices(
+    PackageFilesBundle(),
+    keys: buildKeys(android: android),
+  ).toList();
+  return {
+    for (final entry in entries)
+      entry.packages.single: (entry as LicenseEntryWithLineBreaks).text,
+  };
+}
 
 void main() {
   test('the repository root has the same LICENSE as the package', () {
@@ -54,84 +79,65 @@ void main() {
     );
   });
 
-  test('applications on macOS and iOS list the six common notices', () async {
-    final bundle = PackageFilesBundle();
-    final entries = await thirdPartyNotices(bundle, android: false).toList();
-
-    expect(entries.map((entry) => entry.packages.single), [
-      'MapLibre Native FFI',
-      'MapLibre Native',
-      'ICU',
-      'FastPFOR',
-      'nunicode',
-      'PMTiles',
-    ]);
-    for (final (index, notice) in commonNotices.indexed) {
-      expect(
-        (entries[index] as LicenseEntryWithLineBreaks).text,
-        File(notice.path).readAsStringSync(),
-        reason: notice.path,
-      );
-    }
-    expect(bundle.requestedKeys, everyElement(contains('/notices/common/')));
+  test('notices/ has common and Android notice files', () {
+    expect(noticeFiles('common'), isNotEmpty);
+    expect(noticeFiles('android'), isNotEmpty);
+    expect(
+      Directory('notices').listSync().map((entry) => p.basename(entry.path)),
+      unorderedEquals(['common', 'android']),
+    );
   });
 
-  test('applications on Android also list the Android notices', () async {
-    final entries = await thirdPartyNotices(
-      PackageFilesBundle(),
-      android: true,
-    ).toList();
+  for (final android in [false, true]) {
+    final platform = android ? 'Android' : 'macOS and iOS';
+    test('applications on $platform list each notice file of their build '
+        'once, with its text', () async {
+      final files = [
+        ...noticeFiles('common'),
+        if (android) ...noticeFiles('android'),
+      ];
+      final texts = await entryTexts(android: android);
 
-    expect(entries.map((entry) => entry.packages.single), [
-      for (final notice in commonNotices) notice.packageName,
-      'MapLibre Native FFI Rust crates',
-      'Android NDK C++ runtime',
-      'Kotlin',
-      'Kotlin NOTICE',
-      'rustls-platform-verifier',
-    ]);
-    for (final (index, notice) in androidNotices.indexed) {
-      expect(
-        (entries[commonNotices.length + index] as LicenseEntryWithLineBreaks)
-            .text,
-        File(notice.path).readAsStringSync(),
-        reason: notice.path,
-      );
+      expect(texts, hasLength(files.length));
+      for (final file in files) {
+        expect(
+          texts[noticeName(file)],
+          File(file).readAsStringSync(),
+          reason: file,
+        );
+      }
+    });
+  }
+
+  test('a notice file has its known name, or its file name', () {
+    for (final MapEntry(key: fileName, value: name) in noticeNames.entries) {
+      expect(noticeName('${keyPrefix}notices/common/$fileName'), name);
     }
+    expect(
+      noticeName('${keyPrefix}notices/common/new-component.txt'),
+      'new-component',
+    );
+  });
+
+  test('known notices come first, in the order of the names table', () async {
+    final names = (await entryTexts(android: true)).keys.toList();
+    final known = names.where(noticeNames.containsValue).toList();
+
+    expect(names.take(known.length), known);
+    expect(known, [
+      for (final name in noticeNames.values)
+        if (known.contains(name)) name,
+    ]);
   });
 
   test('no notice file is loaded before the entries are read', () async {
     final bundle = PackageFilesBundle();
-    final notices = thirdPartyNotices(bundle, android: true);
+    final notices = thirdPartyNotices(bundle, keys: buildKeys(android: true));
     await pumpEventQueue();
     expect(bundle.requestedKeys, isEmpty);
 
     await notices.first;
     expect(bundle.requestedKeys, hasLength(1));
-  });
-
-  test('the files in notices/ are exactly the files of the Dart lists', () {
-    expect(noticeFiles(), {
-      for (final notice in [...commonNotices, ...androidNotices]) notice.path,
-    });
-    expect(
-      commonNotices.map((notice) => notice.path),
-      everyElement(startsWith('notices/common/')),
-    );
-    expect(
-      androidNotices.map((notice) => notice.path),
-      everyElement(startsWith('notices/android/')),
-    );
-  });
-
-  test('scripts/copy_ffi_notices.sh copies the files of the Dart lists', () {
-    final script = File('../../scripts/copy_ffi_notices.sh').readAsStringSync();
-    final scriptTargets = RegExp(
-      r'^  "\S+ ((?:common|android)/\S+)"$',
-      multiLine: true,
-    ).allMatches(script).map((match) => 'notices/${match[1]}').toSet();
-
-    expect(scriptTargets, noticeFiles());
   });
 
   test('pubspec.yaml registers the notices on each platform', () {
@@ -142,13 +148,9 @@ void main() {
     const dartFileName = 'src/notices/third_party_notices.dart';
 
     expect(File(p.join('lib', dartFileName)).existsSync(), isTrue);
-    for (final (platform, dartPluginClass) in [
-      ('android', 'MapigradeAndroidNotices'),
-      ('ios', 'MapigradeDarwinNotices'),
-      ('macos', 'MapigradeDarwinNotices'),
-    ]) {
+    for (final platform in ['android', 'ios', 'macos']) {
       final entry = platforms[platform] as YamlMap;
-      expect(entry['dartPluginClass'], dartPluginClass, reason: platform);
+      expect(entry['dartPluginClass'], 'MapigradeNotices', reason: platform);
       expect(entry['dartFileName'], dartFileName, reason: platform);
       expect(entry['pluginClass'], 'MapigradePlugin', reason: platform);
     }

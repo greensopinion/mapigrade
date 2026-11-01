@@ -281,8 +281,8 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     if (!EnsureDisplay()) return MLN_STATUS_NATIVE_ERROR;
     EGLSurface surface = CurrentSurface();
     if (surface == EGL_NO_SURFACE) return MLN_STATUS_NATIVE_ERROR;
-    mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
-    mln_status status = mln_map_attach_opengl_surface(
+    mln_open_gl_surface_descriptor descriptor = Descriptor(size, surface);
+    mln_status status = mln_map_attach_open_gl_surface(
         map, &descriptor, &options, out_session, call.completion,
         call.diagnostic);
     if (status == MLN_STATUS_OK && surface == window_surface_) {
@@ -295,8 +295,8 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
                        const AsyncCall& call) override {
     EGLSurface surface = CurrentSurface();
     if (surface == EGL_NO_SURFACE) return MLN_STATUS_NATIVE_ERROR;
-    mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
-    return mln_render_session_set_opengl_surface_target(
+    mln_open_gl_surface_descriptor descriptor = Descriptor(size, surface);
+    return mln_render_session_set_open_gl_surface_target(
         session, &descriptor, call.completion, call.diagnostic);
   }
 
@@ -411,7 +411,7 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
   // the replacement has run.
   void SwitchSession(mln_render_session session, const TargetSize& size,
                      EGLSurface surface) {
-    mln_opengl_surface_descriptor descriptor = Descriptor(size, surface);
+    mln_open_gl_surface_descriptor descriptor = Descriptor(size, surface);
     auto done = std::make_shared<std::atomic<int32_t>>(1);
     auto* holder = new std::shared_ptr<std::atomic<int32_t>>(done);
     mln_completion completion{};
@@ -427,11 +427,11 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     };
     mln_diagnostic diagnostic{};
     diagnostic.size = sizeof(diagnostic);
-    mln_status status = mln_render_session_set_opengl_surface_target(
+    mln_status status = mln_render_session_set_open_gl_surface_target(
         session, &descriptor, &completion, &diagnostic);
     if (status != MLN_STATUS_OK) {
       delete holder;
-      Report("mln_render_session_set_opengl_surface_target failed with status " +
+      Report("mln_render_session_set_open_gl_surface_target failed with status " +
              std::to_string(static_cast<int>(status)) + ": " +
              diagnostic.message);
       return;
@@ -549,17 +549,17 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     return true;
   }
 
-  mln_opengl_surface_descriptor Descriptor(const TargetSize& size,
-                                           EGLSurface surface) {
-    mln_opengl_surface_descriptor descriptor =
-        mln_opengl_surface_descriptor_default();
+  mln_open_gl_surface_descriptor Descriptor(const TargetSize& size,
+                                            EGLSurface surface) {
+    mln_open_gl_surface_descriptor descriptor{};
+    descriptor.size = sizeof(descriptor);
     descriptor.extent = size.extent;
-    descriptor.context.platform = MLN_OPENGL_CONTEXT_PLATFORM_EGL;
-    descriptor.context.ownership = MLN_OPENGL_CONTEXT_OWNERSHIP_DEDICATED;
+    descriptor.context.platform = MLN_OPEN_GL_CONTEXT_PLATFORM_EGL;
+    descriptor.context.ownership = MLN_OPEN_GL_CONTEXT_OWNERSHIP_DEDICATED;
     descriptor.context.data.egl.display = display_;
     descriptor.context.data.egl.config = config_;
     descriptor.context.data.egl.share_context = nullptr;
-    descriptor.context.data.egl.client_api = MLN_OPENGL_CLIENT_API_GLES;
+    descriptor.context.data.egl.client_api = MLN_OPEN_GL_CLIENT_API_GLES;
     descriptor.surface = surface;
     return descriptor;
   }

@@ -40,22 +40,23 @@ flutter:
       android:
         package: com.greensopinion.flutter_mapigrade
         pluginClass: MapigradePlugin
-        dartPluginClass: MapigradeAndroidNotices
+        dartPluginClass: MapigradeNotices
         dartFileName: src/notices/third_party_notices.dart
       ios:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true
-        dartPluginClass: MapigradeDarwinNotices
+        dartPluginClass: MapigradeNotices
         dartFileName: src/notices/third_party_notices.dart
       macos:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true
-        dartPluginClass: MapigradeDarwinNotices
+        dartPluginClass: MapigradeNotices
         dartFileName: src/notices/third_party_notices.dart
 
   # Third-party notices of MapLibre Native FFI, copied by
-  # scripts/copy_ffi_notices.sh (design D91 and D93). The Android notices are
-  # for libraries that only the Android build links.
+  # scripts/copy_ffi_notices.sh (design D91 and D93, and D217 of the
+  # update-ffi-0-202610-3 change). The Android notices are for libraries that
+  # only the Android build links.
   assets:
     - path: notices/common/
     - path: notices/android/

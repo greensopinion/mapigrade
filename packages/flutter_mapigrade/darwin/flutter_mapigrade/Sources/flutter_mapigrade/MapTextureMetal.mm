@@ -321,8 +321,8 @@ class MetalRenderTarget : public BufferRenderTarget {
   // the descriptor points to; the call copies them.
   mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
                                                    Ring* ring) {
-    mln_metal_borrowed_texture_descriptor descriptor =
-        mln_metal_borrowed_texture_descriptor_default();
+    mln_metal_borrowed_texture_descriptor descriptor{};
+    descriptor.size = sizeof(descriptor);
     descriptor.extent = size.extent;
     descriptor.physical_width = size.physical_width;
     descriptor.physical_height = size.physical_height;
