@@ -174,12 +174,14 @@ In model A, Flutter draws the overlays and MapLibre renders the map texture, on 
                                                       Flutter shows texture of C_(N-1) or C_(N-2)
 ```
 
-During a pan, the overlays are at the current camera and the texture lags them by one or two frames. Rendering faster doesn't remove this lag, because the pipeline causes it. We plan to correct it in Flutter:
+During a pan, the overlays are at the current camera and the texture lags them by one or two frames. Rendering faster doesn't remove this lag, because the pipeline causes it. We planned to correct it in Flutter:
 
-- **Compensating transform (preferred).** Each displayed frame reports the camera it was rendered with (from `mln_render_session_projection_create()` and `mln_map_projection_get_camera()`). Flutter wraps the `Texture` in a `Transform` that maps the rendered camera to the current `flutter_map` camera. For pan, zoom and rotation without pitch, this is a similarity transform in Web Mercator, so it is exact except at the edges. Rendering a margin beyond the viewport (overscan) provides pixels for the edges during fast pans.
+- **Compensating transform (preferred at the time).** Each displayed frame reports the camera it was rendered with (from `mln_render_session_projection_create()` and `mln_map_projection_get_camera()`). Flutter wraps the `Texture` in a `Transform` that maps the rendered camera to the current `flutter_map` camera. For pan, zoom and rotation without pitch, this is a similarity transform in Web Mercator, so it is exact except at the edges. With pitch, no similarity transform maps one camera's frame to another's. Rendering a margin beyond the viewport (overscan) provides pixels for the edges during fast pans.
 - **Overlays follow the texture (alternative).** Position overlays at the camera of the last displayed frame. Alignment is exact, but every overlay gets one or two frames of input latency.
 
-Camera conversion between the engines, confirmed by `flutter_map_maplibre`: MapLibre zoom = `flutter_map` zoom − 1 (512 px vs 256 px tiles), MapLibre bearing = −`flutter_map` rotation, pitch fixed at 0.
+We removed the compensating transform on 2026-10-12 (remove-camera-transform change). The layer draws the texture without a transform and draws its children at the camera that the displayed frame was rendered with (layer-children-alignment change). To reduce the input latency, it sends MapLibre a camera predicted, by default, one refresh interval ahead (camera-prediction change). The camera sent to MapLibre and the camera of the children both include the pitch, so the alignment doesn't depend on a transform between them. The options and measurements are in [options](camera-alignment-options.md) and [limitations](limitations.md).
+
+Camera conversion between the engines, confirmed by `flutter_map_maplibre`: MapLibre zoom = `flutter_map` zoom − 1 (512 px vs 256 px tiles), MapLibre bearing = −`flutter_map` rotation. MapLibre pitch = `flutter_map` pitch (add-pitch change).
 
 Test alignment with:
 
