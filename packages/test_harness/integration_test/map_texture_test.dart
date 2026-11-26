@@ -352,6 +352,7 @@ void main() {
     // The first cycle starts process-wide threads that stay, such as
     // MapLibre's shared worker threads.
     await cycle();
+    expect(waitForReleasesForTesting(), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final before = processThreadCount();
     final namesBefore = _threadNames();
@@ -359,6 +360,7 @@ void main() {
     for (var i = 0; i < 50; i++) {
       await cycle();
     }
+    expect(waitForReleasesForTesting(), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final after = processThreadCount();
     String mib(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(0);

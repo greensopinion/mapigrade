@@ -389,6 +389,13 @@ void RunInPlatformScope(const std::function<void()>& work) {
   }
 }
 
+void PostToPlatformThread(std::function<void()> task) {
+  auto shared = std::make_shared<std::function<void()>>(std::move(task));
+  dispatch_async(dispatch_get_main_queue(), ^{
+    (*shared)();
+  });
+}
+
 std::string PlatformCachePath() {
   NSURL* caches = [[NSFileManager defaultManager]
       URLsForDirectory:NSCachesDirectory

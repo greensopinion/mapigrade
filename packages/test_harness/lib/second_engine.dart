@@ -53,6 +53,14 @@ Future<void> secondEngineMain() async {
     );
     await loaded.timeout(const Duration(seconds: 20));
     await frame.timeout(const Duration(seconds: 20));
+    if (options['disposeMap'] == true) {
+      // The first engine destroys this engine right after the report, while
+      // the map's release is likely still in progress.
+      controller.dispose();
+      debugPrint('secondEngineMain: disposed a map');
+      await _report({'event': 'mapDisposed'});
+      return;
+    }
     // The map stays undisposed, so that destroying the engine has to release
     // it.
     debugPrint('secondEngineMain: created a map');
@@ -83,11 +91,17 @@ class SecondEngine {
   /// The reports of the second engine.
   Stream<Map<String, Object?>> get reports => _reports.stream;
 
-  /// Starts the second engine, which creates a map without disposing it if
-  /// [createMap], and waits for its report.
-  Future<Map<String, Object?>> start({bool createMap = false}) async {
+  /// Starts the second engine, which creates a map if [createMap], and
+  /// disposes it if [disposeMap], and waits for its report.
+  Future<Map<String, Object?>> start({
+    bool createMap = false,
+    bool disposeMap = false,
+  }) async {
     final report = reports.first.timeout(const Duration(seconds: 60));
-    await enginesChannel.invokeMethod<void>('start', {'createMap': createMap});
+    await enginesChannel.invokeMethod<void>('start', {
+      'createMap': createMap,
+      'disposeMap': disposeMap,
+    });
     return report;
   }
 

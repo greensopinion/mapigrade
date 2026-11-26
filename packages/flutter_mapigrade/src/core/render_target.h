@@ -17,7 +17,7 @@
 //   frame, the target gives its image to Flutter.
 //
 // The core in this directory has no platform dependencies. Each platform
-// implements one kind of target and the four functions at the end of this
+// implements one kind of target and the five functions at the end of this
 // file (macOS and iOS: darwin/.../MapTextureMetal.mm; Android:
 // android/src/main/cpp/map_texture_android.cpp).
 #pragma once
@@ -81,8 +81,8 @@ class RenderTarget {
                                const TargetSize& size,
                                const AsyncCall& call) = 0;
 
-  // The thread that disposes the map, after the map thread has stopped.
-  // Unregisters the Flutter textures.
+  // The platform thread, after the map thread has stopped. Unregisters the
+  // Flutter textures.
   virtual void Unregister() = 0;
 };
 
@@ -202,6 +202,10 @@ std::string PlatformCachePath();
 
 // The root of asset:// URLs, or empty if unknown.
 std::string PlatformAssetPath();
+
+// Any thread: runs `task` on the platform thread later. The release of a
+// disposed map unregisters its textures this way.
+void PostToPlatformThread(std::function<void()> task);
 
 // Runs `work` in the platform's per-iteration scope on the map thread. On
 // Apple platforms this is an autorelease pool, so that Objective-C objects

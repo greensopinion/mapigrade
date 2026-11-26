@@ -7,6 +7,12 @@ import 'bindings.dart';
 /// The number of threads in this process, for lifecycle tests.
 int processThreadCount() => mapTextureProcessThreadCount();
 
+/// Waits until the release of every disposed map has finished, which happens
+/// after dispose returns. Returns false if that takes longer than [timeout].
+bool waitForReleasesForTesting({
+  Duration timeout = const Duration(seconds: 30),
+}) => mapTextureWaitForReleasesForTesting(timeout.inMilliseconds) == 1;
+
 /// Pauses or resumes rendering of every map, as the platform does when the
 /// application enters the background or the foreground.
 void setRenderingPausedForTesting(bool paused) =>

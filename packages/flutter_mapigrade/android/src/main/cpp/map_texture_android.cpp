@@ -20,11 +20,13 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <android/log.h>
+#include <android/looper.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <jni.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -175,6 +177,11 @@ class AndroidSurfaceTarget : public SurfaceRenderTarget {
     requested_width_ = size.physical_width;
     requested_height_ = size.physical_height;
     if (!released_) CreateReader();
+  }
+
+  bool OwnerDisposed() const {
+    auto owner = owner_.lock();
+    return !owner || owner->disposed();
   }
 
   // Main thread, when the activity stops. Returns when the map thread no longer
@@ -606,6 +613,9 @@ void SetReadersReleased(bool released) {
   // destroyed meanwhile, but the set is not iterated across the waits.
   std::set<AndroidSurfaceTarget*> targets = Targets();
   for (AndroidSurfaceTarget* target : targets) {
+    // The map thread of a disposed map may still use the surface; the
+    // release closes the readers after it has stopped.
+    if (target->OwnerDisposed()) continue;
     if (released) {
       target->ReleaseReader();
     } else {
@@ -653,6 +663,66 @@ std::string PlatformCachePath() {
 std::string PlatformAssetPath() { return "/android_asset/flutter_assets"; }
 
 void RunInPlatformScope(const std::function<void()>& work) { work(); }
+
+namespace {
+
+// Tasks for the main thread. The main thread's looper runs them when
+// platform_tasks_fd, an eventfd, becomes readable.
+std::mutex platform_tasks_mutex;
+std::vector<std::function<void()>> platform_tasks;
+int platform_tasks_fd = -1;
+
+int RunPlatformTasks(int fd, int, void*) {
+  uint64_t count = 0;
+  read(fd, &count, sizeof(count));
+  std::vector<std::function<void()>> tasks;
+  {
+    std::lock_guard lock(platform_tasks_mutex);
+    tasks.swap(platform_tasks);
+  }
+  for (auto& task : tasks) task();
+  return 1;
+}
+
+// Main thread. Registers platform_tasks_fd with the main thread's looper,
+// once.
+void InitPlatformTasks() {
+  std::lock_guard lock(platform_tasks_mutex);
+  if (platform_tasks_fd >= 0) return;
+  ALooper* looper = ALooper_forThread();
+  if (looper == nullptr) {
+    LOGE("the main thread has no looper; disposed maps won't be released");
+    return;
+  }
+  int fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (fd < 0) {
+    LOGE("eventfd failed; disposed maps won't be released");
+    return;
+  }
+  ALooper_acquire(looper);
+  if (ALooper_addFd(looper, fd, ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT,
+                    RunPlatformTasks, nullptr) != 1) {
+    LOGE("ALooper_addFd failed; disposed maps won't be released");
+    ALooper_release(looper);
+    close(fd);
+    return;
+  }
+  platform_tasks_fd = fd;
+}
+
+}  // namespace
+
+void PostToPlatformThread(std::function<void()> task) {
+  int fd = -1;
+  {
+    std::lock_guard lock(platform_tasks_mutex);
+    if (platform_tasks_fd < 0) return;
+    platform_tasks.push_back(std::move(task));
+    fd = platform_tasks_fd;
+  }
+  uint64_t one = 1;
+  write(fd, &one, sizeof(one));
+}
 
 }  // namespace map_texture
 
@@ -708,6 +778,7 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
     LOGE("mln_android_init failed with status %d: %s", static_cast<int>(status),
          diagnostic.message);
   }
+  InitPlatformTasks();
   std::lock_guard lock(registries_mutex);
   int64_t token = next_token++;
   Registries()[token] = env->NewGlobalRef(registry);

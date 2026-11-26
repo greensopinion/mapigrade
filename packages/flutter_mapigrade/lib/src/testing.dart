@@ -31,4 +31,5 @@ export 'texture/test_hooks.dart'
         setRenderAheadForTesting,
         setRenderingPausedForTesting,
         thermalStateForTesting,
-        trimSurfacesForTesting;
+        trimSurfacesForTesting,
+        waitForReleasesForTesting;
