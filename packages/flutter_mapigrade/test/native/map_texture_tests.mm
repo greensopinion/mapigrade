@@ -147,6 +147,10 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
 
   // Whether WillRender delivers the frame's image at once.
   std::atomic<bool> deliver_early{false};
+  // WillRender sleeps `slow_frame_ms` before the service call that renders
+  // frame `slow_frame`, as a frame that compiles a shader would take.
+  std::atomic<uint64_t> slow_frame{0};
+  std::atomic<int> slow_frame_ms{0};
 
   std::mutex mutex;
   // The frame ids passed to WillRender, in order, each once. The map thread
@@ -376,18 +380,19 @@ void QueueRenderUpdate(int64_t handle) {
   map_texture_load_style_json(handle, NextStyle().c_str());
 }
 
-// Waits until the map has rendered `frames` frames and renders no more for
-// 200 ms, so that a test counts from a settled map.
+// Waits up to 10 seconds until the map has rendered `frames` frames and the
+// map thread reports that it is at rest, so that a test counts from a settled
+// map.
 bool Settled(int64_t handle, int64_t frames) {
-  if (!WaitFor([&] { return Stats(handle).rendered_frames >= frames; })) {
-    return false;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (Stats(handle).rendered_frames >= frames &&
+        map_texture_at_rest_for_testing(handle) == 1) {
+      return true;
+    }
+    Sleep(1);
   }
-  int64_t rendered = -1;
-  while (rendered != Stats(handle).rendered_frames) {
-    rendered = Stats(handle).rendered_frames;
-    Sleep(200);
-  }
-  return true;
+  return false;
 }
 
 // Sets `error` to the message of map_texture_create().
@@ -443,6 +448,7 @@ void FakeSurfaceTarget::WillRender(uint64_t frame_id) {
     will_render.push_back(frame_id);
     render_starts.push_back(fake_clock ? FakeNow() : 0);
   }
+  if (frame_id == slow_frame.load()) Sleep(slow_frame_ms.load());
   if (!deliver_early) return;
   // Delivers the image before the service call returns, as the listener can
   // on a device.
@@ -569,7 +575,24 @@ void RendersArePacedByRefreshInterval() {
   map_texture_set_display_refresh_rate(handle, 120);
   constexpr int64_t kInterval = 1'000'000'000 / 120;
   map_texture_resize(handle, 100, 100, 2.0);
-  CHECK(Settled(handle, 1));
+  // If the style loads after the first frame, the frame that draws it waits
+  // for the end of an interval of the fake clock.
+  CHECK(WaitFor([handle] {
+    if (Stats(handle).rendered_frames >= 1 &&
+        map_texture_at_rest_for_testing(handle) == 1) {
+      return true;
+    }
+    fake_now += kInterval;
+    return false;
+  }));
+  // The checks below measure from a frame that started at the current time.
+  fake_now += kInterval;
+  int64_t settled = Stats(handle).rendered_frames;
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([handle, settled] {
+    return Stats(handle).rendered_frames > settled &&
+           map_texture_at_rest_for_testing(handle) == 1;
+  }));
   int64_t rendered = Stats(handle).rendered_frames;
   // Under #760 the map thread arms the next frame demand as soon as a frame
   // has rendered, so the wait for the interval's end is counted then, once.
@@ -828,6 +851,38 @@ void IdleMapRendersNothing() {
   map_texture_dispose(handle);
 }
 
+void LoadedMapIsAtRest() {
+  int64_t handle = CreateMap();
+  {
+    SurfaceDart dart(handle);
+    map_texture_resize(handle, 200, 100, 2.0);
+    CHECK(WaitFor(
+        [handle] { return map_texture_at_rest_for_testing(handle) == 1; }));
+    CHECK(!EventsOfType(MAP_TEXTURE_EVENT_STYLE_LOADED).empty());
+  }
+  map_texture_dispose(handle);
+}
+
+void PausedMapWithPendingUpdateIsNotAtRest() {
+  int64_t handle = CreateMap();
+  auto at_rest = [handle] {
+    return map_texture_at_rest_for_testing(handle) == 1;
+  };
+  {
+    SurfaceDart dart(handle);
+    map_texture_resize(handle, 200, 100, 2.0);
+    CHECK(WaitFor(at_rest));
+    map_texture_set_paused_for_testing(1);
+    QueueRenderUpdate(handle);
+    // The style loads while paused, and the frame that draws it waits.
+    Sleep(300);
+    CHECK(!at_rest());
+    map_texture_set_paused_for_testing(0);
+    CHECK(WaitFor(at_rest));
+  }
+  map_texture_dispose(handle);
+}
+
 void NoRenderWhilePaused() {
   int64_t handle = CreateMap();
   SurfaceDart dart(handle);
@@ -1065,6 +1120,24 @@ void QueryFindsLineAtRest() {
 
 // The camera jumps 45 logical pixels between renders, so a query converted
 // with a camera other than that of the frame it reads misses the line.
+// A frame that takes longer than any fixed quiet period, such as one that
+// compiles a shader, doesn't settle the map before it has rendered.
+void SettledWaitsForSlowFrame() {
+  int64_t handle = CreateLineMap();
+  last_target->slow_frame = 2;
+  last_target->slow_frame_ms = 400;
+  {
+    SurfaceDart dart(handle);
+    CHECK(Settled(handle, 1));
+    CHECK(Stats(handle).rendered_frames >= 2);
+    int64_t rendered = Stats(handle).rendered_frames;
+    CHECK(FindsLine(Query(handle, QuerySquare(2))));
+    Sleep(600);
+    CHECK(Stats(handle).rendered_frames == rendered);
+  }
+  map_texture_dispose(handle);
+}
+
 void QueryReadsLastRenderedFrameWhileCameraMoves() {
   int64_t handle = CreateLineMap();
   SurfaceDart dart(handle);
@@ -2426,6 +2499,10 @@ int main(int argc, char** argv) {
       {"DisposeEngineMapsDisposesOnlyThatEngine",
        DisposeEngineMapsDisposesOnlyThatEngine},
       {"UnknownEngineFailsCreate", UnknownEngineFailsCreate},
+      {"LoadedMapIsAtRest", LoadedMapIsAtRest},
+      {"SettledWaitsForSlowFrame", SettledWaitsForSlowFrame},
+      {"PausedMapWithPendingUpdateIsNotAtRest",
+       PausedMapWithPendingUpdateIsNotAtRest},
       {"OverlayAppearsInStyleBelowLabels", OverlayAppearsInStyleBelowLabels},
       {"OverlayDataChangeSendsOnlyData", OverlayDataChangeSendsOnlyData},
       {"OverlayRemoveDeletesLayersThenSource",

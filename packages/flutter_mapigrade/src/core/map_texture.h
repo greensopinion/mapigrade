@@ -180,6 +180,14 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // far, or nothing if the query doesn't complete within five seconds.
   std::optional<std::vector<StyleLayerInfo>> ListStyleLayersForTesting();
 
+  // For tests, any thread except the map thread: whether the map is at rest at
+  // the end of the map thread's next loop iteration, so that it renders no
+  // other frame without new input: nothing is queued, every requested resource
+  // has loaded, no camera transition runs, and the last frame drew the latest
+  // map update and needed no repaint. False if the map thread doesn't answer
+  // within a second.
+  bool AtRestForTesting();
+
  private:
   MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
              std::optional<uint64_t> maximum_cache_size,
@@ -190,6 +198,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void Run();
   // One iteration of the map thread's loop; returns true to stop.
   bool RunOnce();
+  // Map thread, at the end of a loop iteration: whether the map is at rest.
+  bool AtRest();
+  // Map thread: answers the rest probes taken in this loop iteration.
+  void AnswerRestProbes();
   // Whether the map thread should arm a frame demand now rather than park.
   bool RenderWanted();
   // Parks the map thread until Signal() or `timeout_ms` passes.
@@ -495,6 +507,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Camera commands whose completion has run, and camera commands submitted
   // by the map thread.
   std::atomic<int64_t> cameras_completed_{0};
+  // Map thread: the rest probes taken in this loop iteration.
+  struct RestProbe {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::optional<bool> at_rest;
+  };
+  std::vector<std::shared_ptr<RestProbe>> rest_probes_;
   int64_t cameras_submitted_ = 0;
   // When to tell Flutter once more that a frame is available after the last
   // resize (steady clock, ns), or 0 for not pending.
