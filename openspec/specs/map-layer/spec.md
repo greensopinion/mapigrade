@@ -7,7 +7,7 @@ Displays the MapLibre map as the base layer of a `flutter_map` map, at the camer
 ## Requirements
 
 ### Requirement: Base layer of a flutter_map map
-The system SHALL provide a layer that an application places among the children of a `flutter_map` map. The layer SHALL display the map in the full viewport of the `flutter_map` map. Layers placed after it SHALL be drawn above it. The layer SHALL accept an optional list of child widgets, typically `flutter_map` layers, and SHALL draw them above the map, in list order, in the full viewport, as the requirement "Children aligned with the displayed map frame" describes. A `MapigradePolylineLayer` in the children SHALL instead have its polylines drawn in the map, among the style's layers, as the `polyline-layer` capability describes, and so below every child that Flutter draws, whatever its position in the list. The layer SHALL load the style it is given, create its map when it is inserted into the widget tree, and dispose the map when it is removed. When the application gives a layer that is in the tree a different style, the layer SHALL load the new style into the map it has, without creating another map. The layer SHALL report to the application each time a style has loaded.
+The system SHALL provide a layer that an application places among the children of a `flutter_map` map. The layer SHALL display the map in the full viewport of the `flutter_map` map. Layers placed after it SHALL be drawn above it. The layer SHALL accept an optional list of child widgets, typically `flutter_map` layers, and SHALL draw them above the map, in list order, in the full viewport, as the requirement "Children aligned with the displayed map frame" describes. A `MapigradePolylineLayer` in the children SHALL instead have its polylines drawn in the map, among the style's layers, as the `polyline-layer` capability describes, and so below every child that Flutter draws, whatever its position in the list. The layer SHALL load the style it is given, create its map when it is inserted into the widget tree, and dispose the map when it is removed. When the application gives a layer that is in the tree a different style, the layer SHALL load the new style into the map it has, without creating another map. The layer SHALL report to the application each time the map has loaded a style, which for one style URL can be more than once, and SHALL NOT report a style load for any other map event.
 
 #### Scenario: Map below overlays
 - **WHEN** an application places the layer as the first child of a `flutter_map` map, followed by a marker layer and a polyline layer
@@ -27,7 +27,11 @@ The system SHALL provide a layer that an application places among the children o
 
 #### Scenario: Style loaded
 - **WHEN** an application places the layer with a reachable style URL and a handler for loaded styles
-- **THEN** the handler is called once after the style has loaded
+- **THEN** the handler is called after the style has loaded, once for each time the map loads the style, and events other than a style load, such as the map becoming idle, don't call it
+
+#### Scenario: Style reloaded from the network
+- **WHEN** the map loads a style URL from its cache, and the network response to the same request then contains the style again
+- **THEN** the handler is called for each of the two loads
 
 #### Scenario: Style changed on a layer in the tree
 - **WHEN** the style of a layer in the tree has loaded, and the application rebuilds the layer with a different style URL, as it does when the platform switches between light and dark mode

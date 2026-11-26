@@ -391,7 +391,9 @@ void main() {
     await tester.pumpWidget(
       appWith(
         MapigradeLayer(
-          styleUrl: demoStyleUrl,
+          // A style URL from the network can load twice, from the cache and
+          // then from the network.
+          styleUrl: 'asset://assets/polyline_style.json',
           onStyleLoaded: () {
             loads++;
             if (!loaded.isCompleted) loaded.complete();

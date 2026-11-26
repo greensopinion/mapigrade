@@ -644,7 +644,66 @@ bool MapTexture::RunOnce() {
   // A newly armed demand renders at once if the map has an update.
   ServiceDriver();
   MaybeNotifyAfterResize();
+  AnswerRestProbes();
   return false;
+}
+
+bool MapTexture::AtRestForTesting() {
+  auto probe = std::make_shared<RestProbe>();
+  commands_.Push(Command::RestProbe(
+      [this, probe] { rest_probes_.push_back(probe); }));
+  Signal();
+  std::unique_lock lock(probe->mutex);
+  if (!probe->cv.wait_for(lock, std::chrono::seconds(1),
+                          [&] { return probe->at_rest.has_value(); })) {
+    return false;
+  }
+  return *probe->at_rest;
+}
+
+void MapTexture::AnswerRestProbes() {
+  if (rest_probes_.empty()) return;
+  bool at_rest = AtRest();
+  for (auto& probe : rest_probes_) {
+    {
+      std::lock_guard lock(probe->mutex);
+      probe->at_rest = at_rest;
+    }
+    probe->cv.notify_all();
+  }
+  rest_probes_.clear();
+}
+
+bool MapTexture::AtRest() {
+  // overlays_dirty_ stays set while there are no overlays to install.
+  bool overlay_work = !overlays_.empty() || !overlay_sources_to_remove_.empty();
+  bool queued = commands_.HasWork() ||
+                cameras_completed_.load() < cameras_submitted_ ||
+                feature_state_applied_ < feature_state_queued_.load() ||
+                feature_state_completed_.load() < feature_state_submitted_ ||
+                (overlays_dirty_ && style_loaded_ && overlay_work) ||
+                layer_list_pending_ || style_loads_.load() != style_loads_seen_;
+  {
+    std::lock_guard lock(layer_list_mutex_);
+    if (layer_list_) queued = true;
+  }
+  for (const auto& [id, overlay] : overlays_) {
+    if (overlay.layers_submitted != overlay.layers_version) queued = true;
+  }
+  {
+    std::lock_guard lock(queries_mutex_);
+    if (!queries_.empty()) queued = true;
+  }
+  if (queued) return false;
+
+  mln_map_snapshot snapshot{};
+  snapshot.size = sizeof(snapshot);
+  if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
+    return false;
+  }
+  return snapshot.fully_loaded && !snapshot.transition_in_progress &&
+         !repaint_wanted_ &&
+         rendered_update_generation_ >= snapshot.latest_render_update_generation;
 }
 
 // Workaround for Flutter's Darwin embedders (see
@@ -924,6 +983,7 @@ void MapTexture::ApplyCommands(bool* stop) {
         ApplyOverlayCommand(command);
         break;
       case Command::Kind::kTargetTask:
+      case Command::Kind::kRestProbe:
         command.task();
         break;
       case Command::Kind::kDispose:

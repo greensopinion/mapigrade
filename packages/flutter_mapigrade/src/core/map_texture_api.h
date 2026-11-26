@@ -297,6 +297,10 @@ MAP_TEXTURE_EXPORT void map_texture_event_free(map_texture_event* event);
 
 // The number of threads in this process, for the lifecycle test.
 MAP_TEXTURE_EXPORT int32_t map_texture_process_thread_count(void);
+// For tests, on macOS and iOS: the name of each thread of this process, one per
+// line, with an empty line for a thread without a name, or null on failure.
+// Free the result with map_texture_string_free(). Not defined on Android.
+MAP_TEXTURE_EXPORT char* map_texture_process_thread_names_for_testing(void);
 
 // The device's thermal state, for measurements: 0 nominal, 1 fair, 2 serious,
 // 3 critical (NSProcessInfoThermalState), or -1 if unknown.
@@ -331,6 +335,10 @@ MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
 // non-zero, creates them again, as it does when the activity starts. Call on
 // the platform thread. Does nothing on macOS and iOS.
 MAP_TEXTURE_EXPORT void map_texture_trim_surfaces_for_testing(int32_t restore);
+// For tests: 1 if the map is at rest, so that it renders no other frame
+// without new input, as the map thread reports at the end of its next loop
+// iteration; 0 if not, and MAP_TEXTURE_ERROR_DISPOSED for a disposed map.
+MAP_TEXTURE_EXPORT int32_t map_texture_at_rest_for_testing(int64_t handle);
 
 #ifdef __cplusplus
 }

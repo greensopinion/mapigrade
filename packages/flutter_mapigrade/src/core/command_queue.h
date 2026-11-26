@@ -91,6 +91,9 @@ struct Command {
     kOverlayRemove,
     // Work of the platform render target on the map thread.
     kTargetTask,
+    // For tests: records a rest probe, which the map thread answers at the
+    // end of the loop iteration (MapTexture::AtRestForTesting).
+    kRestProbe,
     kDispose,
   };
 
@@ -150,6 +153,9 @@ struct Command {
   static Command TargetTask(std::function<void()> task) {
     return {Kind::kTargetTask, {}, {}, std::move(task), {}, {}};
   }
+  static Command RestProbe(std::function<void()> record) {
+    return {Kind::kRestProbe, {}, {}, std::move(record), {}, {}};
+  }
   static Command Dispose() { return {Kind::kDispose, {}, {}, {}, {}, {}}; }
 };
 
@@ -188,6 +194,12 @@ class CommandQueue {
   std::optional<CameraUpdate> TakeCamera() {
     std::lock_guard lock(mutex_);
     return std::exchange(camera_, std::nullopt);
+  }
+
+  // Whether a command or a camera is queued.
+  bool HasWork() {
+    std::lock_guard lock(mutex_);
+    return !commands_.empty() || camera_.has_value();
   }
 
  private:

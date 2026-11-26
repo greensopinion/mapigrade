@@ -85,7 +85,9 @@ final class MapigradeLayer extends StatelessWidget {
   /// give the layer a new [key].
   final List<HttpHeaderRule> httpHeaders;
 
-  /// Called each time a style has loaded.
+  /// Called each time the map has loaded a style. For a style URL this can be
+  /// twice: MapLibre loads a cached copy first, and loads the style again when
+  /// the network response to the same request contains it.
   final VoidCallback? onStyleLoaded;
 
   /// Called with each failure of the map; when null, the layer passes

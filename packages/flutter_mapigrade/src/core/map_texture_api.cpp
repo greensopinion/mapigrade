@@ -422,6 +422,12 @@ int32_t map_texture_get_stats(int64_t handle, map_texture_stats* out_stats) {
   return MAP_TEXTURE_OK;
 }
 
+int32_t map_texture_at_rest_for_testing(int64_t handle) {
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  return texture->AtRestForTesting() ? 1 : 0;
+}
+
 int32_t map_texture_dispose(int64_t handle) {
   std::shared_ptr<MapTexture> texture;
   {
