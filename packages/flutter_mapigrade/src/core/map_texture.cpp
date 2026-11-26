@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -251,8 +252,152 @@ MapTexture::MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
       header_rules_(std::move(header_rules)),
       callback_(callback) {}
 
+namespace {
+
+// A disposed map whose release hasn't finished.
+struct PendingRelease {
+  std::shared_ptr<MapTexture> map;
+  // Whether the release thread has joined the map thread.
+  bool stopped = false;
+};
+
+// The disposed maps whose release hasn't finished, in dispose order. A map
+// stays here until its textures are unregistered, so that the platform thread
+// drops the last reference to it: Android destroys a target on the main
+// thread only.
+std::mutex releases_mutex;
+std::condition_variable releases_cv;
+std::vector<PendingRelease>& Releases() {
+  static auto* releases = new std::vector<PendingRelease>();
+  return *releases;
+}
+// Runs while a map in Releases() hasn't stopped; guarded by releases_mutex.
+std::thread* release_thread = nullptr;
+bool release_thread_running = false;
+
+PendingRelease* FindRelease(const MapTexture* map) {
+  for (PendingRelease& release : Releases()) {
+    if (release.map.get() == map) return &release;
+  }
+  return nullptr;
+}
+
+// The platform thread, after the map thread of `map` has stopped.
+void FinishRelease(const std::shared_ptr<MapTexture>& map) {
+  map->UnregisterOnce();
+  std::lock_guard lock(releases_mutex);
+  auto& releases = Releases();
+  releases.erase(std::remove_if(releases.begin(), releases.end(),
+                                [&](const PendingRelease& release) {
+                                  return release.map == map;
+                                }),
+                 releases.end());
+  releases_cv.notify_all();
+}
+
+// The release thread: joins the map thread of each map in Releases() that
+// hasn't stopped, and exits when none is left.
+void RunReleases() {
+  std::unique_lock lock(releases_mutex);
+  while (true) {
+    std::shared_ptr<MapTexture> map;
+    for (const PendingRelease& release : Releases()) {
+      if (!release.stopped) {
+        map = release.map;
+        break;
+      }
+    }
+    if (!map) {
+      release_thread_running = false;
+      releases_cv.notify_all();
+      return;
+    }
+    lock.unlock();
+    map->JoinMapThread();
+    lock.lock();
+    // Only FinishRelease() and FinishReleases() remove a map, after it has
+    // stopped.
+    FindRelease(map.get())->stopped = true;
+    releases_cv.notify_all();
+    lock.unlock();
+    PostToPlatformThread([map = std::move(map)] { FinishRelease(map); });
+    lock.lock();
+  }
+}
+
+// Called with releases_mutex held. Joins a release thread that has exited.
+void StartReleaseThreadLocked() {
+  if (release_thread_running) return;
+  if (release_thread != nullptr) {
+    release_thread->join();
+    delete release_thread;
+  }
+  release_thread_running = true;
+  release_thread = new std::thread(RunReleases);
+}
+
+void QueueRelease(std::shared_ptr<MapTexture> map) {
+  std::lock_guard lock(releases_mutex);
+  Releases().push_back({std::move(map), false});
+  StartReleaseThreadLocked();
+}
+
+}  // namespace
+
+bool FinishReleases(const std::function<bool(const MapTexture&)>& which,
+                    int64_t timeout_ms) {
+  std::vector<std::shared_ptr<MapTexture>> stopped;
+  bool all_stopped = true;
+  {
+    std::unique_lock lock(releases_mutex);
+    auto done = [&] {
+      for (const PendingRelease& release : Releases()) {
+        if (!release.stopped && which(*release.map)) return false;
+      }
+      return true;
+    };
+    if (timeout_ms < 0) {
+      releases_cv.wait(lock, done);
+    } else {
+      all_stopped = releases_cv.wait_for(
+          lock, std::chrono::milliseconds(timeout_ms), done);
+    }
+    auto& releases = Releases();
+    for (auto it = releases.begin(); it != releases.end();) {
+      if (it->stopped && which(*it->map)) {
+        stopped.push_back(std::move(it->map));
+        it = releases.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (auto& map : stopped) map->UnregisterOnce();
+  return all_stopped;
+}
+
+bool FinishAllReleasesForTesting(int64_t timeout_ms) {
+  auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  if (!FinishReleases([](const MapTexture&) { return true; }, timeout_ms)) {
+    return false;
+  }
+  std::unique_lock lock(releases_mutex);
+  if (!releases_cv.wait_until(lock, deadline,
+                              [] { return !release_thread_running; })) {
+    return false;
+  }
+  if (release_thread != nullptr) {
+    release_thread->join();
+    delete release_thread;
+    release_thread = nullptr;
+  }
+  return true;
+}
+
 MapTexture::~MapTexture() {
-  // Dispose() joins the thread; this only covers a failed Start().
+  // The release thread joins the thread after Dispose(); this only covers a
+  // failed Start().
   if (thread_.joinable()) {
     commands_.Push(Command::Dispose());
     Signal();
@@ -424,11 +569,20 @@ void MapTexture::Dispose() {
     std::lock_guard lock(callback_mutex_);
     callback_ = nullptr;
   }
-  if (thread_.joinable()) {
-    commands_.Push(Command::Dispose());
-    Signal();
-    thread_.join();
-  }
+  disposed_ = true;
+  commands_.Push(Command::Dispose());
+  Signal();
+  QueueRelease(shared_from_this());
+}
+
+void MapTexture::JoinMapThread() {
+  if (thread_.joinable()) thread_.join();
+}
+
+void MapTexture::UnregisterOnce() {
+  std::lock_guard lock(unregister_mutex_);
+  if (unregistered_) return;
+  unregistered_ = true;
   target_->Unregister();
 }
 

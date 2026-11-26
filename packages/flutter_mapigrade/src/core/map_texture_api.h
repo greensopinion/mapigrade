@@ -289,8 +289,9 @@ MAP_TEXTURE_EXPORT int32_t map_texture_overlay_remove(int64_t handle,
                                                       int64_t overlay_id);
 MAP_TEXTURE_EXPORT int32_t map_texture_get_stats(int64_t handle,
                                                  map_texture_stats* out_stats);
-// Stops the map thread, releases the map and its resources, and unregisters
-// the texture. No events are delivered after this returns.
+// Releases the map and its resources, and unregisters the textures. Returns
+// without waiting for the map thread to stop; the release finishes later. No
+// events are delivered after this returns.
 MAP_TEXTURE_EXPORT int32_t map_texture_dispose(int64_t handle);
 
 MAP_TEXTURE_EXPORT void map_texture_event_free(map_texture_event* event);
@@ -324,6 +325,10 @@ MAP_TEXTURE_EXPORT int32_t map_texture_released_buffers_for_testing(
 // renders without waiting until Flutter has taken the latest frame.
 MAP_TEXTURE_EXPORT void map_texture_set_render_ahead_for_testing(int32_t mode);
 
+// For tests, on the platform thread: waits until the release of every disposed
+// map has finished. Returns 1, or 0 if that takes longer than `timeout_ms`.
+MAP_TEXTURE_EXPORT int32_t map_texture_wait_for_releases_for_testing(
+    int64_t timeout_ms);
 // For tests: pause (non-zero) or resume (zero) rendering of every map, as the
 // platform does when the application enters the background or foreground.
 MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);

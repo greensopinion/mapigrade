@@ -116,6 +116,10 @@ void DisposeEngineMaps(int64_t engine) {
   }
   // Outside the lock, as in map_texture_dispose().
   for (auto& texture : textures) texture->Dispose();
+  // The textures are unregistered while the engine is attached, including
+  // those of maps that Dart disposed before.
+  FinishReleases(
+      [engine](const MapTexture& texture) { return texture.engine() == engine; });
 }
 
 }  // namespace map_texture
@@ -439,6 +443,10 @@ int32_t map_texture_dispose(int64_t handle) {
   }
   texture->Dispose();
   return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_wait_for_releases_for_testing(int64_t timeout_ms) {
+  return map_texture::FinishAllReleasesForTesting(timeout_ms) ? 1 : 0;
 }
 
 void map_texture_set_paused_for_testing(int32_t paused) {

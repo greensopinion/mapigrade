@@ -137,10 +137,21 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // render target.
   void ReportRenderError(const std::string& message);
 
-  // Stops the map thread after it has destroyed the session, map and
-  // runtime, then unregisters the texture. After this returns no events are
-  // delivered.
+  // Asks the map thread to stop and returns without waiting for it. No events
+  // are delivered after this returns. The release thread waits for the map
+  // thread to destroy the session, map and runtime and to stop; the textures
+  // are then unregistered on the platform thread (see FinishReleases).
   void Dispose();
+
+  // Whether Dispose() has been called.
+  bool disposed() const { return disposed_.load(); }
+
+  // The release thread: waits until the map thread has stopped.
+  void JoinMapThread();
+
+  // The platform thread, after the map thread has stopped: unregisters the
+  // textures, unless an earlier call has.
+  void UnregisterOnce();
 
   // Any thread except the map thread, for a surface target: marks every slot
   // free, so that Dart's choice of a frame from before the call is refused.
@@ -389,6 +400,10 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::mutex callback_mutex_;
   map_texture_event_callback callback_;
 
+  std::atomic<bool> disposed_{false};
+  std::mutex unregister_mutex_;
+  bool unregistered_ = false;
+
   // Map thread state.
   mln_runtime runtime_ = MLN_HANDLE_NULL;
   mln_map map_ = MLN_HANDLE_NULL;
@@ -567,9 +582,25 @@ void ReduceAllMemoryUse();
 
 // Disposes every live map with the engine token `engine`, as
 // map_texture_dispose() does; later calls with their handles return
-// MAP_TEXTURE_ERROR_DISPOSED. The platform calls this when the engine detaches
-// the plugin. Defined in map_texture_api.cpp.
+// MAP_TEXTURE_ERROR_DISPOSED. Returns after the textures of every map of the
+// engine are unregistered, including maps disposed before. The platform calls
+// this on the platform thread when the engine detaches the plugin. Defined in
+// map_texture_api.cpp.
 void DisposeEngineMaps(int64_t engine);
+
+// The platform thread: finishes the release of the disposed maps for which
+// `which` returns true. Waits until their map threads have stopped, then
+// unregisters their textures on the calling thread. With `timeout_ms` >= 0,
+// waits at most that long and returns false if a map thread didn't stop in
+// time; the maps that stopped are released either way. Defined in
+// map_texture.cpp.
+bool FinishReleases(const std::function<bool(const MapTexture&)>& which,
+                    int64_t timeout_ms = -1);
+
+// For tests, on the platform thread: finishes the release of every disposed
+// map as FinishReleases() does, and waits until the release thread has exited.
+// Returns false if that takes longer than `timeout_ms`.
+bool FinishAllReleasesForTesting(int64_t timeout_ms);
 
 // For tests and measurements: when maps render without waiting until Dart has
 // chosen the latest frame. kAuto (the default) renders ahead while a frame

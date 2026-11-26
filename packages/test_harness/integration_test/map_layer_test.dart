@@ -342,6 +342,7 @@ void main() {
     // The first cycle starts process-wide threads that stay, such as
     // MapLibre's shared worker threads.
     await cycle();
+    expect(waitForReleasesForTesting(), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final threadsBefore = processThreadCount();
     final footprintBefore = memoryFootprintForTesting();
@@ -353,6 +354,7 @@ void main() {
     // Threads and memory settle within a few seconds after the last cycle;
     // a plain MapTextureView shows the same rise and settling without
     // flutter_map.
+    expect(waitForReleasesForTesting(), isTrue);
     await Future<void>.delayed(const Duration(seconds: 3));
     final threadsAfter = processThreadCount();
     final footprintAfter = memoryFootprintForTesting();

@@ -216,4 +216,39 @@ void main() {
     await frame;
     expect(await centerColor(0), red);
   });
+
+  testWidgets('engine destroyed right after Dart disposes a map', (
+    tester,
+  ) async {
+    if (Platform.isMacOS) {
+      markTestSkipped('macOS has no detach callback (design D158)');
+      return;
+    }
+    final first = await createMap(tester, '#ff0000');
+    await show(tester, [first]);
+    await waitForDisplayedFrame(first);
+
+    expect((await secondEngine.start())['event'], 'started');
+    await secondEngine.destroy();
+    await Future<void>.delayed(const Duration(seconds: 1));
+    final before = processThreadCount();
+
+    final report = await secondEngine.start(createMap: true, disposeMap: true);
+    expect(report['event'], 'mapDisposed', reason: '$report');
+    await secondEngine.destroy();
+    await Future<void>.delayed(const Duration(seconds: 2));
+    final after = processThreadCount();
+    debugPrint(
+      'ENGINES dispose then destroy threads: before $before, after $after',
+    );
+    expect(after, lessThanOrEqualTo(before + 1));
+
+    // The maps of the first engine keep rendering.
+    final frame = waitFor<FrameCamera>(
+      first.frames,
+      (f) => (f.camera.zoom - 4).abs() < 1e-6,
+    );
+    first.setCamera(const MapCamera(latitude: 0, longitude: 0, zoom: 4));
+    await frame;
+  });
 }

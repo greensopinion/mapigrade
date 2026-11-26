@@ -344,6 +344,11 @@ external int mapTextureDispose(int handle);
 )
 external void mapTextureEventFree(Pointer<MapTextureEventStruct> event);
 
+@Native<Int32 Function(Int64)>(
+  symbol: 'map_texture_wait_for_releases_for_testing',
+)
+external int mapTextureWaitForReleasesForTesting(int timeoutMs);
+
 @Native<Int32 Function()>(symbol: 'map_texture_process_thread_count')
 external int mapTextureProcessThreadCount();
 

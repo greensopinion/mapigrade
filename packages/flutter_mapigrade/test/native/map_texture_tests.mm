@@ -133,12 +133,16 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
 
   void ReleaseSurfaces() override { surfaces_released = true; }
 
-  void Unregister() override { unregistered = true; }
+  void Unregister() override {
+    unregistered = true;
+    ++unregister_calls;
+  }
 
   // Set when the last target released its surfaces and unregistered; read
   // after dispose has destroyed the target.
   static inline std::atomic<bool> surfaces_released{false};
   static inline std::atomic<bool> unregistered{false};
+  static inline std::atomic<int> unregister_calls{0};
 
   std::atomic<bool> can_present{true};
   std::atomic<int> set_targets{0};
@@ -354,6 +358,26 @@ int32_t SelectNewest(int64_t handle, map_texture_frame* out = nullptr) {
   return status;
 }
 
+// The tasks that the core posted to the platform thread, which the test
+// runs.
+std::mutex platform_tasks_mutex;
+std::vector<std::function<void()>> platform_tasks;
+
+void RunPlatformTasks() {
+  std::vector<std::function<void()>> tasks;
+  {
+    std::lock_guard lock(platform_tasks_mutex);
+    tasks.swap(platform_tasks);
+  }
+  for (auto& task : tasks) task();
+}
+
+// Finishes the release of every disposed map, as the platform thread would.
+void FinishReleases() {
+  CHECK(map_texture_wait_for_releases_for_testing(30'000) == 1);
+  RunPlatformTasks();
+}
+
 // Waits up to five seconds for `condition`.
 bool WaitFor(const std::function<bool()>& condition) {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -400,6 +424,9 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
                            const std::vector<int32_t>& counts,
                            std::string* error = nullptr,
                            int64_t engine = kEngine) {
+  // The map thread of a map that the last test disposed may still record
+  // calls.
+  FinishReleases();
   ffi_wrappers::Reset();
   {
     std::lock_guard lock(events_mutex);
@@ -521,6 +548,7 @@ void SurfaceFrameIsReportedWithoutDisplayTime() {
   FakeSurfaceTarget::surfaces_released = false;
   FakeSurfaceTarget::unregistered = false;
   map_texture_dispose(handle);
+  FinishReleases();
   CHECK(FakeSurfaceTarget::surfaces_released.load());
   CHECK(FakeSurfaceTarget::unregistered.load());
 }
@@ -558,6 +586,7 @@ void TaskWaitEndsAtDispose() {
   int64_t handle = CreateMap();
   auto owner = last_owner.lock();
   map_texture_dispose(handle);
+  FinishReleases();
   // The map thread has stopped, so the task never runs; the wait ends.
   bool ran = false;
   owner->RunTargetTask([&](mln_render_session, const TargetSize&) { ran = true; },
@@ -1855,6 +1884,62 @@ void DisposeEngineMapsDisposesOnlyThatEngine() {
   CHECK(map_texture_dispose(other) == MAP_TEXTURE_OK);
 }
 
+void DisposeEngineMapsFinishesEarlierDispose() {
+  int64_t handle = CreateMap(/*style=*/false);
+  FakeSurfaceTarget::unregister_calls = 0;
+  map_texture_dispose(handle);
+  map_texture::DisposeEngineMaps(kEngine);
+  CHECK(FakeSurfaceTarget::unregister_calls == 1);
+  // The unregistration that the release thread posted does nothing.
+  RunPlatformTasks();
+  CHECK(FakeSurfaceTarget::unregister_calls == 1);
+}
+
+void DisposeReturnsWhileMapThreadIsBlocked() {
+  int64_t handle = CreateMap();
+  CHECK(WaitFor([] { return !EventsOfType(MAP_TEXTURE_EVENT_STYLE_LOADED).empty(); }));
+  auto blocked = std::make_shared<std::atomic<bool>>(true);
+  auto entered = std::make_shared<std::atomic<bool>>(false);
+  last_owner.lock()->RunTargetTask(
+      [blocked, entered](mln_render_session, const TargetSize&) {
+        entered->store(true);
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (blocked->load() && std::chrono::steady_clock::now() < deadline) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+      },
+      /*wait=*/false);
+  CHECK(WaitFor([entered] { return entered->load(); }));
+  FakeSurfaceTarget::unregister_calls = 0;
+  auto start = std::chrono::steady_clock::now();
+  CHECK(map_texture_dispose(handle) == MAP_TEXTURE_OK);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  CHECK(elapsed < std::chrono::milliseconds(100));
+  size_t events_before = 0;
+  {
+    std::lock_guard lock(events_mutex);
+    events_before = events.size();
+  }
+  CHECK(map_texture_wait_for_releases_for_testing(50) == 0);
+  CHECK(FakeSurfaceTarget::unregister_calls == 0);
+  *blocked = false;
+  FinishReleases();
+  CHECK(FakeSurfaceTarget::unregister_calls == 1);
+  std::lock_guard lock(events_mutex);
+  CHECK(events.size() == events_before);
+}
+
+void ReleaseThreadStartsAgainAfterExit() {
+  for (int i = 0; i < 3; ++i) {
+    int64_t handle = CreateMap(/*style=*/false);
+    FakeSurfaceTarget::unregister_calls = 0;
+    map_texture_dispose(handle);
+    // Exits the release thread; the next dispose starts it again.
+    FinishReleases();
+    CHECK(FakeSurfaceTarget::unregister_calls == 1);
+  }
+}
+
 void UnknownEngineFailsCreate() {
   std::string error;
   int64_t result = CreateMapWithRules({}, {}, &error, /*engine=*/99);
@@ -2412,6 +2497,11 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
   return target;
 }
 
+void PostToPlatformThread(std::function<void()> task) {
+  std::lock_guard lock(platform_tasks_mutex);
+  platform_tasks.push_back(std::move(task));
+}
+
 std::string PlatformCachePath() { return {}; }
 
 std::string PlatformAssetPath() { return {}; }
@@ -2498,6 +2588,11 @@ int main(int argc, char** argv) {
       {"MapKeepsItsEngineToken", MapKeepsItsEngineToken},
       {"DisposeEngineMapsDisposesOnlyThatEngine",
        DisposeEngineMapsDisposesOnlyThatEngine},
+      {"DisposeEngineMapsFinishesEarlierDispose",
+       DisposeEngineMapsFinishesEarlierDispose},
+      {"DisposeReturnsWhileMapThreadIsBlocked",
+       DisposeReturnsWhileMapThreadIsBlocked},
+      {"ReleaseThreadStartsAgainAfterExit", ReleaseThreadStartsAgainAfterExit},
       {"UnknownEngineFailsCreate", UnknownEngineFailsCreate},
       {"LoadedMapIsAtRest", LoadedMapIsAtRest},
       {"SettledWaitsForSlowFrame", SettledWaitsForSlowFrame},
@@ -2534,6 +2629,7 @@ int main(int argc, char** argv) {
     std::printf("%s %s\n", failures == before ? "PASS" : "FAIL", test.name);
     std::fflush(stdout);
   }
+  FinishReleases();
   if (failures > 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;
