@@ -1,8 +1,9 @@
-## Unreleased
+## 0.1.0
 
 - Updated MapLibre Native FFI to 0.202610.3.
 - Breaking change on Android: the map sends HTTP requests through the platform's HTTP client, which applies the app's network security configuration. Android blocks cleartext HTTP by default, so a style URL or a URL in a style that starts with `http://` needs the app to allow cleartext traffic to its host. `https://` and `asset://` URLs work as before.
 - The Android license entries for Kotlin and rustls-platform-verifier are removed, because the FFI's Android library no longer contains that code.
+- Disposing a map no longer blocks the platform thread while the map thread stops. On Android this blocking caused an ANR.
 
 ## 0.0.4
 
