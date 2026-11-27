@@ -1595,6 +1595,8 @@ void main() {
         ],
       );
       await _eventually(tester, map, _pixel(180, 175, _isRed, 'the polyline'));
+      final needed = emulator ? 3 : 30;
+      bool isPaired(_Sample<double?> s) => s.captureFrameId == s.frameId;
       final samples = await _record<double?>(
         map,
         measure: (shot, camera) async {
@@ -1615,17 +1617,20 @@ void main() {
           final east = _panOffset(elapsed.inMicroseconds / 1e6);
           map.mapController.move(LatLng(0, east / _pxPerDegree), _zoom);
         },
-        finished: (elapsed, _) => elapsed >= const Duration(seconds: 2),
+        // On the emulator, few captures complete before the next map frame is
+        // displayed, and how few varies from run to run, so the pan continues
+        // until enough of them have, for at most 30 seconds.
+        finished: (elapsed, samples) =>
+            elapsed >= const Duration(seconds: 30) ||
+            (elapsed >= const Duration(seconds: 2) &&
+                samples.where(isPaired).length > needed),
       );
       double worstOf(Iterable<_Sample<double?>> of) => of
           .map((s) => s.value)
           .whereType<double>()
           .fold<double>(0, (m, e) => math.max(m, e.abs()));
-      final paired = [
-        for (final s in samples)
-          if (s.captureFrameId == s.frameId) s,
-      ];
-      final unpaired = samples.where((s) => s.captureFrameId != s.frameId);
+      final paired = samples.where(isPaired).toList();
+      final unpaired = samples.where((s) => !isPaired(s));
       final errors = [for (final s in paired) s.value];
       final frames = {for (final s in paired) s.frameId}.length;
       final missing = errors.where((e) => e == null).length;
@@ -1638,7 +1643,7 @@ void main() {
       );
       expect(
         paired.length,
-        greaterThan(emulator ? 3 : 30),
+        greaterThan(needed),
         reason: 'Flutter frames sampled',
       );
       expect(missing, 0, reason: 'frames without the polyline');
