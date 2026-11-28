@@ -9,14 +9,16 @@ Defines the Dart API that the package offers to applications: which names the ma
 ### Requirement: Exported names
 The repository SHALL publish two packages, each with one public library:
 
-- `package:mapigrade/mapigrade.dart`, for applications that display a MapLibre map without depending on `flutter_map`. It SHALL export exactly these names: `MapigradeController`, `MapigradeException`, `MapigradeLoadException`, `MapigradeRenderException`, `MapigradeCreateException`, `MapigradeQueryException`, `HttpHeaderRule`, `MapigradeMetrics`, `MapigradeMetricsSnapshot`, `QueriedFeature`, `MapigradePolyline`, `MapigradePolylineLayer` and `OverlayPlacement`.
-- `package:flutter_mapigrade/flutter_mapigrade.dart`, for applications that display the map in a `flutter_map` map. It SHALL export exactly `MapigradeLayer` and `LayerAlignment`, and the thirteen names that `mapigrade` exports, which it re-exports from `mapigrade`.
+- `package:mapigrade/mapigrade.dart`, for applications that display a MapLibre map without depending on `flutter_map`. It SHALL export exactly these names:
+  - shared with `flutter_mapigrade`: `MapigradeController`, `MapigradeException`, `MapigradeLoadException`, `MapigradeRenderException`, `MapigradeCreateException`, `MapigradeQueryException`, `HttpHeaderRule`, `MapigradeMetrics`, `MapigradeMetricsSnapshot`, `QueriedFeature`, `MapigradePolyline`, `MapigradePolylineLayer` and `OverlayPlacement`;
+  - for `MapigradeMap`: `MapigradeMap`, `Mapigrade`, `MapigradeCameraController`, `MapigradeCamera`, `CameraChange`, `CameraChangeSource`, `CameraTransitionOutcome`, `CameraLimits`, `GeoBounds`, `MapigradeGestures`, `MapigradeTap`, `MapigradeFrame`, `MapigradeMarkers`, `MapigradeMarker` and `MarkerAlignment`.
+- `package:flutter_mapigrade/flutter_mapigrade.dart`, for applications that display the map in a `flutter_map` map. It SHALL export exactly `MapigradeLayer` and `LayerAlignment`, and the thirteen names that `mapigrade` shares with it, which it re-exports from `mapigrade`.
 
 Every export directive of either library SHALL list the names it exports. Neither package SHALL contain another library outside `lib/src/`.
 
 #### Scenario: Export namespace
 - **WHEN** the API test of `mapigrade` resolves its main library
-- **THEN** the names the library exports are exactly the thirteen names above, and each export directive lists the names it exports
+- **THEN** the names the library exports are exactly the twenty-eight names above, and each export directive lists the names it exports
 
 #### Scenario: Export namespace of flutter_mapigrade
 - **WHEN** the API test of `flutter_mapigrade` resolves its main library
@@ -80,14 +82,14 @@ Each package SHALL provide what its test harness and tests need, and the main li
 - **THEN** it imports `package:mapigrade/src/testing.dart` or `package:flutter_mapigrade/src/testing.dart`, and no other library under `src/` of either package
 
 ### Requirement: Example uses the public library only
-The package SHALL include an example app in `packages/flutter_mapigrade/example/` that displays the map as the base layer of a `flutter_map` map with a marker above it. The example SHALL import only the main library of the package, and SHALL run on each supported platform.
+Each package SHALL include an example app that imports only the package's main library and runs on each supported platform. `packages/flutter_mapigrade/example/` SHALL display the map as the base layer of a `flutter_map` map with a marker above it. `packages/mapigrade/example/` SHALL display a `MapigradeMap` with a pitched initial camera and a `MapigradeMarker`, and SHALL NOT depend on `flutter_map`.
 
 #### Scenario: Example imports
-- **WHEN** the example's Dart files are inspected
-- **THEN** they import `package:flutter_mapigrade/flutter_mapigrade.dart` and no other library of the package
+- **WHEN** the examples' Dart files are inspected
+- **THEN** the `flutter_mapigrade` example imports `package:flutter_mapigrade/flutter_mapigrade.dart` and no other library of either package, and the `mapigrade` example imports `package:mapigrade/mapigrade.dart` and no other library of `mapigrade`
 
 #### Scenario: Example runs
-- **WHEN** the example is built and run on macOS, on the iOS simulator and on the Android emulator
+- **WHEN** each example is built and run on macOS, on the iOS simulator and on the Android emulator
 - **THEN** on each platform the map appears below the marker, and the marker is at the coordinate it is placed at
 
 ### Requirement: Integration library for flutter_mapigrade

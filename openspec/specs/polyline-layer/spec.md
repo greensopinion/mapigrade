@@ -7,7 +7,7 @@ Lets an application draw polylines, such as routes and tracks, as part of the Ma
 ## Requirements
 
 ### Requirement: Polyline layer in the children of the map layer
-The package SHALL provide `MapigradePolylineLayer`, a widget that takes a list of `MapigradePolyline` values and a placement. An application SHALL place it among the `children` of a `MapigradeLayer`, at any depth below a child. The polyline layer SHALL give its polylines to that `MapigradeLayer`'s map, and the map SHALL draw them in the map frames it renders, so that the polylines are drawn exactly where the displayed map frame draws their coordinates, including while the camera moves. The polyline layer SHALL draw nothing in Flutter. A polyline layer that isn't below a `MapigradeLayer` SHALL fail an assertion in debug builds and draw nothing in release builds. When the `MapigradeLayer` has no map, because the map isn't created yet or couldn't be created, the polyline layer SHALL NOT throw; when the map is created, it SHALL draw the polylines that the polyline layer has then.
+The package SHALL provide `MapigradePolylineLayer`, a widget that takes a list of `MapigradePolyline` values and a placement. An application SHALL place it among the `children` of a `MapigradeLayer` or of a `MapigradeMap`, at any depth below a child. The polyline layer SHALL give its polylines to that widget's map, and the map SHALL draw them in the map frames it renders, so that the polylines are drawn exactly where the displayed map frame draws their coordinates, including while the camera moves. The polyline layer SHALL draw nothing in Flutter. A polyline layer that isn't below a `MapigradeLayer` or a `MapigradeMap` SHALL fail an assertion in debug builds and draw nothing in release builds. When that widget has no map, because the map isn't created yet or couldn't be created, the polyline layer SHALL NOT throw; when the map is created, it SHALL draw the polylines that the polyline layer has then.
 
 #### Scenario: Route drawn by the map
 - **WHEN** an application places a polyline layer with one polyline in the children of a `MapigradeLayer`, and the camera is at rest
@@ -23,11 +23,15 @@ The package SHALL provide `MapigradePolylineLayer`, a widget that takes a list o
 
 #### Scenario: Polyline layer outside a map layer
 - **WHEN** an application places a polyline layer directly among the children of a `flutter_map` map in a debug build
-- **THEN** an assertion fails that states that the polyline layer must be below a `MapigradeLayer`
+- **THEN** an assertion fails that states that the polyline layer must be below a map widget
 
 #### Scenario: Polylines given before the map exists
 - **WHEN** an application places a `MapigradeLayer` with a polyline layer in its children, and the map is created after the polyline layer was built
 - **THEN** the map draws the polylines when the style has loaded
+
+#### Scenario: Route in a MapigradeMap
+- **WHEN** an application places a polyline layer with one polyline in the children of a `MapigradeMap` with pitch 45, and the camera is at rest
+- **THEN** the displayed map frame draws the polyline at the screen positions of its points, within 1 logical pixel
 
 ### Requirement: Polyline model
 The package SHALL provide `MapigradePolyline`, an immutable value with these properties and defaults: `points`, a list of `LatLng`, required; `color`, default `0xFF00FF00`; `strokeWidth`, default 1.0; `useStrokeWidthInMeter`, default false; `borderStrokeWidth`, default 0.0; `borderColor`, default `0xFFFFFF00`; `strokeCap`, default `StrokeCap.round`; `strokeJoin`, default `StrokeJoin.round`; `dashes`, a list of numbers or null, default null; `gradientColors`, a list of `Color` or null, default null; and `gradientStops`, a list of numbers or null, default null. The names, types and defaults of the properties that `flutter_map`'s `Polyline` also has SHALL equal those of `Polyline`. Two `MapigradePolyline` values with equal properties SHALL be equal. In debug builds the constructor SHALL fail an assertion for a negative `strokeWidth` or `borderStrokeWidth`, for `dashes` with an odd number of entries, a negative entry or only zeros, for `gradientStops` that is given without `gradientColors`, whose length differs from that of `gradientColors`, or whose entries aren't in non-decreasing order from 0 to 1, and for `gradientColors` given together with `dashes`, because MapLibre can't draw a gradient on a dashed line.
@@ -149,3 +153,14 @@ When the application rebuilds a polyline layer with a list of polylines that isn
 #### Scenario: Polyline layer removed
 - **WHEN** the application removes a polyline layer from the children
 - **THEN** the map no longer draws its polylines
+
+### Requirement: Polylines in MapigradeMap
+The requirements of this capability that name `MapigradeLayer`, its `children`, its style or its failure handler SHALL apply in the same way to `MapigradeMap`, its `children`, its style and its failure handler.
+
+#### Scenario: Order in a MapigradeMap
+- **WHEN** a `MapigradeMap` has two polyline layers in its children at the default placement, the first with a red polyline and the second with a blue polyline that crosses it
+- **THEN** the crossing is blue
+
+#### Scenario: Missing placement layer in a MapigradeMap
+- **WHEN** a polyline layer in a `MapigradeMap` has the placement `OverlayPlacement.belowLayer('road-label')` and the style has no layer with that ID
+- **THEN** the polylines are drawn above all style layers, and the map's failure callback receives one `MapigradeLoadException` that names `road-label`
