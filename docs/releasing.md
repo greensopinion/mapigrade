@@ -77,8 +77,8 @@ On `main`:
 
 Then, on a branch `release/<version>` from `main`:
 
-1. Run `scripts/set_version.sh <version>`. For a prerelease it sets `flutter_mapigrade`'s constraint on `mapigrade` to the exact version.
-2. Remove the `android` entry under `flutter.plugin.platforms` in `packages/mapigrade/pubspec.yaml`. `main` keeps it, so that the repository's Android builds keep working with a local FFI build.
+1. Run `scripts/set_version.sh <version>`. For a prerelease, whose suffix must end with a number, it sets `flutter_mapigrade`'s constraint on `mapigrade` to the range up to the next prerelease, such as `'>=0.2.0-beta.1 <0.2.0-beta.2'`.
+2. Remove the `android` entry under `flutter.plugin.platforms` in `packages/mapigrade/pubspec.yaml`, and under `platforms` in `packages/flutter_mapigrade/pubspec.yaml`. `main` keeps it, so that the repository's Android builds keep working with a local FFI build.
 3. Under "Supported platforms" in both READMEs, and at the top of both CHANGELOG entries, state that the prerelease supports iOS and macOS only because its FFI has no release yet, and which release supports Android.
 4. Check that `ffi_pins_test.dart` and `version_test.dart` pass, commit, and push the branch.
 

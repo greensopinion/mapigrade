@@ -53,7 +53,7 @@ So the test fails on `main`, which declares Android with version `0.1.0`, as it 
 
 ### D253. Android in the prerelease
 
-On the release branch, `mapigrade`'s pubspec has no `android` entry under `flutter.plugin.platforms`. Flutter then doesn't add the plugin's Gradle project to an Android build, so the empty FFI version is never resolved, and the APK has no `libmapigrade.so`. The build hook still declares the code asset by name, `nativeLibraryAvailable` is false, and both widgets report a `MapigradeCreateException` and build their children, as on an Android device without a supported ABI. The license registration of the FFI notices, a `dartPluginClass` of the Android entry, also stops on Android, which is right for an APK without the FFI.
+On the release branch, `mapigrade`'s pubspec has no `android` entry under `flutter.plugin.platforms`, and `flutter_mapigrade`'s pubspec, whose `platforms` equal those of `mapigrade`'s plugin (`platforms_test.dart`), has no `android` entry either. `third_party_notices_test.dart` requires the Android registration of the notices only when the lock names an FFI release or the pubspec declares Android. Flutter then doesn't add the plugin's Gradle project to an Android build, so the empty FFI version is never resolved, and the APK has no `libmapigrade.so`. The build hook still declares the code asset by name, `nativeLibraryAvailable` is false, and both widgets report a `MapigradeCreateException` and build their children, as on an Android device without a supported ABI. The license registration of the FFI notices, a `dartPluginClass` of the Android entry, also stops on Android, which is right for an APK without the FFI.
 
 `android/` stays in the archive, so that the branch's archive differs from `main`'s only in the pubspec. If the dry run warns about it, `.pubignore` on the branch excludes it.
 
@@ -61,7 +61,7 @@ On the release branch, `mapigrade`'s pubspec has no `android` entry under `flutt
 
 ### D254. The prerelease's version and constraint
 
-`scripts/set_version.sh` accepts a version with a prerelease suffix. For a prerelease, it sets `flutter_mapigrade`'s constraint on `mapigrade` to the exact version, `mapigrade: 0.2.0-beta.1`, because the range to the next patch version, `<0.2.0`, would also allow `0.2.0-beta.2`. `version_test.dart` checks the same rule. The minor version increases because the renames of `split-mapigrade-package` break the API.
+`scripts/set_version.sh` accepts a version with a prerelease suffix that ends with a number. For a prerelease, it sets `flutter_mapigrade`'s constraint on `mapigrade` to the range up to the next prerelease, `'>=0.2.0-beta.1 <0.2.0-beta.2'`, because the range to the next patch version, `<0.2.0`, would also allow `0.2.0-beta.2`. `version_test.dart` checks the same rule. We first chose the exact version, `mapigrade: 0.2.0-beta.1`; the dry run of `flutter_mapigrade` then warned that the dependency should allow more than one version, which the `package-distribution` requirement "Published archive contents" doesn't allow. The minor version increases because the renames of `split-mapigrade-package` break the API.
 
 ### D255. The prerelease states its platforms
 
