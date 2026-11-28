@@ -5,7 +5,7 @@ import 'texture/map_texture_controller.dart';
 import 'mapigrade_exception.dart';
 import 'overlay_placement.dart';
 
-/// Keeps the overlays of the widgets below a `MapTextureLayer` and sends them
+/// Keeps the overlays of the widgets below a map widget and sends them
 /// to its map: each overlay's latest sources, style layers, placement and
 /// order key, from when the map exists. It never throws for a map that
 /// doesn't exist or that is disposed; it gives failures of the map to
@@ -22,9 +22,8 @@ final class OverlayHost {
   int _nextId = 1;
   int _nextSeq = 0;
 
-  /// Registers an overlay whose widget is the child [childIndex] of the
-  /// `MapTextureLayer`. Nothing is sent until the overlay has sources or
-  /// style layers.
+  /// Registers an overlay whose widget is the child [childIndex] of the map
+  /// widget. Nothing is sent until the overlay has sources or style layers.
   OverlayRegistration register({required int childIndex}) {
     final registration = OverlayRegistration._(
       this,
@@ -134,8 +133,8 @@ final class OverlayRegistration {
     _flushLayers();
   }
 
-  /// Sets the index of the overlay's widget among the `MapTextureLayer`'s
-  /// children, the first part of the overlay's order key.
+  /// Sets the index of the overlay's widget among the map widget's children,
+  /// the first part of the overlay's order key.
   set childIndex(int value) {
     if (_removed || value == _childIndex) return;
     _childIndex = value;
@@ -278,7 +277,7 @@ final class _OverlaySource {
   bool removed = false;
 }
 
-/// Provides the [OverlayHost] of the nearest `MapTextureLayer` to the widgets
+/// Provides the [OverlayHost] of the nearest map widget to the widgets
 /// below its children.
 class OverlayHostScope extends InheritedWidget {
   /// Provides [host] to [child].
@@ -295,16 +294,16 @@ class OverlayHostScope extends InheritedWidget {
   bool updateShouldNotify(OverlayHostScope oldWidget) => host != oldWidget.host;
 }
 
-/// Gives the widgets below a child of a `MapTextureLayer` the child's index.
+/// Gives the widgets below a child of a map widget the child's index.
 class OverlayChildIndex extends InheritedWidget {
-  /// Wraps [child], which is the child [index] of the `MapTextureLayer`.
+  /// Wraps [child], which is the child [index] of the map widget.
   const OverlayChildIndex({
     super.key,
     required this.index,
     required super.child,
   });
 
-  /// The index of the child in `MapTextureLayer.children`.
+  /// The index of the child in the map widget's children.
   final int index;
 
   /// The index of the nearest child above [context], or 0 without one. With

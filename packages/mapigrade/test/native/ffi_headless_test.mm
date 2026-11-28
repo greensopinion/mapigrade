@@ -1,6 +1,6 @@
-// Task 2.1 of the adopt-ffi-core-executor change (design D187): whether the
-// native tests can run against the real MapLibre Native FFI with a headless
-// target. On the map thread's model of design D180, it creates a runtime and a
+// Checks whether the native tests can run against the real MapLibre Native FFI
+// with a headless target (design D187 of the adopt-ffi-core-executor change).
+// On the map thread's model of design D180, it creates a runtime and a
 // map, loads an inline style, attaches a borrowed ring of one Metal texture
 // with the caller-graphics-thread driver, renders one frame demand, and
 // disposes everything, waiting for each completion.

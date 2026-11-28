@@ -26,6 +26,215 @@ const int mapTextureEventIdle = 3;
 const int mapTextureEventFrameDisplayed = 4;
 const int mapTextureEventFrameReady = 5;
 const int mapTextureEventQueryResult = 6;
+const int mapTextureEventCameraTransitionEnded = 7;
+const int mapTextureEventCameraSettled = 8;
+
+const int mapTextureCameraCenter = 1;
+const int mapTextureCameraZoom = 2;
+const int mapTextureCameraBearing = 4;
+const int mapTextureCameraPitch = 8;
+const int mapTextureCameraCenterAltitude = 16;
+const int mapTextureCameraPadding = 32;
+const int mapTextureCameraRoll = 128;
+const int mapTextureCameraFieldOfView = 256;
+
+final class MapTextureFrameViewStruct extends Struct {
+  @Double()
+  external double pitch;
+  @Double()
+  external double centerAltitude;
+  @Double()
+  external double paddingTop;
+  @Double()
+  external double paddingLeft;
+  @Double()
+  external double paddingBottom;
+  @Double()
+  external double paddingRight;
+  @Double()
+  external double roll;
+  @Double()
+  external double fieldOfView;
+  @Array(16)
+  external Array<Double> matrix;
+  @Int32()
+  external int clipDepthRange;
+  @Int32()
+  external int cameraSource;
+  @Int64()
+  external int mapUpdateGeneration;
+}
+
+final class MapTextureCameraStruct extends Struct {
+  @Int32()
+  external int fields;
+  @Double()
+  external double latitude;
+  @Double()
+  external double longitude;
+  @Double()
+  external double centerAltitude;
+  @Double()
+  external double paddingTop;
+  @Double()
+  external double paddingLeft;
+  @Double()
+  external double paddingBottom;
+  @Double()
+  external double paddingRight;
+  @Double()
+  external double zoom;
+  @Double()
+  external double bearing;
+  @Double()
+  external double pitch;
+  @Double()
+  external double roll;
+  @Double()
+  external double fieldOfView;
+}
+
+final class MapTextureLimitsStruct extends Struct {
+  @Double()
+  external double minZoom;
+  @Double()
+  external double maxZoom;
+  @Double()
+  external double minPitch;
+  @Double()
+  external double maxPitch;
+  @Int32()
+  external int hasBounds;
+  @Double()
+  external double south;
+  @Double()
+  external double west;
+  @Double()
+  external double north;
+  @Double()
+  external double east;
+}
+
+final class MapTextureFitStruct extends Struct {
+  @Double()
+  external double south;
+  @Double()
+  external double west;
+  @Double()
+  external double north;
+  @Double()
+  external double east;
+  @Int32()
+  external int fields;
+  @Double()
+  external double paddingTop;
+  @Double()
+  external double paddingLeft;
+  @Double()
+  external double paddingBottom;
+  @Double()
+  external double paddingRight;
+  @Double()
+  external double bearing;
+  @Double()
+  external double pitch;
+}
+
+final class MapTextureGestureOptionsStruct extends Struct {
+  @Int32()
+  external int pan;
+  @Int32()
+  external int zoom;
+  @Int32()
+  external int rotate;
+  @Int32()
+  external int pitch;
+  @Int32()
+  external int glides;
+  @Int32()
+  external int snapToNorth;
+  @Double()
+  external double doubleTapZoom;
+  @Double()
+  external double twoFingerTapZoom;
+  @Int32()
+  external int momentumModel;
+  @Double()
+  external double halfLifeMs;
+}
+
+final class MapTextureGestureInputStruct extends Struct {
+  @Int32()
+  external int type;
+  @Int32()
+  external int pointerId;
+  @Int32()
+  external int pointerKind;
+  @Int32()
+  external int modes;
+  @Double()
+  external double x;
+  @Double()
+  external double y;
+  @Int32()
+  external int discrete;
+  @Double()
+  external double panX;
+  @Double()
+  external double panY;
+  @Double()
+  external double zoom;
+  @Double()
+  external double bearing;
+  @Double()
+  external double pitch;
+  @Double()
+  external double scale;
+  @Double()
+  external double rotation;
+  @Int32()
+  external int phase;
+}
+
+final class MapTextureGestureEventStruct extends Struct {
+  @Int32()
+  external int type;
+  @Int32()
+  external int pointerId;
+  @Double()
+  external double x;
+  @Double()
+  external double y;
+  @Int32()
+  external int axis;
+  @Int32()
+  external int kind;
+  @Double()
+  external double value;
+}
+
+final class MapTextureGestureResultStruct extends Struct {
+  @Int32()
+  external int handled;
+  @Int32()
+  external int nextTick;
+  @Double()
+  external double nextTickMs;
+  @Int32()
+  external int boxZoomActive;
+  @Double()
+  external double boxMinX;
+  @Double()
+  external double boxMinY;
+  @Double()
+  external double boxMaxX;
+  @Double()
+  external double boxMaxY;
+  @Int32()
+  external int eventCount;
+  @Array(4)
+  external Array<MapTextureGestureEventStruct> events;
+}
 
 final class MapTextureEventStruct extends Struct {
   @Int64()
@@ -59,6 +268,7 @@ final class MapTextureEventStruct extends Struct {
   external int requestId;
   @Int32()
   external int status;
+  external MapTextureFrameViewStruct view;
 }
 
 final class MapTextureFrameStruct extends Struct {
@@ -82,6 +292,7 @@ final class MapTextureFrameStruct extends Struct {
   external int physicalHeight;
   @Double()
   external double scaleFactor;
+  external MapTextureFrameViewStruct view;
 }
 
 final class MapTextureStatsStruct extends Struct {
@@ -152,6 +363,8 @@ typedef MapTextureEventCallback = Void Function(
     Pointer<Pointer<Utf8>>,
     Pointer<Int32>,
     Int32,
+    Pointer<MapTextureCameraStruct>,
+    Pointer<MapTextureLimitsStruct>,
     Pointer<Pointer<Utf8>>,
   )
 >(symbol: 'map_texture_create')
@@ -163,7 +376,94 @@ external int mapTextureCreate(
   Pointer<Pointer<Utf8>> headerStrings,
   Pointer<Int32> headerCounts,
   int ruleCount,
+  Pointer<MapTextureCameraStruct> initialCamera,
+  Pointer<MapTextureLimitsStruct> limits,
   Pointer<Pointer<Utf8>> outError,
+);
+
+@Native<
+  Int32 Function(Int64, Int64, Int32, Pointer<MapTextureCameraStruct>, Double)
+>(symbol: 'map_texture_camera_command')
+external int mapTextureCameraCommand(
+  int handle,
+  int requestId,
+  int mode,
+  Pointer<MapTextureCameraStruct> camera,
+  double durationMs,
+);
+
+@Native<
+  Int32 Function(Int64, Int64, Int32, Pointer<MapTextureFitStruct>, Double)
+>(symbol: 'map_texture_fit_bounds')
+external int mapTextureFitBounds(
+  int handle,
+  int requestId,
+  int mode,
+  Pointer<MapTextureFitStruct> fit,
+  double durationMs,
+);
+
+@Native<
+  Int32 Function(Int64, Double, Double, Pointer<Double>, Pointer<Double>)
+>(symbol: 'map_texture_project_for_testing')
+external int mapTextureProjectForTesting(
+  int handle,
+  double latitude,
+  double longitude,
+  Pointer<Double> outX,
+  Pointer<Double> outY,
+);
+
+@Native<Int32 Function(Int64)>(symbol: 'map_texture_cancel_transitions')
+external int mapTextureCancelTransitions(int handle);
+
+@Native<Int32 Function(Int64, Pointer<MapTextureLimitsStruct>)>(
+  symbol: 'map_texture_set_limits',
+)
+external int mapTextureSetLimits(
+  int handle,
+  Pointer<MapTextureLimitsStruct> limits,
+);
+
+@Native<Int32 Function(Int64, Pointer<MapTextureGestureOptionsStruct>)>(
+  symbol: 'map_texture_gesture_create',
+)
+external int mapTextureGestureCreate(
+  int handle,
+  Pointer<MapTextureGestureOptionsStruct> options,
+);
+
+@Native<Int32 Function(Int64, Pointer<MapTextureGestureOptionsStruct>)>(
+  symbol: 'map_texture_gesture_set_options',
+)
+external int mapTextureGestureSetOptions(
+  int handle,
+  Pointer<MapTextureGestureOptionsStruct> options,
+);
+
+@Native<
+  Int32 Function(
+    Int64,
+    Pointer<MapTextureGestureInputStruct>,
+    Double,
+    Pointer<MapTextureGestureResultStruct>,
+  )
+>(symbol: 'map_texture_gesture_handle', isLeaf: true)
+external int mapTextureGestureHandle(
+  int handle,
+  Pointer<MapTextureGestureInputStruct> input,
+  double timeMs,
+  Pointer<MapTextureGestureResultStruct> outResult,
+);
+
+@Native<Int32 Function(Int64, Double, Pointer<MapTextureGestureResultStruct>)>(
+  symbol: 'map_texture_gesture_tick',
+  isLeaf: true,
+)
+external int mapTextureGestureTick(
+  int handle,
+  double timeMs,
+  Pointer<MapTextureGestureResultStruct> outResult,
 );
 
 @Native<Void Function(Pointer<Utf8>)>(symbol: 'map_texture_string_free')

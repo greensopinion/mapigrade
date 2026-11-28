@@ -6,6 +6,7 @@ environment:
 
 workspace:
   - packages/mapigrade
+  - packages/mapigrade/example
   - packages/flutter_mapigrade
   - packages/flutter_mapigrade/example
   - packages/demo

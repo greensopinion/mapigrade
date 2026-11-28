@@ -22,6 +22,8 @@ Future<MapTextureController> createMapTextureController({
   required double pixelRatio,
   required bool copyFree,
   required List<HeaderRule> httpHeaders,
+  NativeCamera? initialCamera,
+  NativeLimits? limits,
 }) async {
   final engine = await engineToken();
   late final _FfiMapTextureController controller;
@@ -48,6 +50,16 @@ Future<MapTextureController> createMapTextureController({
       headerCounts[i] = httpHeaders[i].headers.length;
     }
     final outError = arena<Pointer<Utf8>>();
+    Pointer<MapTextureCameraStruct> camera = nullptr;
+    Pointer<MapTextureLimitsStruct> nativeLimits = nullptr;
+    if (initialCamera != null) {
+      camera = arena<MapTextureCameraStruct>();
+      _writeCamera(camera.ref, initialCamera);
+    }
+    if (limits != null) {
+      nativeLimits = arena<MapTextureLimitsStruct>();
+      _writeLimits(nativeLimits.ref, limits);
+    }
     final handle = mapTextureCreate(
       engine,
       pixelRatio,
@@ -56,6 +68,8 @@ Future<MapTextureController> createMapTextureController({
       headerStrings,
       headerCounts,
       httpHeaders.length,
+      camera,
+      nativeLimits,
       outError,
     );
     String? error;
@@ -79,6 +93,99 @@ Future<MapTextureController> createMapTextureController({
   controller = _FfiMapTextureController(handle, textureIds, copyFree, callable);
   return controller;
 }
+
+void _writeCamera(MapTextureCameraStruct out, NativeCamera camera) {
+  out
+    ..fields = camera.fields
+    ..latitude = camera.latitude
+    ..longitude = camera.longitude
+    ..centerAltitude = camera.centerAltitude
+    ..paddingTop = camera.paddingTop
+    ..paddingLeft = camera.paddingLeft
+    ..paddingBottom = camera.paddingBottom
+    ..paddingRight = camera.paddingRight
+    ..zoom = camera.zoom
+    ..bearing = camera.bearing
+    ..pitch = camera.pitch
+    ..roll = camera.roll
+    ..fieldOfView = camera.fieldOfView;
+}
+
+void _writeLimits(MapTextureLimitsStruct out, NativeLimits limits) {
+  out
+    ..minZoom = limits.minZoom
+    ..maxZoom = limits.maxZoom
+    ..minPitch = limits.minPitch
+    ..maxPitch = limits.maxPitch
+    ..hasBounds = limits.hasBounds ? 1 : 0
+    ..south = limits.south
+    ..west = limits.west
+    ..north = limits.north
+    ..east = limits.east;
+}
+
+void _writeGestureOptions(
+  MapTextureGestureOptionsStruct out,
+  NativeGestureOptions options,
+) {
+  out
+    ..pan = options.pan ? 1 : 0
+    ..zoom = options.zoom ? 1 : 0
+    ..rotate = options.rotate ? 1 : 0
+    ..pitch = options.pitch ? 1 : 0
+    ..glides = options.glides ? 1 : 0
+    ..snapToNorth = options.snapToNorth ? 1 : 0
+    ..doubleTapZoom = options.doubleTapZoom
+    ..twoFingerTapZoom = options.twoFingerTapZoom
+    ..momentumModel = options.momentumModel
+    ..halfLifeMs = options.halfLifeMs;
+}
+
+FrameView _viewOf(MapTextureFrameViewStruct v) {
+  final matrix = Float64List(16);
+  for (var i = 0; i < 16; ++i) {
+    matrix[i] = v.matrix[i];
+  }
+  return FrameView(
+    pitch: v.pitch,
+    centerAltitude: v.centerAltitude,
+    paddingTop: v.paddingTop,
+    paddingLeft: v.paddingLeft,
+    paddingBottom: v.paddingBottom,
+    paddingRight: v.paddingRight,
+    roll: v.roll,
+    fieldOfView: v.fieldOfView,
+    matrix: matrix,
+    clipDepthRange: v.clipDepthRange,
+    cameraSource: NativeCameraSource
+        .values[v.cameraSource.clamp(0, NativeCameraSource.values.length - 1)],
+    mapUpdateGeneration: v.mapUpdateGeneration,
+  );
+}
+
+GestureResult _gestureResultOf(MapTextureGestureResultStruct r) =>
+    GestureResult(
+      handled: r.handled != 0,
+      nextTick: GestureNextTick.values[r.nextTick.clamp(0, 2)],
+      nextTickMs: r.nextTickMs,
+      boxZoom: r.boxZoomActive != 0
+          ? Rect.fromPoints(
+              Offset(r.boxMinX, r.boxMinY),
+              Offset(r.boxMaxX, r.boxMaxY),
+            )
+          : null,
+      events: [
+        for (var i = 0; i < r.eventCount && i < 4; ++i)
+          GestureEvent(
+            type: r.events[i].type,
+            pointerId: r.events[i].pointerId,
+            position: Offset(r.events[i].x, r.events[i].y),
+            axis: r.events[i].axis,
+            kind: r.events[i].kind,
+            value: r.events[i].value,
+          ),
+      ],
+    );
 
 (int, String?) _setOverlaySource(
   int handle,
@@ -160,6 +267,11 @@ class _FfiMapTextureController implements MapTextureController {
   final NativeCallable<MapTextureEventCallback> _callable;
   final Pointer<MapTextureFrameStruct> _chosen =
       calloc<MapTextureFrameStruct>();
+  // Reused by every gesture call, which runs synchronously on this isolate.
+  final Pointer<MapTextureGestureInputStruct> _gestureInput =
+      calloc<MapTextureGestureInputStruct>();
+  final Pointer<MapTextureGestureResultStruct> _gestureResult =
+      calloc<MapTextureGestureResultStruct>();
 
   @override
   final List<int> textureIds;
@@ -248,6 +360,7 @@ class _FfiMapTextureController implements MapTextureController {
       displayTime: null,
       slot: f.slot,
       seq: f.seq,
+      view: _viewOf(f.view),
     );
     _selectedFrame = frame;
     return frame;
@@ -463,6 +576,135 @@ class _FfiMapTextureController implements MapTextureController {
   }
 
   @override
+  void cameraCommand(
+    int requestId,
+    int mode,
+    NativeCamera camera, {
+    double durationMs = -1,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      final native = arena<MapTextureCameraStruct>();
+      _writeCamera(native.ref, camera);
+      _check(
+        mapTextureCameraCommand(_handle, requestId, mode, native, durationMs),
+      );
+    });
+  }
+
+  @override
+  void fitBounds(
+    int requestId,
+    int mode,
+    NativeFit fit, {
+    double durationMs = -1,
+  }) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      final native = arena<MapTextureFitStruct>();
+      native.ref
+        ..south = fit.south
+        ..west = fit.west
+        ..north = fit.north
+        ..east = fit.east
+        ..fields = fit.fields
+        ..paddingTop = fit.paddingTop
+        ..paddingLeft = fit.paddingLeft
+        ..paddingBottom = fit.paddingBottom
+        ..paddingRight = fit.paddingRight
+        ..bearing = fit.bearing
+        ..pitch = fit.pitch;
+      _check(mapTextureFitBounds(_handle, requestId, mode, native, durationMs));
+    });
+  }
+
+  @override
+  void cancelTransitions() {
+    if (_disposed) throw const MapTextureDisposedException();
+    _check(mapTextureCancelTransitions(_handle));
+  }
+
+  @override
+  void setLimits(NativeLimits limits) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      final native = arena<MapTextureLimitsStruct>();
+      _writeLimits(native.ref, limits);
+      _check(mapTextureSetLimits(_handle, native));
+    });
+  }
+
+  @override
+  void createGestureRecognizer(NativeGestureOptions options) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      final native = arena<MapTextureGestureOptionsStruct>();
+      _writeGestureOptions(native.ref, options);
+      _check(mapTextureGestureCreate(_handle, native));
+    });
+  }
+
+  @override
+  void setGestureOptions(NativeGestureOptions options) {
+    if (_disposed) throw const MapTextureDisposedException();
+    using((arena) {
+      final native = arena<MapTextureGestureOptionsStruct>();
+      _writeGestureOptions(native.ref, options);
+      _check(mapTextureGestureSetOptions(_handle, native));
+    });
+  }
+
+  @override
+  GestureResult handleGesture(GestureInput input, double timeMs) {
+    if (_disposed) throw const MapTextureDisposedException();
+    _gestureInput.ref
+      ..type = input.type
+      ..pointerId = input.pointerId
+      ..pointerKind = input.pointerKind
+      ..modes = input.modes
+      ..x = input.position.dx
+      ..y = input.position.dy
+      ..discrete = input.discrete ? 1 : 0
+      ..panX = input.pan.dx
+      ..panY = input.pan.dy
+      ..zoom = input.zoom
+      ..bearing = input.bearing
+      ..pitch = input.pitch
+      ..scale = input.scale
+      ..rotation = input.rotation
+      ..phase = input.phase;
+    _check(
+      mapTextureGestureHandle(_handle, _gestureInput, timeMs, _gestureResult),
+    );
+    return _gestureResultOf(_gestureResult.ref);
+  }
+
+  @override
+  GestureResult tickGesture(double timeMs) {
+    if (_disposed) throw const MapTextureDisposedException();
+    _check(mapTextureGestureTick(_handle, timeMs, _gestureResult));
+    return _gestureResultOf(_gestureResult.ref);
+  }
+
+  @override
+  Offset? projectForTesting(double latitude, double longitude) {
+    if (_disposed) throw const MapTextureDisposedException();
+    return using((arena) {
+      final x = arena<Double>(), y = arena<Double>();
+      final status = mapTextureProjectForTesting(
+        _handle,
+        latitude,
+        longitude,
+        x,
+        y,
+      );
+      if (status == mapTextureErrorInvalidArgument) return null;
+      _check(status);
+      return Offset(x.value, y.value);
+    });
+  }
+
+  @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
@@ -471,6 +713,8 @@ class _FfiMapTextureController implements MapTextureController {
     // No event is sent after dispose returns, so the callable can close.
     _callable.close();
     calloc.free(_chosen);
+    calloc.free(_gestureInput);
+    calloc.free(_gestureResult);
     _events.close();
     _frames.close();
     _readyFrames.close();
@@ -521,8 +765,10 @@ class _FfiMapTextureController implements MapTextureController {
             : e.displayTimeUs,
         slot: e.slot,
         seq: e.seq,
+        view: _viewOf(e.view),
       );
     }
+    final settledGeneration = e.view.mapUpdateGeneration;
     mapTextureEventFree(pointer);
     if (_disposed) return;
 
@@ -543,6 +789,10 @@ class _FfiMapTextureController implements MapTextureController {
         _readyFrames.add(frame!);
       case mapTextureEventQueryResult:
         _queries.complete(requestId, status, message);
+      case mapTextureEventCameraTransitionEnded:
+        _events.add(CameraTransitionEnded(requestId, status));
+      case mapTextureEventCameraSettled:
+        _events.add(CameraSettled(settledGeneration));
     }
   }
 }

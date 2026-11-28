@@ -1,9 +1,10 @@
 // Tests the license entries of the third-party notices (design D96 of the
 // third-party-notices change, first item, D217 of the update-ffi-0-202610-3
-// change, and D227 of the port-ffi-gesture-recognizer change): one entry with the file's text for each file in notices/, and the
-// plugin and asset entries in pubspec.yaml. The entries are read through a test
-// AssetBundle, because `flutter test` bundles every asset and doesn't apply the
-// platform filter. The tests name no notice file, so an FFI update that adds or
+// change, and D227 of the port-ffi-gesture-recognizer change): one entry with
+// the file's text for each file in notices/, and the plugin and asset entries
+// in pubspec.yaml. The tests read the entries through a test AssetBundle,
+// because `flutter test` bundles every asset and doesn't apply the platform
+// filter. The tests name no notice file, so an FFI update that adds or
 // removes one needs no change here.
 import 'dart:io';
 

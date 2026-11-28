@@ -30,3 +30,4 @@
 #define mln_map_remove_style_layer test_mln_map_remove_style_layer
 #define mln_map_move_style_layer test_mln_map_move_style_layer
 #define mln_map_set_feature_state test_mln_map_set_feature_state
+#define mln_map_update_camera test_mln_map_update_camera

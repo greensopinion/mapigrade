@@ -17,7 +17,7 @@ The package SHALL provide `MapigradePolylineLayer`, a widget that takes a list o
 
 #### Scenario: Polyline layer outside a map layer
 - **WHEN** an application places a polyline layer directly among the children of a `flutter_map` map in a debug build
-- **THEN** an assertion fails that states that the polyline layer must be below a `MapigradeLayer` or a `MapigradeMap`
+- **THEN** an assertion fails that states that the polyline layer must be below a map widget
 
 #### Scenario: Polylines given before the map exists
 - **WHEN** an application places a `MapigradeLayer` with a polyline layer in its children, and the map is created after the polyline layer was built

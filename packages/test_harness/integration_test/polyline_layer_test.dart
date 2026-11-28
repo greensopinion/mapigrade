@@ -629,7 +629,7 @@ void main() {
       );
       final exception = tester.takeException();
       expect(exception, isA<AssertionError>());
-      expect('$exception', contains('MapigradeLayer'));
+      expect('$exception', contains('must be below a map widget'));
     });
 
     testWidgets('Polylines given before the map exists', (tester) async {

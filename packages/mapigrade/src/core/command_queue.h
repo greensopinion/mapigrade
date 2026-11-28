@@ -3,8 +3,10 @@
 // Style loads, resizes, memory reduction, feature state, overlays, target
 // tasks and dispose go into an ordered queue and are never dropped or
 // reordered. Consecutive resizes are coalesced so that a window drag doesn't
-// allocate a buffer set per intermediate size. Camera updates go into a single
-// slot where the latest update wins, with its sequence number.
+// allocate a buffer set per intermediate size. Camera updates of a map whose
+// camera Dart owns go into a single slot where the latest update wins, with
+// its sequence number. Camera commands of a map that owns its camera (design
+// D235) go into the ordered queue.
 //
 // All methods are safe to call from any thread.
 #pragma once
@@ -27,13 +29,64 @@ namespace map_texture {
 // source exists, to install it again after each style load (design D224).
 using GeoJsonText = std::shared_ptr<const std::string>;
 
+struct EdgeInsets {
+  double top = 0;
+  double left = 0;
+  double bottom = 0;
+  double right = 0;
+
+  bool operator==(const EdgeInsets&) const = default;
+};
+
+// A camera with the fields of mln_camera (design D247). A map whose camera
+// Dart owns sets only the center, zoom and bearing.
 struct Camera {
   double latitude = 0;
   double longitude = 0;
   double zoom = 0;
   double bearing = 0;
+  double pitch = 0;
+  double center_altitude = 0;
+  EdgeInsets padding = {};
+  double roll = 0;
+  double field_of_view = 0;
 
   bool operator==(const Camera&) const = default;
+};
+
+// The limits of a map that owns its camera; mln_bound_options.
+struct CameraLimits {
+  double min_zoom = 0;
+  double max_zoom = 25.5;
+  double min_pitch = 0;
+  double max_pitch = 60;
+  bool has_bounds = false;
+  double south = 0;
+  double west = 0;
+  double north = 0;
+  double east = 0;
+};
+
+// A camera command of a map that owns its camera (design D236).
+struct CameraCommand {
+  enum class Type { kUpdate, kFit, kCancel, kLimits };
+  Type type = Type::kUpdate;
+  int64_t request_id = 0;
+  // An mln_camera_update_mode, for kUpdate and kFit.
+  uint32_t mode = 0;
+  // For kUpdate: the mln_camera_option_field bits of the fields of `camera`
+  // that the command sets. For kFit: the mln_camera_fit_option_field bits of
+  // `camera.padding`, `camera.bearing` and `camera.pitch`.
+  uint32_t fields = 0;
+  Camera camera;
+  // A negative duration leaves the animation's duration to MapLibre.
+  double duration_ms = -1;
+  // For kFit, and for kLimits in `limits`.
+  double south = 0;
+  double west = 0;
+  double north = 0;
+  double east = 0;
+  CameraLimits limits;
 };
 
 struct CameraUpdate {
@@ -89,6 +142,7 @@ struct Command {
     kOverlayRemoveSource,
     kOverlaySetLayers,
     kOverlayRemove,
+    kCamera,
     // Work of the platform render target on the map thread.
     kTargetTask,
     // For tests: records a rest probe, which the map thread answers at the
@@ -109,6 +163,8 @@ struct Command {
   FeatureStateTarget feature;
   // Set for the kOverlay* kinds.
   OverlayCommand overlay;
+  // Set for kCamera.
+  CameraCommand camera = {};
 
   static Command StyleUrl(std::string url) {
     return {Kind::kStyleUrl, std::move(url), {}, {}, {}, {}};
@@ -149,6 +205,11 @@ struct Command {
   }
   static Command OverlayRemove(int64_t id) {
     return {Kind::kOverlayRemove, {}, {}, {}, {}, {id, 0, 0, nullptr, {}, {}, {}, {}}};
+  }
+  static Command ForCamera(CameraCommand camera) {
+    Command command{Kind::kCamera, {}, {}, {}, {}, {}};
+    command.camera = camera;
+    return command;
   }
   static Command TargetTask(std::function<void()> task) {
     return {Kind::kTargetTask, {}, {}, std::move(task), {}, {}};

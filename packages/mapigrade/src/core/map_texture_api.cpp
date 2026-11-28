@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,6 +81,177 @@ bool ReadHeaderRules(const char* const* strings, const int32_t* counts,
   return true;
 }
 
+bool Finite(std::initializer_list<double> values) {
+  for (double value : values) {
+    if (!std::isfinite(value)) return false;
+  }
+  return true;
+}
+
+// The camera of `camera`, or nothing for a value that isn't finite or a field
+// that isn't a MAP_TEXTURE_CAMERA_* bit.
+std::optional<map_texture::Camera> CameraOf(const map_texture_camera& camera) {
+  constexpr int32_t kFields =
+      MAP_TEXTURE_CAMERA_CENTER | MAP_TEXTURE_CAMERA_ZOOM |
+      MAP_TEXTURE_CAMERA_BEARING | MAP_TEXTURE_CAMERA_PITCH |
+      MAP_TEXTURE_CAMERA_CENTER_ALTITUDE | MAP_TEXTURE_CAMERA_PADDING |
+      MAP_TEXTURE_CAMERA_ROLL | MAP_TEXTURE_CAMERA_FIELD_OF_VIEW;
+  if ((camera.fields & ~kFields) != 0 ||
+      !Finite({camera.latitude, camera.longitude, camera.center_altitude,
+               camera.padding_top, camera.padding_left, camera.padding_bottom,
+               camera.padding_right, camera.zoom, camera.bearing, camera.pitch,
+               camera.roll, camera.field_of_view})) {
+    return std::nullopt;
+  }
+  return map_texture::Camera{camera.latitude,
+                             camera.longitude,
+                             camera.zoom,
+                             camera.bearing,
+                             camera.pitch,
+                             camera.center_altitude,
+                             {camera.padding_top, camera.padding_left,
+                              camera.padding_bottom, camera.padding_right},
+                             camera.roll,
+                             camera.field_of_view};
+}
+
+// The limits of `limits`, or nothing for values that aren't finite or ranges
+// whose minimum is above their maximum.
+std::optional<map_texture::CameraLimits> LimitsOf(
+    const map_texture_limits& limits) {
+  if (!Finite({limits.min_zoom, limits.max_zoom, limits.min_pitch,
+               limits.max_pitch, limits.south, limits.west, limits.north,
+               limits.east}) ||
+      limits.min_zoom > limits.max_zoom || limits.min_pitch > limits.max_pitch ||
+      (limits.has_bounds != 0 && limits.south > limits.north)) {
+    return std::nullopt;
+  }
+  return map_texture::CameraLimits{limits.min_zoom,  limits.max_zoom,
+                                   limits.min_pitch, limits.max_pitch,
+                                   limits.has_bounds != 0, limits.south,
+                                   limits.west,      limits.north,
+                                   limits.east};
+}
+
+mln_momentum_decay Decay(const map_texture_gesture_options& options) {
+  mln_momentum_decay decay{};
+  decay.fields = MLN_MOMENTUM_DECAY_MODEL;
+  decay.model = static_cast<mln_momentum_decay_model>(options.momentum_model);
+  if (decay.model == MLN_MOMENTUM_DECAY_MODEL_FRICTION) {
+    decay.fields |= MLN_MOMENTUM_DECAY_HALF_LIFE_MS;
+    decay.half_life_ms = options.half_life_ms;
+  }
+  return decay;
+}
+
+mln_gesture_axis_options Axis(bool enabled,
+                              const map_texture_gesture_options& options) {
+  mln_gesture_axis_options axis{};
+  axis.fields = MLN_GESTURE_AXIS_OPTION_ENABLED |
+                MLN_GESTURE_AXIS_OPTION_GLIDES |
+                MLN_GESTURE_AXIS_OPTION_MOMENTUM;
+  axis.enabled = enabled;
+  axis.glides = options.glides != 0;
+  axis.momentum = Decay(options);
+  return axis;
+}
+
+// The FFI's options for `options` (design D240).
+mln_gesture_options GestureOptionsOf(
+    const map_texture_gesture_options& options) {
+  mln_gesture_options out{};
+  out.size = sizeof(out);
+  out.fields =
+      MLN_GESTURE_OPTION_DOUBLE_TAP_ZOOM | MLN_GESTURE_OPTION_TWO_FINGER_TAP_ZOOM;
+  out.double_tap_zoom = options.double_tap_zoom;
+  out.two_finger_tap_zoom = options.two_finger_tap_zoom;
+  out.pan.fields = MLN_GESTURE_PAN_OPTION_ENABLED |
+                   MLN_GESTURE_PAN_OPTION_GLIDES |
+                   MLN_GESTURE_PAN_OPTION_MOMENTUM;
+  out.pan.enabled = options.pan != 0;
+  out.pan.glides = options.glides != 0;
+  out.pan.momentum = Decay(options);
+  out.zoom = Axis(options.zoom != 0, options);
+  out.bearing = Axis(options.rotate != 0, options);
+  out.bearing.fields |= MLN_GESTURE_AXIS_OPTION_SNAPS;
+  out.bearing.snaps = options.snap_to_north != 0;
+  out.pitch = Axis(options.pitch != 0, options);
+  return out;
+}
+
+mln_gesture_input GestureInputOf(const map_texture_gesture_input& input) {
+  mln_gesture_input out{};
+  out.size = sizeof(out);
+  out.type = static_cast<mln_gesture_input_type>(input.type);
+  mln_screen_point position{input.x, input.y};
+  uint32_t id = static_cast<uint32_t>(input.pointer_id);
+  switch (out.type) {
+    case MLN_GESTURE_INPUT_POINTER_DOWN:
+      out.data.pointer_down = {id, static_cast<mln_pointer_kind>(input.pointer_kind),
+                               position,
+                               static_cast<mln_gesture_modes>(input.modes)};
+      break;
+    case MLN_GESTURE_INPUT_POINTER_MOVE:
+      out.data.pointer_move = {id, position};
+      break;
+    case MLN_GESTURE_INPUT_POINTER_UP:
+      out.data.pointer_up = {id, position};
+      break;
+    case MLN_GESTURE_INPUT_POINTER_CANCEL:
+      out.data.pointer_cancel = {id, position};
+      break;
+    case MLN_GESTURE_INPUT_MODES:
+      out.data.modes = static_cast<mln_gesture_modes>(input.modes);
+      break;
+    case MLN_GESTURE_INPUT_DELTA:
+      out.data.delta = {position,     input.discrete != 0,
+                        {input.pan_x, input.pan_y},
+                        input.zoom,   input.bearing,
+                        input.pitch};
+      break;
+    case MLN_GESTURE_INPUT_PINCH:
+      out.data.pinch = {position, input.scale, input.rotation,
+                        static_cast<mln_pinch_phase>(input.phase)};
+      break;
+  }
+  return out;
+}
+
+void GestureResultOf(const mln_gesture_result& result,
+                     map_texture_gesture_result* out) {
+  *out = {};
+  out->handled = result.handled ? 1 : 0;
+  out->next_tick = static_cast<int32_t>(result.next_tick);
+  out->next_tick_ms = result.next_tick_ms;
+  out->box_zoom_active = result.box_zoom_active ? 1 : 0;
+  out->box_min_x = result.box_zoom.min.x;
+  out->box_min_y = result.box_zoom.min.y;
+  out->box_max_x = result.box_zoom.max.x;
+  out->box_max_y = result.box_zoom.max.y;
+  size_t count = std::min<size_t>(result.event_count, 4);
+  out->event_count = static_cast<int32_t>(count);
+  for (size_t i = 0; i < count; ++i) {
+    const mln_gesture_event& event = result.events[i];
+    map_texture_gesture_event& flat = out->events[i];
+    flat.type = static_cast<int32_t>(event.type);
+    if (event.type == MLN_GESTURE_EVENT_NOTCH) {
+      flat.axis = static_cast<int32_t>(event.data.notch.axis);
+      flat.kind = static_cast<int32_t>(event.data.notch.kind);
+      flat.value = event.data.notch.value;
+    } else {
+      // Every other event is a tap of some kind.
+      flat.pointer_id = static_cast<int32_t>(event.data.tap.id);
+      flat.x = event.data.tap.position.x;
+      flat.y = event.data.tap.position.y;
+    }
+  }
+}
+
+int32_t StatusCode(mln_status status) {
+  if (status == MLN_STATUS_OK) return MAP_TEXTURE_OK;
+  return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+}
+
 std::shared_ptr<MapTexture> Find(int64_t handle) {
   std::lock_guard lock(registry_mutex);
   auto it = Registry().find(handle);
@@ -131,6 +303,8 @@ int64_t map_texture_create(int64_t engine, double pixel_ratio,
                            map_texture_event_callback callback,
                            const char* const* header_strings,
                            const int32_t* header_counts, int32_t rule_count,
+                           const map_texture_camera* initial_camera,
+                           const map_texture_limits* limits,
                            char** out_error) {
   if (out_error != nullptr) *out_error = nullptr;
   auto fail = [out_error](int64_t error, const std::string& message) {
@@ -146,6 +320,20 @@ int64_t map_texture_create(int64_t engine, double pixel_ratio,
                        &error)) {
     return fail(MAP_TEXTURE_ERROR_INVALID_ARGUMENT, error);
   }
+  std::optional<map_texture::OwnedCamera> owned;
+  if (initial_camera != nullptr) {
+    auto camera = CameraOf(*initial_camera);
+    auto camera_limits =
+        limits != nullptr ? LimitsOf(*limits) : std::nullopt;
+    if (!camera) {
+      return fail(MAP_TEXTURE_ERROR_INVALID_ARGUMENT, "invalid initial camera");
+    }
+    if (!camera_limits) {
+      return fail(MAP_TEXTURE_ERROR_INVALID_ARGUMENT, "invalid camera limits");
+    }
+    owned = map_texture::OwnedCamera{
+        *camera, static_cast<uint32_t>(initial_camera->fields), *camera_limits};
+  }
   int64_t handle;
   std::optional<uint64_t> cache_size;
   {
@@ -155,7 +343,7 @@ int64_t map_texture_create(int64_t engine, double pixel_ratio,
   }
   auto texture = MapTexture::Create(handle, engine, pixel_ratio, copy_free != 0,
                                     cache_size, std::move(rules), callback,
-                                    &error);
+                                    &error, owned);
   if (!texture) return fail(MAP_TEXTURE_ERROR_CREATE_FAILED, error);
   std::lock_guard lock(registry_mutex);
   // The map can't have rendered yet: its render session is attached by the
@@ -205,6 +393,7 @@ int32_t map_texture_select_newest(int64_t handle, map_texture_frame* out) {
   out->physical_width = static_cast<int32_t>(info.physical_width);
   out->physical_height = static_cast<int32_t>(info.physical_height);
   out->scale_factor = info.scale_factor;
+  map_texture::FillFrameView(info, &out->view);
   return MAP_TEXTURE_OK;
 }
 
@@ -229,7 +418,137 @@ int32_t map_texture_set_camera(int64_t handle, double latitude,
                                int64_t seq) {
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  if (texture->owns_camera()) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
   texture->SetCamera({latitude, longitude, zoom, bearing}, seq);
+  return MAP_TEXTURE_OK;
+}
+
+namespace {
+
+// Submits `command` to the map `handle` if it owns its camera.
+int32_t SubmitCameraCommand(int64_t handle,
+                            const map_texture::CameraCommand& command) {
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  if (!texture->owns_camera()) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  texture->SubmitCameraCommand(command);
+  return MAP_TEXTURE_OK;
+}
+
+bool ValidMode(int32_t mode) { return mode >= 0 && mode <= 2; }
+
+bool ValidDuration(double duration_ms) { return std::isfinite(duration_ms); }
+
+}  // namespace
+
+int32_t map_texture_camera_command(int64_t handle, int64_t request_id,
+                                   int32_t mode,
+                                   const map_texture_camera* camera,
+                                   double duration_ms) {
+  if (camera == nullptr || !ValidMode(mode) || !ValidDuration(duration_ms)) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto target = CameraOf(*camera);
+  if (!target) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  map_texture::CameraCommand command;
+  command.type = map_texture::CameraCommand::Type::kUpdate;
+  command.request_id = request_id;
+  command.mode = static_cast<uint32_t>(mode);
+  command.fields = static_cast<uint32_t>(camera->fields);
+  command.camera = *target;
+  command.duration_ms = duration_ms;
+  return SubmitCameraCommand(handle, command);
+}
+
+int32_t map_texture_fit_bounds(int64_t handle, int64_t request_id, int32_t mode,
+                               const map_texture_fit* fit, double duration_ms) {
+  if (fit == nullptr || !ValidMode(mode) || !ValidDuration(duration_ms) ||
+      (fit->fields & ~7) != 0 ||
+      !Finite({fit->south, fit->west, fit->north, fit->east, fit->padding_top,
+               fit->padding_left, fit->padding_bottom, fit->padding_right,
+               fit->bearing, fit->pitch}) ||
+      fit->south > fit->north) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  map_texture::CameraCommand command;
+  command.type = map_texture::CameraCommand::Type::kFit;
+  command.request_id = request_id;
+  command.mode = static_cast<uint32_t>(mode);
+  command.fields = static_cast<uint32_t>(fit->fields);
+  command.camera.padding = {fit->padding_top, fit->padding_left,
+                            fit->padding_bottom, fit->padding_right};
+  command.camera.bearing = fit->bearing;
+  command.camera.pitch = fit->pitch;
+  command.duration_ms = duration_ms;
+  command.south = fit->south;
+  command.west = fit->west;
+  command.north = fit->north;
+  command.east = fit->east;
+  return SubmitCameraCommand(handle, command);
+}
+
+int32_t map_texture_cancel_transitions(int64_t handle) {
+  map_texture::CameraCommand command;
+  command.type = map_texture::CameraCommand::Type::kCancel;
+  return SubmitCameraCommand(handle, command);
+}
+
+int32_t map_texture_set_limits(int64_t handle,
+                               const map_texture_limits* limits) {
+  auto camera_limits = limits != nullptr ? LimitsOf(*limits) : std::nullopt;
+  if (!camera_limits) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  map_texture::CameraCommand command;
+  command.type = map_texture::CameraCommand::Type::kLimits;
+  command.limits = *camera_limits;
+  return SubmitCameraCommand(handle, command);
+}
+
+int32_t map_texture_gesture_create(int64_t handle,
+                                   const map_texture_gesture_options* options) {
+  if (options == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  mln_gesture_options gesture_options = GestureOptionsOf(*options);
+  return StatusCode(texture->GestureCreate(gesture_options, nullptr));
+}
+
+int32_t map_texture_gesture_set_options(
+    int64_t handle, const map_texture_gesture_options* options) {
+  if (options == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  mln_gesture_options gesture_options = GestureOptionsOf(*options);
+  return StatusCode(texture->GestureSetOptions(gesture_options));
+}
+
+int32_t map_texture_gesture_handle(int64_t handle,
+                                   const map_texture_gesture_input* input,
+                                   double time_ms,
+                                   map_texture_gesture_result* out_result) {
+  if (input == nullptr || out_result == nullptr) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  mln_gesture_result result{};
+  result.size = sizeof(result);
+  mln_status status =
+      texture->GestureHandle(GestureInputOf(*input), time_ms, &result);
+  if (status != MLN_STATUS_OK) return StatusCode(status);
+  GestureResultOf(result, out_result);
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_gesture_tick(int64_t handle, double time_ms,
+                                 map_texture_gesture_result* out_result) {
+  if (out_result == nullptr) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  mln_gesture_result result{};
+  result.size = sizeof(result);
+  mln_status status = texture->GestureTick(time_ms, &result);
+  if (status != MLN_STATUS_OK) return StatusCode(status);
+  GestureResultOf(result, out_result);
   return MAP_TEXTURE_OK;
 }
 
@@ -406,6 +725,21 @@ int32_t map_texture_get_stats(int64_t handle, map_texture_stats* out_stats) {
   auto texture = Find(handle);
   if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
   *out_stats = texture->stats();
+  return MAP_TEXTURE_OK;
+}
+
+int32_t map_texture_project_for_testing(int64_t handle, double latitude,
+                                        double longitude, double* out_x,
+                                        double* out_y) {
+  if (out_x == nullptr || out_y == nullptr) {
+    return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  }
+  auto texture = Find(handle);
+  if (!texture) return MAP_TEXTURE_ERROR_DISPOSED;
+  auto point = texture->ProjectForTesting(latitude, longitude);
+  if (!point) return MAP_TEXTURE_ERROR_INVALID_ARGUMENT;
+  *out_x = point->x;
+  *out_y = point->y;
   return MAP_TEXTURE_OK;
 }
 

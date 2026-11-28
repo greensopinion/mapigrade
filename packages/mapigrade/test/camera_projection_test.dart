@@ -1,7 +1,5 @@
 // Unit tests for ViewCamera and the Web Mercator math that MapigradeController
-// uses to convert query positions (design D22). flutter_mapigrade's
-// flutter_map_camera_test.dart checks the conversion from and to flutter_map's
-// camera.
+// uses to convert query positions (design D22).
 import 'dart:math' as math;
 import 'dart:ui';
 

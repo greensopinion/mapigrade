@@ -1,10 +1,13 @@
 // Web Mercator projection of the map camera, the C++ counterpart of
-// lib/src/layer/camera_projection.dart. The camera has no pitch.
+// lib/src/camera_projection.dart. ScreenPosition and ScreenBounds ignore the
+// camera's pitch; the Matrix* functions use a frame's projection matrix.
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
+#include <optional>
 
 #include "command_queue.h"
 
@@ -28,11 +31,13 @@ struct ScreenBox {
   ScreenPoint max;
 };
 
-// The camera and logical viewport size that a frame was rendered with.
+// The camera and logical viewport size that a frame was rendered with, and
+// the matrix of its mln_frame_projection, column-major.
 struct RenderedView {
   Camera camera;
   double width = 0;
   double height = 0;
+  std::array<double, 16> matrix{};
 };
 
 // The largest latitude Web Mercator shows, as in MapLibre.
@@ -78,6 +83,47 @@ inline ScreenBox ScreenBounds(const Camera& camera, double width,
     ScreenPoint p = ScreenPosition(camera, width, height, corner);
     box.min = {std::min(box.min.x, p.x), std::min(box.min.y, p.y)};
     box.max = {std::max(box.max.x, p.x), std::max(box.max.y, p.y)};
+  }
+  return box;
+}
+
+// The logical position at which a frame with the column-major clip matrix
+// `matrix` (mln_frame_projection.matrix) in a viewport of logical size
+// `width` x `height` draws `world` at altitude 0, in the copy of the world
+// nearest the Web Mercator x `center_x`. Nothing for a point behind the
+// camera.
+inline std::optional<ScreenPoint> MatrixScreenPosition(
+    const std::array<double, 16>& matrix, double width, double height,
+    double center_x, WorldPoint world) {
+  double dx = world.x - center_x;
+  dx -= std::round(dx);
+  double x = center_x + dx;
+  double clip_x = matrix[0] * x + matrix[4] * world.y + matrix[12];
+  double clip_y = matrix[1] * x + matrix[5] * world.y + matrix[13];
+  double clip_w = matrix[3] * x + matrix[7] * world.y + matrix[15];
+  if (!(clip_w > 0)) return std::nullopt;
+  // Clip y points up.
+  return ScreenPoint{(clip_x / clip_w + 1) / 2 * width,
+                     (1 - clip_y / clip_w) / 2 * height};
+}
+
+// The smallest box aligned with the screen axes that contains the positions
+// of `corners` in `view` through its matrix, or nothing if a corner is behind
+// the camera.
+inline std::optional<ScreenBox> MatrixScreenBounds(
+    const RenderedView& view, const WorldPoint (&corners)[4]) {
+  double center_x = (view.camera.longitude + 180) / 360;
+  std::optional<ScreenBox> box;
+  for (const WorldPoint& corner : corners) {
+    auto p = MatrixScreenPosition(view.matrix, view.width, view.height,
+                                  center_x, corner);
+    if (!p) return std::nullopt;
+    if (!box) {
+      box = ScreenBox{*p, *p};
+    } else {
+      box->min = {std::min(box->min.x, p->x), std::min(box->min.y, p->y)};
+      box->max = {std::max(box->max.x, p->x), std::max(box->max.y, p->y)};
+    }
   }
   return box;
 }

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'map_benchmark.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:mapigrade/src/testing.dart';
@@ -38,7 +40,9 @@ const styles = [
 void main() => runApp(
   MaterialApp(
     debugShowCheckedModeBanner: false,
-    home: alignmentBenchmarkEnabled
+    home: mapBenchmarkEnabled
+        ? const MapBenchmarkPage()
+        : alignmentBenchmarkEnabled
         ? const AlignmentBenchmarkPage()
         : flutterMapPageAtLaunch
         ? FlutterMapPage(styleUrl: styles.first.url)
@@ -169,6 +173,9 @@ class _MapScreenState extends State<MapScreen>
           _error = message;
         case MapIdle():
           _status = 'idle';
+        // The harness's map doesn't own its camera.
+        case CameraTransitionEnded() || CameraSettled():
+          break;
       }
     });
   }

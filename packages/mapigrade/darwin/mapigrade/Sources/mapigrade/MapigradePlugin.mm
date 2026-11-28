@@ -142,7 +142,7 @@ static void MLTObserveApplicationLifecycle(void) {
 }
 
 #if TARGET_OS_IOS
-// Releases the maps that Dart in this engine created and didn't dispose
+// Releases the maps that Dart in this engine created and didn't dispose.
 // Maps of other engines are unaffected.
 - (void)detachFromEngineForRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   RemoveRegistry(_token);

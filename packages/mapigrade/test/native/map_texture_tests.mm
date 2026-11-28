@@ -2,8 +2,9 @@
 // display slots (D130-D135), the display slots of a buffer target
 // (D122-D126, D182 and D183), camera sequence numbers (D125, D181), the
 // maximum size of the tile cache (D61-D63), the HTTP header rules (D81, D82),
-// glyph load failures, and the engine token of each map (D156 and D157 of the
-// multiple-flutter-engines change).
+// glyph load failures, the engine token of each map (D156 and D157 of the
+// multiple-flutter-engines change), rendered feature queries and feature
+// state, overlays, and maps that own their camera.
 //
 // The tests run MapTexture on the real MapLibre Native FFI with headless Metal
 // targets (design D187 of the adopt-ffi-core-executor change): the surface
@@ -119,9 +120,9 @@ std::string NextStyle() {
 }
 
 // A surface target with six slots that share one texture, on a borrowed ring
-// of one Metal texture. The test plays the image listener: it passes the frame ids
-// that WillRender recorded to MapTexture::OnFrameImage, and the target keeps
-// the frame id as the slot's image.
+// of one Metal texture. The test plays the image listener: it passes the frame
+// ids that WillRender recorded to MapTexture::OnFrameImage, and the target
+// keeps the frame id as the slot's image.
 class FakeSurfaceTarget : public SurfaceRenderTarget {
  public:
   int slot_count() const override {
@@ -331,6 +332,9 @@ struct Event {
   int64_t seq;
   int64_t request_id;
   int32_t status;
+  double latitude = 0;
+  double longitude = 0;
+  map_texture_frame_view view{};
 };
 std::mutex events_mutex;
 std::vector<Event> events;
@@ -345,7 +349,8 @@ void OnEvent(map_texture_event* event) {
                       event->physical_width, event->display_time_us,
                       event->message == nullptr ? "" : event->message,
                       event->slot, event->seq, event->request_id,
-                      event->status});
+                      event->status, event->latitude, event->longitude,
+                      event->view});
   }
   map_texture_event_free(event);
 }
@@ -466,7 +471,7 @@ int64_t CreateMapWithRules(const std::vector<const char*>& strings,
   int64_t handle = map_texture_create(
       engine, 2.0, 1, OnEvent, strings.empty() ? nullptr : strings.data(),
       counts.empty() ? nullptr : counts.data(),
-      static_cast<int32_t>(counts.size()), &message);
+      static_cast<int32_t>(counts.size()), nullptr, nullptr, &message);
   CHECK((handle > 0) == (message == nullptr));
   if (error != nullptr) *error = message == nullptr ? "" : message;
   map_texture_string_free(message);
@@ -605,9 +610,9 @@ void NoRenderWithoutSurface() {
   CHECK(task_thread != std::thread::id());
   CHECK(task_thread != std::this_thread::get_id());
   CHECK(WaitFor([handle] { return Stats(handle).rendered_frames >= 1; }));
-  // Under #760, a task after the first frame renders again only when it
-  // replaces the target, which makes the session run the waiting demand
-  // again; this fake surface has no target to replace.
+  // A task after the first frame renders again only when it replaces the
+  // target, which makes the session run the waiting demand again; this fake
+  // surface has no target to replace.
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -624,8 +629,7 @@ void TaskWaitEndsAtDispose() {
   CHECK(!ran);
 }
 
-// Designs D53 and D134: renders are paced to one per display refresh
-// interval.
+// Designs D53 and D134.
 void RendersArePacedByRefreshInterval() {
   fake_now = 1'000'000'000;
   fake_clock = true;
@@ -653,8 +657,8 @@ void RendersArePacedByRefreshInterval() {
            map_texture_at_rest_for_testing(handle) == 1;
   }));
   int64_t rendered = Stats(handle).rendered_frames;
-  // Under #760 the map thread arms the next frame demand as soon as a frame
-  // has rendered, so the wait for the interval's end is counted then, once.
+  // The map thread arms the next frame demand as soon as a frame has
+  // rendered, so the wait for the interval's end is counted then, once.
   int64_t waits = Stats(handle).interval_waits;
   CHECK(waits >= 1);
 
@@ -840,7 +844,7 @@ void SurfaceSlotIsFreedAfterThreeLaterChoices() {
   map_texture_dispose(handle);
 }
 
-// Design D131: an image whose frame no slot ever queued is reported once.
+// Design D131.
 void SurfaceImageOfUnknownFrameIsReportedOnce() {
   int64_t handle = CreateMap();
   map_texture_resize(handle, 100, 100, 2.0);
@@ -1584,9 +1588,7 @@ void MapDoesNotRenderIntoHeldSlot() {
   map_texture_dispose(handle);
 }
 
-// The map thread publishes a frame only after it has read the frame's producer
-// sync, and releases a frame only when its slot is free (design D223 of the
-// port-ffi-gesture-recognizer change).
+// Design D223 of the port-ffi-gesture-recognizer change.
 void FrameIsPublishedAfterProducerSyncAndReleasedWhenSlotIsFree() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
@@ -1637,7 +1639,6 @@ void FrameIsPublishedAfterProducerSyncAndReleasedWhenSlotIsFree() {
   map_texture_dispose(handle);
 }
 
-// A frame whose producer sync the target can't wait for isn't published.
 void FrameWithUnwaitableProducerSyncIsNotPublished() {
   int64_t handle = CreateBufferMap();
   map_texture_resize(handle, 100, 100, 2.0);
@@ -1658,8 +1659,7 @@ void FrameWithUnwaitableProducerSyncIsNotPublished() {
   map_texture_dispose(handle);
 }
 
-// Each published frame keeps the projection of its frame result (design D226
-// of the port-ffi-gesture-recognizer change).
+// Design D226 of the port-ffi-gesture-recognizer change.
 void PublishedFrameKeepsItsProjection() {
   int64_t handle = CreateBufferMap();
   auto owner = last_owner.lock();
@@ -1744,7 +1744,7 @@ void SelectAfterDisposeReportsDisposed() {
         MAP_TEXTURE_ERROR_DISPOSED);
 }
 
-// Design D135: six slots share the surface target's one texture.
+// Design D135.
 void SurfaceMapHasSixSlotsWithOneTexture() {
   int64_t handle = CreateMap();
   int64_t ids[8] = {};
@@ -1841,7 +1841,7 @@ void CacheSizeFailureIsReportedAndMapRenders() {
     events.clear();
   }
   int64_t handle = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
-                                      nullptr, 0, nullptr);
+                                      nullptr, 0, nullptr, nullptr, nullptr);
   ffi_wrappers::SetMaximumCacheSizeStatus(MLN_STATUS_OK);
   CHECK(handle > 0);
   CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).size() == 1);
@@ -1922,8 +1922,8 @@ void EmptyAssetPathKeepsDefault() {
   map_texture_dispose(handle);
 }
 
-// Under #760 the runtime validates the rules when the map thread registers
-// them, so the creation fails with the runtime's message.
+// The runtime validates the rules when the map thread registers them, so the
+// creation fails with the runtime's message.
 void RejectedHeaderFailsCreate() {
   std::string error;
   int64_t result = CreateMapWithRules(
@@ -1938,7 +1938,7 @@ void InvalidRuleArraysFailCreate() {
   std::string error;
   ffi_wrappers::Reset();
   char* message = nullptr;
-  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 1,
+  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 1, nullptr, nullptr,
                            &message) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(message != nullptr);
@@ -1947,7 +1947,7 @@ void InvalidRuleArraysFailCreate() {
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(!error.empty());
   // A null out_error is allowed.
-  CHECK(map_texture_create(kEngine, 2.0, 1, nullptr, nullptr, nullptr, 0,
+  CHECK(map_texture_create(kEngine, 2.0, 1, nullptr, nullptr, nullptr, 0, nullptr, nullptr,
                            nullptr) ==
         MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(ffi_wrappers::Calls().empty());
@@ -1962,7 +1962,7 @@ void FailedInitReportsMessage() {
   }
   char* message = nullptr;
   int64_t result = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
-                                      nullptr, 0, &message);
+                                      nullptr, 0, nullptr, nullptr, &message);
   ffi_wrappers::SetRuntimeCreateResult(MLN_STATUS_OK, "");
   std::string error = message == nullptr ? "" : message;
   map_texture_string_free(message);
@@ -2032,9 +2032,9 @@ void DisposeEngineMapsDisposesOnlyThatEngine() {
   int64_t first = CreateMap(/*style=*/false);
   // Without the reset of CreateMapWithRules, which the live map uses.
   int64_t second =
-      map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0, nullptr);
+      map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0, nullptr, nullptr, nullptr);
   int64_t other = map_texture_create(kOtherEngine, 2.0, 1, OnEvent, nullptr,
-                                     nullptr, 0, nullptr);
+                                     nullptr, 0, nullptr, nullptr, nullptr);
   CHECK(second > 0);
   CHECK(other > 0);
   map_texture::DisposeEngineMaps(kEngine);
@@ -2697,6 +2697,387 @@ void RunInPlatformScope(const std::function<void()>& work) {
 
 }  // namespace map_texture
 
+// Maps that own their camera (designs D235 to D237, D241, D243 and D247).
+
+map_texture_limits WideLimits() {
+  map_texture_limits limits{};
+  limits.min_zoom = 0;
+  limits.max_zoom = 22;
+  limits.min_pitch = 0;
+  limits.max_pitch = 85;
+  return limits;
+}
+
+// Creates a map that owns its camera, starting at `camera` within `limits`,
+// with a style that renders without network access.
+int64_t CreateOwnedMap(const map_texture_camera& camera,
+                       const map_texture_limits& limits = WideLimits(),
+                       bool buffer_target = false) {
+  FinishReleases();
+  ffi_wrappers::Reset();
+  {
+    std::lock_guard lock(events_mutex);
+    events.clear();
+  }
+  use_buffer_target = buffer_target;
+  char* message = nullptr;
+  int64_t handle = map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr,
+                                      nullptr, 0, &camera, &limits, &message);
+  use_buffer_target = false;
+  CHECK(handle > 0);
+  if (message != nullptr) std::fprintf(stderr, "%s\n", message);
+  map_texture_string_free(message);
+  map_texture_load_style_json(handle, NextStyle().c_str());
+  return handle;
+}
+
+map_texture_camera CenterCamera(double latitude, double longitude,
+                                double zoom) {
+  map_texture_camera camera{};
+  camera.fields = MAP_TEXTURE_CAMERA_CENTER | MAP_TEXTURE_CAMERA_ZOOM;
+  camera.latitude = latitude;
+  camera.longitude = longitude;
+  camera.zoom = zoom;
+  return camera;
+}
+
+std::vector<Event> TransitionEnds(int64_t request_id) {
+  std::vector<Event> ends;
+  for (const Event& event :
+       EventsOfType(MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED)) {
+    if (event.request_id == request_id) ends.push_back(event);
+  }
+  return ends;
+}
+
+size_t CallCount(const std::string& name) {
+  auto names = ffi_wrappers::CallNames(name);
+  return names.size();
+}
+
+void OwnedMapRendersItsInitialCamera() {
+  map_texture_camera camera = CenterCamera(10, 20, 5);
+  camera.fields |= MAP_TEXTURE_CAMERA_BEARING | MAP_TEXTURE_CAMERA_PITCH |
+                   MAP_TEXTURE_CAMERA_ROLL | MAP_TEXTURE_CAMERA_FIELD_OF_VIEW |
+                   MAP_TEXTURE_CAMERA_PADDING;
+  camera.bearing = 30;
+  camera.pitch = 40;
+  camera.roll = 10;
+  camera.field_of_view = 50;
+  camera.padding_top = 20;
+  int64_t handle = CreateOwnedMap(camera);
+  auto owner = last_owner.lock();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 200, 200, 2.0);
+  CHECK(WaitFor([] { return !ReadyEvents().empty(); }));
+  CHECK(Settled(handle, 1));
+  Event ready = ReadyEvents().back();
+  CHECK(std::abs(ready.latitude - 10) < 1e-6);
+  CHECK(std::abs(ready.longitude - 20) < 1e-6);
+  CHECK(std::abs(ready.zoom - 5) < 1e-9);
+  CHECK(std::abs(ready.view.pitch - 40) < 1e-6);
+  CHECK(std::abs(ready.view.roll - 10) < 1e-6);
+  CHECK(std::abs(ready.view.field_of_view - 50) < 1e-6);
+  CHECK(std::abs(ready.view.padding_top - 20) < 1e-9);
+  // The camera slot is never submitted: only the initial jump reached the FFI.
+  size_t updates = CallCount("mln_map_update_camera");
+  CHECK(updates == 1);
+  CHECK(map_texture_set_camera(handle, 0, 0, 3, 0, 1) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  owner->SetCamera({0, 0, 3, 0}, 2);
+  Sleep(300);
+  CHECK(CallCount("mln_map_update_camera") == updates);
+  CHECK(std::abs(owner->CameraForTesting()->zoom - 5) < 1e-9);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void OwnedMapRejectsInvalidStart() {
+  FinishReleases();
+  map_texture_camera camera = CenterCamera(0, 0, 3);
+  map_texture_limits limits = WideLimits();
+  limits.min_zoom = 10;
+  limits.max_zoom = 5;
+  char* message = nullptr;
+  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0,
+                           &camera, &limits, &message) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(message != nullptr && std::string(message) == "invalid camera limits");
+  map_texture_string_free(message);
+  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0,
+                           &camera, nullptr, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  camera.zoom = NAN;
+  limits = WideLimits();
+  CHECK(map_texture_create(kEngine, 2.0, 1, OnEvent, nullptr, nullptr, 0,
+                           &camera, &limits, nullptr) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+}
+
+void CameraCommandsAreRefusedWhenDartOwnsTheCamera() {
+  int64_t handle = CreateMap();
+  map_texture_camera camera = CenterCamera(0, 0, 3);
+  CHECK(map_texture_camera_command(handle, 1, 0, &camera, -1) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  CHECK(map_texture_cancel_transitions(handle) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  map_texture_gesture_options options{};
+  options.pan = 1;
+  CHECK(map_texture_gesture_create(handle, &options) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  map_texture_dispose(handle);
+}
+
+void JumpReportsCompleted() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0, 0, 3));
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 200, 200, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_camera target{};
+  target.fields = MAP_TEXTURE_CAMERA_ZOOM;
+  target.zoom = 7;
+  CHECK(map_texture_camera_command(handle, 11, 0, &target, -1) ==
+        MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(11).empty(); }));
+  CHECK(TransitionEnds(11).size() == 1);
+  CHECK(TransitionEnds(11).front().status == MAP_TEXTURE_OUTCOME_COMPLETED);
+  CHECK(WaitFor([] {
+    auto ready = ReadyEvents();
+    return !ready.empty() && ready.back().zoom == 7;
+  }));
+  // The command set only the zoom.
+  CHECK(std::abs(ReadyEvents().back().latitude) < 1e-9);
+  map_texture_dispose(handle);
+}
+
+void CancelledEaseReportsCancelled() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0, 0, 3));
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 200, 200, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_camera target{};
+  target.fields = MAP_TEXTURE_CAMERA_ZOOM;
+  target.zoom = 10;
+  CHECK(map_texture_camera_command(handle, 12, 1, &target, 5000) ==
+        MAP_TEXTURE_OK);
+  Sleep(200);
+  CHECK(TransitionEnds(12).empty());
+  CHECK(map_texture_cancel_transitions(handle) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(12).empty(); }));
+  CHECK(TransitionEnds(12).front().status == MAP_TEXTURE_OUTCOME_CANCELLED);
+  // A later ease of the same field replaces an earlier one.
+  CHECK(map_texture_camera_command(handle, 13, 1, &target, 5000) ==
+        MAP_TEXTURE_OK);
+  target.zoom = 4;
+  CHECK(map_texture_camera_command(handle, 14, 1, &target, 100) ==
+        MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(13).empty(); }));
+  CHECK(TransitionEnds(13).front().status == MAP_TEXTURE_OUTCOME_REPLACED);
+  CHECK(WaitFor([] { return !TransitionEnds(14).empty(); }));
+  CHECK(TransitionEnds(14).front().status == MAP_TEXTURE_OUTCOME_COMPLETED);
+  map_texture_dispose(handle);
+}
+
+void LimitsKeepJumpWithinBounds() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0.5, 0.5, 8));
+  auto owner = last_owner.lock();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 200, 200, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_limits limits = WideLimits();
+  limits.has_bounds = 1;
+  limits.south = 0;
+  limits.west = 0;
+  limits.north = 1;
+  limits.east = 1;
+  limits.max_pitch = 30;
+  CHECK(map_texture_set_limits(handle, &limits) == MAP_TEXTURE_OK);
+  map_texture_camera target = CenterCamera(30, 30, 8);
+  target.fields |= MAP_TEXTURE_CAMERA_PITCH;
+  target.pitch = 60;
+  CHECK(map_texture_camera_command(handle, 21, 0, &target, -1) ==
+        MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(21).empty(); }));
+  CHECK(Settled(handle, 1));
+  auto camera = owner->CameraForTesting();
+  CHECK(camera.has_value());
+  if (camera) {
+    CHECK(camera->latitude <= 1 + 1e-9 && camera->latitude >= -1e-9);
+    CHECK(camera->longitude <= 1 + 1e-9 && camera->longitude >= -1e-9);
+    CHECK(camera->pitch <= 30 + 1e-9);
+  }
+  // Invalid limits are refused.
+  limits.min_pitch = 40;
+  CHECK(map_texture_set_limits(handle, &limits) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void FitBoundsWithoutRoomIsCancelled() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0, 0, 3));
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 200, 200, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_fit fit{};
+  fit.south = -1;
+  fit.west = -1;
+  fit.north = 1;
+  fit.east = 1;
+  fit.fields = 1;
+  fit.padding_left = 150;
+  fit.padding_right = 150;
+  CHECK(map_texture_fit_bounds(handle, 31, 0, &fit, -1) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(31).empty(); }));
+  CHECK(TransitionEnds(31).front().status == MAP_TEXTURE_OUTCOME_CANCELLED);
+  fit.padding_left = 10;
+  fit.padding_right = 10;
+  CHECK(map_texture_fit_bounds(handle, 32, 0, &fit, -1) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] { return !TransitionEnds(32).empty(); }));
+  CHECK(TransitionEnds(32).front().status == MAP_TEXTURE_OUTCOME_COMPLETED);
+  map_texture_dispose(handle);
+}
+
+map_texture_gesture_result Gesture(int64_t handle,
+                                   map_texture_gesture_input input,
+                                   double time_ms) {
+  map_texture_gesture_result result{};
+  CHECK(map_texture_gesture_handle(handle, &input, time_ms, &result) ==
+        MAP_TEXTURE_OK);
+  return result;
+}
+
+map_texture_gesture_input Pointer(int32_t type, double x, double y) {
+  map_texture_gesture_input input{};
+  input.type = type;
+  input.pointer_id = 1;
+  input.pointer_kind = MLN_POINTER_KIND_TOUCH;
+  input.x = x;
+  input.y = y;
+  return input;
+}
+
+void DragMovesCameraByItsDistance() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0, 0, 4));
+  auto owner = last_owner.lock();
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 400, 400, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_gesture_options options{};
+  options.pan = options.zoom = options.rotate = options.pitch = 1;
+  options.glides = 0;
+  options.snap_to_north = 1;
+  options.double_tap_zoom = 1;
+  options.two_finger_tap_zoom = -1;
+  options.momentum_model = MLN_MOMENTUM_DECAY_MODEL_FRICTION;
+  options.half_life_ms = 346;
+  CHECK(map_texture_gesture_create(handle, &options) == MAP_TEXTURE_OK);
+  // One recognizer per map.
+  CHECK(map_texture_gesture_create(handle, &options) ==
+        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
+  size_t settled = EventsOfType(MAP_TEXTURE_EVENT_CAMERA_SETTLED).size();
+  Gesture(handle, Pointer(MLN_GESTURE_INPUT_POINTER_DOWN, 200, 200), 0);
+  for (int i = 1; i <= 10; ++i) {
+    Gesture(handle, Pointer(MLN_GESTURE_INPUT_POINTER_MOVE, 200 + 10 * i, 200),
+            16.0 * i);
+    Sleep(16);
+  }
+  map_texture_gesture_result up =
+      Gesture(handle, Pointer(MLN_GESTURE_INPUT_POINTER_UP, 300, 200), 176);
+  CHECK(up.handled == 1);
+  // No glide, and a pan is no tap.
+  for (int i = 0; i < up.event_count; ++i) {
+    CHECK(up.events[i].type != MLN_GESTURE_EVENT_TAP);
+  }
+  CHECK(WaitFor([settled] {
+    return EventsOfType(MAP_TEXTURE_EVENT_CAMERA_SETTLED).size() > settled;
+  }));
+  CHECK(Settled(handle, 1));
+  auto camera = owner->CameraForTesting();
+  CHECK(camera.has_value());
+  // The content moved 100 logical pixels to the east, so the center moved
+  // 100 pixels to the west, within 1 pixel.
+  double degrees_per_pixel = 360 / map_texture::WorldSize(4);
+  if (camera) {
+    CHECK(std::abs(camera->longitude - -100 * degrees_per_pixel) <
+          degrees_per_pixel);
+    CHECK(std::abs(camera->latitude) < degrees_per_pixel);
+  }
+  // Frames that a gesture moved report it.
+  CHECK(ReadyEvents().back().view.camera_source ==
+        MAP_TEXTURE_CAMERA_SOURCE_GESTURE);
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+void TapIsReportedByRecognizer() {
+  int64_t handle = CreateOwnedMap(CenterCamera(0, 0, 4));
+  SurfaceDart dart(handle);
+  map_texture_resize(handle, 400, 400, 2.0);
+  CHECK(Settled(handle, 1));
+  map_texture_gesture_options options{};
+  options.pan = options.zoom = options.rotate = options.pitch = 1;
+  options.momentum_model = MLN_MOMENTUM_DECAY_MODEL_CURVE;
+  CHECK(map_texture_gesture_create(handle, &options) == MAP_TEXTURE_OK);
+  Gesture(handle, Pointer(MLN_GESTURE_INPUT_POINTER_DOWN, 120, 80), 0);
+  map_texture_gesture_result up =
+      Gesture(handle, Pointer(MLN_GESTURE_INPUT_POINTER_UP, 120, 80), 50);
+  CHECK(up.event_count == 1);
+  if (up.event_count == 1) {
+    CHECK(up.events[0].type == MLN_GESTURE_EVENT_TAP);
+    CHECK(up.events[0].pointer_id == 1);
+    CHECK(up.events[0].x == 120 && up.events[0].y == 80);
+  }
+  map_texture_dispose(handle);
+}
+
+void FrameReportsItsMatrix() {
+  map_texture_camera camera = CenterCamera(10, 20, 4);
+  camera.fields |= MAP_TEXTURE_CAMERA_PITCH | MAP_TEXTURE_CAMERA_BEARING;
+  camera.pitch = 45;
+  camera.bearing = 30;
+  int64_t handle = CreateOwnedMap(camera, WideLimits(), true);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
+  auto projections = ffi_wrappers::RenderedProjections();
+  CHECK(!projections.empty());
+  map_texture_frame frame{};
+  CHECK(SelectNewest(handle, &frame) == MAP_TEXTURE_OK);
+  if (!projections.empty()) {
+    const mln_frame_projection& expected = projections.back();
+    const mln_vec4* columns[] = {&expected.matrix.x, &expected.matrix.y,
+                                 &expected.matrix.z, &expected.matrix.w};
+    for (int c = 0; c < 4; ++c) {
+      CHECK(frame.view.matrix[c * 4 + 0] == columns[c]->x);
+      CHECK(frame.view.matrix[c * 4 + 1] == columns[c]->y);
+      CHECK(frame.view.matrix[c * 4 + 2] == columns[c]->z);
+      CHECK(frame.view.matrix[c * 4 + 3] == columns[c]->w);
+    }
+    CHECK(frame.view.clip_depth_range ==
+          static_cast<int32_t>(expected.clip_depth_range));
+    // The ready event reports the same view.
+    CHECK(std::memcmp(ReadyEvents().back().view.matrix, frame.view.matrix,
+                      sizeof(frame.view.matrix)) == 0);
+  }
+  CHECK(frame.view.clip_depth_range == MLN_CLIP_DEPTH_RANGE_ZERO_TO_ONE);
+  CHECK(std::abs(frame.view.pitch - 45) < 1e-9);
+  CHECK(std::abs(frame.bearing - 30) < 1e-9);
+  CHECK(frame.view.map_update_generation > 0);
+  CHECK(frame.view.camera_source == MAP_TEXTURE_CAMERA_SOURCE_COMMAND);
+  // The matrix draws the center at the middle of the frame.
+  map_texture::RenderedView view{{10, 20, 4, 30, 45}, 100, 100, {}};
+  std::copy(std::begin(frame.view.matrix), std::end(frame.view.matrix),
+            view.matrix.begin());
+  auto center = map_texture::MatrixScreenPosition(
+      view.matrix, 100, 100, (20.0 + 180) / 360, map_texture::Mercator(10, 20));
+  CHECK(center.has_value());
+  if (center) {
+    CHECK(std::abs(center->x - 50) < 1e-6);
+    CHECK(std::abs(center->y - 50) < 1e-6);
+  }
+  map_texture_dispose(handle);
+}
+
 int main(int argc, char** argv) {
   struct Test {
     const char* name;
@@ -2808,6 +3189,17 @@ int main(int argc, char** argv) {
        OverlayWithTwoSourcesIsDrawnOnceBothExist},
       {"RejectedLayerJsonIsReportedAsRenderError",
        RejectedLayerJsonIsReportedAsRenderError},
+      {"OwnedMapRendersItsInitialCamera", OwnedMapRendersItsInitialCamera},
+      {"OwnedMapRejectsInvalidStart", OwnedMapRejectsInvalidStart},
+      {"CameraCommandsAreRefusedWhenDartOwnsTheCamera",
+       CameraCommandsAreRefusedWhenDartOwnsTheCamera},
+      {"JumpReportsCompleted", JumpReportsCompleted},
+      {"CancelledEaseReportsCancelled", CancelledEaseReportsCancelled},
+      {"LimitsKeepJumpWithinBounds", LimitsKeepJumpWithinBounds},
+      {"FitBoundsWithoutRoomIsCancelled", FitBoundsWithoutRoomIsCancelled},
+      {"DragMovesCameraByItsDistance", DragMovesCameraByItsDistance},
+      {"TapIsReportedByRecognizer", TapIsReportedByRecognizer},
+      {"FrameReportsItsMatrix", FrameReportsItsMatrix},
   };
   // A name as argument runs only the tests whose names contain it.
   const char* only = nullptr;

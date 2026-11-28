@@ -175,7 +175,7 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
                     Log.w(
                         "mapigrade",
                         "lib$LIBRARY.so isn't available for this device's ABIs " +
-                            "(${Build.SUPPORTED_ABIS.joinToString()}); MapigradeLayer.isSupported " +
+                            "(${Build.SUPPORTED_ABIS.joinToString()}); Mapigrade.isSupported " +
                             "is false",
                         e,
                     )

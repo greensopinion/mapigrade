@@ -4,7 +4,7 @@
 
 # Mapigrade
 
-Mapigrade is a Flutter plugin that renders MapLibre Native maps into a Flutter `Texture` widget, for use as the base layer of a `flutter_map` map.
+Mapigrade is a Flutter plugin that renders MapLibre Native maps into a Flutter `Texture` widget, as the base layer of a `flutter_map` map or as a map widget of its own.
 
 Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. Mapigrade also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
 
@@ -24,9 +24,20 @@ Mapigrade runs on macOS and iOS (arm64), and on Android (API level 29 or later, 
 
 Mapigrade is pre-1.0: the API can change between 0.x releases. We tested it on a MacBook Pro (M2 Max), an iPhone 15 Pro Max, an iPhone 13 and one Android device (Pixel 4a (5G)); see [docs/limitations.md](docs/limitations.md) for what isn't covered yet.
 
-Use Mapigrade in your app: [packages/flutter_mapigrade](packages/flutter_mapigrade/)
+Use Mapigrade in your app: [packages/flutter_mapigrade](packages/flutter_mapigrade/) or [packages/mapigrade](packages/mapigrade/); see Choosing a package.
 
 Try the demo: [packages/demo](packages/demo/)
+
+## Choosing a package
+
+Mapigrade has two packages. Both draw the same map, with the same styles, polylines, feature queries and feature state.
+
+- Use [`flutter_mapigrade`](packages/flutter_mapigrade/) if your app uses `flutter_map`. `MapigradeLayer` is the base layer of a `flutter_map` map: `flutter_map` handles the camera and the gestures, and its layers and plugins draw above the map. The map can't be pitched.
+- Use [`mapigrade`](packages/mapigrade/) if your app doesn't use `flutter_map`. `MapigradeMap` is a map widget of its own, with MapLibre's gestures and camera, including pitch. You move the camera with jumps, eases and flights, and place widgets on the map with `MapigradeMarkers`.
+
+`flutter_mapigrade` depends on `mapigrade`, so an app that uses both widgets depends on both packages.
+
+Other open-source Flutter packages that display MapLibre maps include [`maplibre_gl`](https://pub.dev/packages/maplibre_gl) and [`maplibre`](https://pub.dev/packages/maplibre).
 
 ## Documentation
 
@@ -40,7 +51,7 @@ Try the demo: [packages/demo](packages/demo/)
 ## Repository layout
 
 ```
-packages/mapigrade/            Flutter plugin: native code, map controller, polylines
+packages/mapigrade/            Flutter plugin: native code, MapigradeMap, map controller, polylines
 packages/flutter_mapigrade/    MapigradeLayer, the flutter_map layer
 packages/demo/                 demo app
 packages/test_harness/         integration tests and benchmarks

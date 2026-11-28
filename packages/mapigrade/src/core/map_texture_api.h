@@ -35,7 +35,113 @@ enum {
   MAP_TEXTURE_EVENT_FRAME_READY = 5,
   // The result of map_texture_query_rendered_features().
   MAP_TEXTURE_EVENT_QUERY_RESULT = 6,
+  // A camera command of map_texture_camera_command() or
+  // map_texture_fit_bounds() ended: `request_id` is the command's, and
+  // `status` its MAP_TEXTURE_OUTCOME_*.
+  MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED = 7,
+  // A map that owns its camera: no gesture, glide, snap or camera transition
+  // moves the camera any more. A frame shows the camera at rest once its
+  // `map_update_generation` is at least the event's.
+  MAP_TEXTURE_EVENT_CAMERA_SETTLED = 8,
 };
+
+// How a camera command ended; mln_camera_transition_outcome.
+enum {
+  MAP_TEXTURE_OUTCOME_COMPLETED = 0,
+  MAP_TEXTURE_OUTCOME_CANCELLED = 1,
+  MAP_TEXTURE_OUTCOME_CLOSED = 2,
+  MAP_TEXTURE_OUTCOME_REPLACED = 3,
+};
+
+// What moved the camera last before a frame; mln_camera_change_source.
+enum {
+  MAP_TEXTURE_CAMERA_SOURCE_COMMAND = 0,
+  MAP_TEXTURE_CAMERA_SOURCE_GESTURE = 1,
+  MAP_TEXTURE_CAMERA_SOURCE_MOMENTUM = 2,
+};
+
+// The fields of a map_texture_camera that a command sets; the bits of
+// mln_camera_option_field.
+#define MAP_TEXTURE_CAMERA_CENTER 1
+#define MAP_TEXTURE_CAMERA_ZOOM 2
+#define MAP_TEXTURE_CAMERA_BEARING 4
+#define MAP_TEXTURE_CAMERA_PITCH 8
+#define MAP_TEXTURE_CAMERA_CENTER_ALTITUDE 16
+#define MAP_TEXTURE_CAMERA_PADDING 32
+#define MAP_TEXTURE_CAMERA_ROLL 128
+#define MAP_TEXTURE_CAMERA_FIELD_OF_VIEW 256
+
+// A camera with the fields of mln_camera, in its conventions. The padding is
+// in logical pixels.
+typedef struct map_texture_camera {
+  int32_t fields;
+  double latitude;
+  double longitude;
+  double center_altitude;
+  double padding_top;
+  double padding_left;
+  double padding_bottom;
+  double padding_right;
+  double zoom;
+  double bearing;
+  double pitch;
+  double roll;
+  double field_of_view;
+} map_texture_camera;
+
+// The limits of a map that owns its camera; mln_bound_options. With
+// `has_bounds` zero the center isn't limited.
+typedef struct map_texture_limits {
+  double min_zoom;
+  double max_zoom;
+  double min_pitch;
+  double max_pitch;
+  int32_t has_bounds;
+  double south;
+  double west;
+  double north;
+  double east;
+} map_texture_limits;
+
+// The area and options of map_texture_fit_bounds(). `fields` has bit 1 for
+// the padding, 2 for the bearing and 4 for the pitch, as
+// mln_camera_fit_option_field.
+typedef struct map_texture_fit {
+  double south;
+  double west;
+  double north;
+  double east;
+  int32_t fields;
+  double padding_top;
+  double padding_left;
+  double padding_bottom;
+  double padding_right;
+  double bearing;
+  double pitch;
+} map_texture_fit;
+
+// The camera fields that a frame was rendered with besides the center, zoom
+// and bearing, the matrix it drew the map with, and what moved its camera.
+typedef struct map_texture_frame_view {
+  double pitch;
+  double center_altitude;
+  double padding_top;
+  double padding_left;
+  double padding_bottom;
+  double padding_right;
+  double roll;
+  double field_of_view;
+  // mln_frame_projection.matrix, column-major: the 16 doubles of columns x, y,
+  // z and w in order. All zero for a frame that rendered nothing.
+  double matrix[16];
+  // An mln_clip_depth_range.
+  int32_t clip_depth_range;
+  // A MAP_TEXTURE_CAMERA_SOURCE_*: the source of the last camera change that
+  // the runtime reported before the frame finished.
+  int32_t camera_source;
+  // mln_render_frame_result.map_update_generation.
+  int64_t map_update_generation;
+} map_texture_frame_view;
 
 // An event for Dart. The receiver frees it with map_texture_event_free().
 typedef struct map_texture_event {
@@ -74,6 +180,9 @@ typedef struct map_texture_event {
   // failure.
   int64_t request_id;
   int32_t status;
+  // Set for MAP_TEXTURE_EVENT_FRAME_DISPLAYED and MAP_TEXTURE_EVENT_FRAME_READY.
+  // For MAP_TEXTURE_EVENT_CAMERA_SETTLED, only `view.map_update_generation`.
+  map_texture_frame_view view;
 } map_texture_event;
 
 typedef void (*map_texture_event_callback)(map_texture_event* event);
@@ -92,6 +201,7 @@ typedef struct map_texture_frame {
   int32_t physical_width;
   int32_t physical_height;
   double scale_factor;
+  map_texture_frame_view view;
 } map_texture_frame;
 
 typedef struct map_texture_stats {
@@ -162,13 +272,20 @@ typedef struct map_texture_stats {
 // `header_strings` holds, for each of `rule_count` HTTP header rules, its URL
 // glob and `header_counts[i]` name and value pairs.
 //
+// With `initial_camera` null, Dart owns the camera and sets it with
+// map_texture_set_camera(). Otherwise the map owns its camera (design D235):
+// it starts at the fields of `initial_camera` that its `fields` sets, within
+// `limits` (which must then be non-null), and only camera commands and the
+// gesture recognizer move it; map_texture_set_camera() is then refused.
+//
 // Returns a handle (> 0) or a negative MAP_TEXTURE_ERROR_* value. On failure
 // `*out_error`, if non-null, is a message to free with
 // map_texture_string_free().
 MAP_TEXTURE_EXPORT int64_t map_texture_create(
     int64_t engine, double pixel_ratio, int32_t copy_free, map_texture_event_callback callback,
     const char* const* header_strings, const int32_t* header_counts,
-    int32_t rule_count, char** out_error);
+    int32_t rule_count, const map_texture_camera* initial_camera,
+    const map_texture_limits* limits, char** out_error);
 
 // Frees a string returned by map_texture_create().
 MAP_TEXTURE_EXPORT void map_texture_string_free(char* string);
@@ -200,13 +317,132 @@ MAP_TEXTURE_EXPORT int32_t map_texture_load_style_url(int64_t handle,
                                                       const char* url);
 MAP_TEXTURE_EXPORT int32_t map_texture_load_style_json(int64_t handle,
                                                        const char* json);
-// Sets the camera. `seq` identifies the update; frames rendered with it
-// report it.
+// Sets the camera of a map whose camera Dart owns. `seq` identifies the
+// update; frames rendered with it report it. Returns
+// MAP_TEXTURE_ERROR_INVALID_ARGUMENT for a map that owns its camera.
 MAP_TEXTURE_EXPORT int32_t map_texture_set_camera(int64_t handle,
                                                   double latitude,
                                                   double longitude,
                                                   double zoom, double bearing,
                                                   int64_t seq);
+
+// Camera commands of a map that owns its camera (design D236), ordered with
+// the other commands. Each returns MAP_TEXTURE_ERROR_INVALID_ARGUMENT for a
+// map whose camera Dart owns, or for invalid arguments.
+//
+// Moves the camera to the fields of `camera` that its `fields` sets: `mode`
+// 0 jumps, 1 eases and 2 flies, over `duration_ms`, or MapLibre's duration
+// when it is negative. The command's end is reported as one
+// MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED with `request_id`.
+MAP_TEXTURE_EXPORT int32_t map_texture_camera_command(
+    int64_t handle, int64_t request_id, int32_t mode,
+    const map_texture_camera* camera, double duration_ms);
+// Moves the camera to fit `fit`'s area, as map_texture_camera_command() does.
+// Padding that leaves no room for the area ends the command as cancelled.
+MAP_TEXTURE_EXPORT int32_t map_texture_fit_bounds(int64_t handle,
+                                                  int64_t request_id,
+                                                  int32_t mode,
+                                                  const map_texture_fit* fit,
+                                                  double duration_ms);
+// Stops every running camera transition; each ends as cancelled.
+MAP_TEXTURE_EXPORT int32_t map_texture_cancel_transitions(int64_t handle);
+// Replaces the camera limits; a camera outside them moves inside.
+MAP_TEXTURE_EXPORT int32_t map_texture_set_limits(
+    int64_t handle, const map_texture_limits* limits);
+
+// The gesture recognizer of a map that owns its camera (designs D237 and
+// D240), which moves the camera with camera commands of its own. Any thread
+// may call these, and none waits for the map thread. A map has at most one
+// recognizer, from map_texture_gesture_create() until the map is disposed.
+
+// The options of the recognizer. A part that isn't enabled doesn't move the
+// camera. `momentum_model` is an mln_momentum_decay_model: with
+// MLN_MOMENTUM_DECAY_MODEL_FRICTION every part glides with a half-life of
+// `half_life_ms`, and with MLN_MOMENTUM_DECAY_MODEL_CURVE with Android's
+// fling defaults. A zoom of 0 for `double_tap_zoom` or `two_finger_tap_zoom`
+// leaves those taps to Dart.
+typedef struct map_texture_gesture_options {
+  int32_t pan;
+  int32_t zoom;
+  int32_t rotate;
+  int32_t pitch;
+  int32_t glides;
+  int32_t snap_to_north;
+  double double_tap_zoom;
+  double two_finger_tap_zoom;
+  int32_t momentum_model;
+  double half_life_ms;
+} map_texture_gesture_options;
+
+// One mln_gesture_input, flattened. `type` is an mln_gesture_input_type.
+// POINTER_DOWN uses `pointer_id`, `pointer_kind`, `x`, `y` and `modes`;
+// POINTER_MOVE, POINTER_UP and POINTER_CANCEL `pointer_id`, `x` and `y`; MODES
+// `modes`; DELTA `x`, `y` (its position), `discrete`, `pan_x`, `pan_y`,
+// `zoom`, `bearing` and `pitch`; PINCH `x`, `y` (its center), `scale`,
+// `rotation` and `phase`. Positions are logical pixels from the map's
+// top-left corner.
+typedef struct map_texture_gesture_input {
+  int32_t type;
+  int32_t pointer_id;
+  int32_t pointer_kind;
+  int32_t modes;
+  double x;
+  double y;
+  int32_t discrete;
+  double pan_x;
+  double pan_y;
+  double zoom;
+  double bearing;
+  double pitch;
+  double scale;
+  double rotation;
+  int32_t phase;
+} map_texture_gesture_input;
+
+// One mln_gesture_event, flattened. `type` is an mln_gesture_event_type. Taps
+// and long presses set `pointer_id`, `x` and `y`; notches `axis`, `kind` and
+// `value`.
+typedef struct map_texture_gesture_event {
+  int32_t type;
+  int32_t pointer_id;
+  double x;
+  double y;
+  int32_t axis;
+  int32_t kind;
+  double value;
+} map_texture_gesture_event;
+
+// An mln_gesture_result, flattened.
+typedef struct map_texture_gesture_result {
+  int32_t handled;
+  // An mln_gesture_next_tick.
+  int32_t next_tick;
+  double next_tick_ms;
+  int32_t box_zoom_active;
+  double box_min_x;
+  double box_min_y;
+  double box_max_x;
+  double box_max_y;
+  int32_t event_count;
+  map_texture_gesture_event events[4];
+} map_texture_gesture_result;
+
+// Creates the map's recognizer with `options`. Returns
+// MAP_TEXTURE_ERROR_INVALID_ARGUMENT for a map whose camera Dart owns, for a
+// map that has one already, or for options that the FFI refuses.
+MAP_TEXTURE_EXPORT int32_t map_texture_gesture_create(
+    int64_t handle, const map_texture_gesture_options* options);
+// Changes the recognizer's options from the next input on.
+MAP_TEXTURE_EXPORT int32_t map_texture_gesture_set_options(
+    int64_t handle, const map_texture_gesture_options* options);
+// Passes one input at `time_ms`, on a clock that only goes forward, to the
+// recognizer and writes its result.
+MAP_TEXTURE_EXPORT int32_t map_texture_gesture_handle(
+    int64_t handle, const map_texture_gesture_input* input, double time_ms,
+    map_texture_gesture_result* out_result);
+// Ticks the recognizer at `time_ms`, when the last result asked for it.
+MAP_TEXTURE_EXPORT int32_t map_texture_gesture_tick(
+    int64_t handle, double time_ms, map_texture_gesture_result* out_result);
 // Sets the widget's logical size and device pixel ratio.
 MAP_TEXTURE_EXPORT int32_t map_texture_resize(int64_t handle,
                                               double logical_width,
@@ -307,8 +543,9 @@ MAP_TEXTURE_EXPORT char* map_texture_process_thread_names_for_testing(void);
 // 3 critical (NSProcessInfoThermalState), or -1 if unknown.
 MAP_TEXTURE_EXPORT int32_t map_texture_thermal_state(void);
 
-// The process's physical memory footprint in bytes (the value Xcode's memory
-// gauge shows), for measurements, or -1 if unknown.
+// The process's memory use in bytes, for measurements, or -1 if unknown: on
+// macOS and iOS the physical memory footprint (the value Xcode's memory gauge
+// shows), on Android the proportional set size (PSS).
 MAP_TEXTURE_EXPORT int64_t map_texture_memory_footprint(void);
 
 // For tests: how many display buffers released since the last reset are still
@@ -329,10 +566,10 @@ MAP_TEXTURE_EXPORT void map_texture_set_render_ahead_for_testing(int32_t mode);
 // map has finished. Returns 1, or 0 if that takes longer than `timeout_ms`.
 MAP_TEXTURE_EXPORT int32_t map_texture_wait_for_releases_for_testing(
     int64_t timeout_ms);
-// For tests: pause (non-zero) or resume (zero) rendering of every map, as the
-// platform does when the application enters the background or foreground.
+// For tests: pauses (non-zero) or resumes (zero) rendering of every map, as
+// the platform does when the application enters the background or foreground.
 MAP_TEXTURE_EXPORT void map_texture_set_paused_for_testing(int32_t paused);
-// For tests: ask every map to release cached renderer resources, as the
+// For tests: asks every map to release cached renderer resources, as the
 // platform does after a memory warning.
 MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
 // For tests, on Android: with `restore` zero, releases the image readers the
@@ -340,6 +577,15 @@ MAP_TEXTURE_EXPORT void map_texture_reduce_memory_use_for_testing(void);
 // non-zero, creates them again, as it does when the activity starts. Call on
 // the platform thread. Does nothing on macOS and iOS.
 MAP_TEXTURE_EXPORT void map_texture_trim_surfaces_for_testing(int32_t restore);
+// For tests: writes to `out_x` and `out_y` the logical position at which
+// MapLibre's projection of the view of the last frame the map rendered places
+// the coordinate. Returns MAP_TEXTURE_ERROR_INVALID_ARGUMENT before the first
+// frame or when the projection fails.
+MAP_TEXTURE_EXPORT int32_t map_texture_project_for_testing(int64_t handle,
+                                                           double latitude,
+                                                           double longitude,
+                                                           double* out_x,
+                                                           double* out_y);
 // For tests: 1 if the map is at rest, so that it renders no other frame
 // without new input, as the map thread reports at the end of its next loop
 // iteration; 0 if not, and MAP_TEXTURE_ERROR_DISPOSED for a disposed map.

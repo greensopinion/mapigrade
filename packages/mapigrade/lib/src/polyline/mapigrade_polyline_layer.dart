@@ -10,21 +10,22 @@ import 'polyline_translation.dart';
 /// and prepared on a background isolate.
 const polylineBackgroundPointThreshold = 20000;
 
-/// Polylines that the map of the `MapigradeLayer` above it draws among the
-/// style's own layers.
+/// Polylines that the map of the map widget, such as `MapigradeMap`, above it
+/// draws among the style's own layers.
 ///
-/// Place it in the `children` of a `MapigradeLayer`, at any depth below a
-/// child. It draws nothing in Flutter. The map draws the polylines in its
-/// frames, so they are exactly where the frame draws their coordinates and
-/// below every Flutter child of the `MapigradeLayer`, whatever the polyline
-/// layer's position in `children`. [placement] sets where they go among the
-/// style's layers. Polyline layers with the same placement are drawn in the
-/// order of `children`: a later one is drawn above an earlier one.
+/// Place it in the `children` of a map widget, such as `MapigradeMap`, at
+/// any depth below a child. It draws nothing in Flutter. The map draws the
+/// polylines in its frames, so they are exactly where the frame draws their
+/// coordinates and below every Flutter child of that widget, whatever the
+/// polyline layer's position in `children`. [placement] sets where they go
+/// among the style's layers. Polyline layers with the same placement are drawn
+/// in the order of `children`: a later one is drawn above an earlier one.
 ///
-/// A polyline layer that isn't below a `MapigradeLayer` fails an assertion in
-/// debug builds and draws nothing in release builds. While the map doesn't
-/// exist or couldn't be created, the polyline layer does nothing; when the map
-/// is created, it draws the polylines that the layer has then.
+/// A polyline layer that isn't below a map widget
+/// fails an assertion in debug builds and draws nothing in release builds.
+/// While the map doesn't exist or couldn't be created, the polyline layer does
+/// nothing; when the map is created, it draws the polylines that the layer has
+/// then.
 ///
 /// The map doesn't hit test polylines. Translucent polylines that overlap
 /// are darker where they overlap, because MapLibre blends each polyline with
@@ -78,7 +79,8 @@ class _MapigradePolylineLayerState extends State<MapigradePolylineLayer> {
     final host = OverlayHostScope.maybeOf(context);
     assert(
       host != null,
-      'a MapigradePolylineLayer must be below a MapigradeLayer',
+      'a MapigradePolylineLayer must be below a map widget, such as '
+      'MapigradeMap',
     );
     _registration = host?.register(
       childIndex: OverlayChildIndex.of(context, listen: false),

@@ -1,7 +1,5 @@
 import 'package:flutter/widgets.dart';
 import 'package:mapigrade/mapigrade.dart';
-// ignore: implementation_imports
-import 'package:mapigrade/src/integration.dart';
 
 import 'layer_alignment.dart';
 import 'map_texture_layer.dart';
@@ -36,25 +34,24 @@ final class MapigradeLayer extends StatelessWidget {
        );
 
   /// Whether the layer can create a map in this process: false when the
-  /// package's native library isn't available, for example on an Android
-  /// device without an arm64 ABI. When it is false, place another layer, such
-  /// as a `TileLayer`, in place of this one; this layer would report a
+  /// package's native library isn't available, for example on web or on an
+  /// Android device with none of the ABIs `arm64-v8a`, `armeabi-v7a` and
+  /// `x86_64`. When it is false, place another layer, such as a `TileLayer`,
+  /// in place of this one; this layer would report a
   /// [MapigradeCreateException] and draw nothing.
-  static bool get isSupported => nativeLibraryAvailable;
+  static bool get isSupported => Mapigrade.isSupported;
 
   /// The maximum size in bytes of the tile cache for maps created after it is
   /// set; 50 MiB by default. Each map evicts from the shared cache file to its
   /// own maximum size; after a reduction, the cache reaches the new maximum
   /// size as the map stores new tiles. The server's cache headers determine
-  /// freshness. A negative value throws an [ArgumentError].
-  static int get maximumCacheSizeBytes => _maximumCacheSizeBytes;
+  /// freshness. A negative value throws an [ArgumentError]. The value is
+  /// `mapigrade`'s `Mapigrade.maximumCacheSizeBytes`, which applies to every
+  /// map of the process.
+  static int get maximumCacheSizeBytes => Mapigrade.maximumCacheSizeBytes;
 
-  static set maximumCacheSizeBytes(int bytes) {
-    MapTextureController.setMaximumCacheSize(bytes);
-    _maximumCacheSizeBytes = bytes;
-  }
-
-  static int _maximumCacheSizeBytes = 50 * 1024 * 1024;
+  static set maximumCacheSizeBytes(int bytes) =>
+      Mapigrade.maximumCacheSizeBytes = bytes;
 
   /// The URL of the style.
   ///

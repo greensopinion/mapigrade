@@ -63,7 +63,6 @@ class RenderTarget {
   virtual BufferRenderTarget* AsBufferTarget() { return nullptr; }
   virtual SurfaceRenderTarget* AsSurfaceTarget() { return nullptr; }
 
-  // The number of display slots.
   virtual int slot_count() const { return 1; }
 
   // The id of the registered Flutter texture of `slot`.

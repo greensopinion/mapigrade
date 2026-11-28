@@ -1,6 +1,6 @@
-/// A failure of a `MapigradeLayer`'s map, passed to its `onError`, or for a
-/// [MapigradeQueryException], to the `Future` of the failed query. Later versions
-/// may add subclasses.
+/// A failure of a map widget's map, passed to its `onError`, or for a
+/// [MapigradeQueryException], to the `Future` of the failed query. Later
+/// versions may add subclasses.
 abstract final class MapigradeException implements Exception {
   /// A failure with [message].
   const MapigradeException(this.message);

@@ -1,9 +1,26 @@
-/// Renders a MapLibre Native map into a Flutter `Texture` on the GPU, without
-/// `flutter_map`: the types that a map widget, such as `MapigradeLayer` of
-/// `flutter_mapigrade`, takes and reports, and [MapigradePolylineLayer].
+/// Renders a MapLibre Native map into a Flutter `Texture` on the GPU:
+/// `MapigradeMap`, a map widget with MapLibre's gestures and camera, the types
+/// that map widgets take and report, and [MapigradePolylineLayer].
 library;
 
 export 'src/http_header_rule.dart' show HttpHeaderRule;
+export 'src/map/camera.dart'
+    show
+        CameraChange,
+        CameraChangeSource,
+        CameraLimits,
+        CameraTransitionOutcome,
+        GeoBounds,
+        MapigradeCamera;
+export 'src/map/gestures/mapigrade_gestures.dart'
+    show MapigradeGestures, MapigradeTap;
+export 'src/map/mapigrade.dart' show Mapigrade;
+export 'src/map/mapigrade_camera_controller.dart'
+    show MapigradeCameraController;
+export 'src/map/mapigrade_frame.dart' show MapigradeFrame;
+export 'src/map/mapigrade_map.dart' show MapigradeMap;
+export 'src/map/markers.dart'
+    show MapigradeMarker, MapigradeMarkers, MarkerAlignment;
 export 'src/mapigrade_controller.dart' show MapigradeController;
 export 'src/mapigrade_exception.dart'
     show

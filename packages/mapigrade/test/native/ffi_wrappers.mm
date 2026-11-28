@@ -345,6 +345,14 @@ mln_status test_mln_runtime_create_map(mln_runtime runtime,
                                 out_diagnostic);
 }
 
+mln_status test_mln_map_update_camera(mln_map map,
+                                      const mln_camera_update* update,
+                                      const mln_completion* completion,
+                                      mln_diagnostic* out_diagnostic) {
+  Record("mln_map_update_camera");
+  return mln_map_update_camera(map, update, completion, out_diagnostic);
+}
+
 mln_status test_mln_map_set_style_url(mln_map map, mln_buffer_view url,
                                       const mln_completion* completion,
                                       mln_diagnostic* out_diagnostic) {

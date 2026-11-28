@@ -18,11 +18,12 @@ const _Values _zero = (
 
 final _clock = Stopwatch()..start();
 
-/// Reads the frame counts and render time of the map of a `MapigradeLayer`.
+/// Reads the frame counts and render time of the map of a map widget, such as
+/// `MapigradeMap`.
 ///
-/// Create one object for each layer and pass it to the layer as `metrics`;
-/// when two layers are given the same object, it reports the map of the layer
-/// that was given it last. Call [snapshot] to read the values, for example
+/// Create one object for each map widget and pass it to the widget as
+/// `metrics`; when two widgets are given the same object, it reports the map
+/// of the widget that was given it last. Call [snapshot] to read the values, for example
 /// once per second, and compute rates from two snapshots.
 ///
 /// The values are those of one map, from the map's creation. Before the layer

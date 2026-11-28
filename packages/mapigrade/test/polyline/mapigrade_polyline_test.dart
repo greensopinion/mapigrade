@@ -1,4 +1,3 @@
-// Task 2.2 of the add-mapigrade-polyline-layer change.
 import 'dart:ui';
 
 import 'package:mapigrade/src/polyline/mapigrade_polyline.dart';

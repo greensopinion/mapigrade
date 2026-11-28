@@ -94,11 +94,11 @@ Alternative: rebuild a `Stack` of `Positioned` children each frame, as flutter_m
 
 ### D243. Camera streams from frames and camera events
 
-The map thread records the source of each FFI camera event and the snapshot generation it applies to. Each published frame carries the source of the last camera change it includes. `cameraChanges` emits a `CameraChange` when the displayed frame's camera differs from the previous displayed frame's.
+The map thread records the source of each FFI camera event. Each published frame carries the source of the last camera event that the runtime delivered before the frame's result was handled. Events carry snapshot generations and frame results render update generations, so the source can lag by one frame when it changes. `cameraChanges` emits a `CameraChange` when the displayed frame's camera differs from the previous displayed frame's.
 
 The rest stream emits when all of these hold:
 
-- an FFI camera-did-change event that isn't animated has arrived;
+- after an FFI camera event, the map snapshot shows no transition and no gesture in progress, which the map thread reports as an event with the snapshot's latest render update generation (mln-rs ends every command, eased ones too, with a did-change event that carries the command's mode, so an event's mode can't tell that the camera is at rest);
 - no pointer is down on the map;
 - the recognizer asks for no tick;
 - a frame with that camera has been displayed.

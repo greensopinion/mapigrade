@@ -6,6 +6,8 @@ library;
 export 'camera_projection.dart' show ViewCamera;
 export 'texture/map_texture_controller.dart'
     show
+        CameraSettled,
+        CameraTransitionEnded,
         FrameCamera,
         LoadingFailed,
         MapCamera,
@@ -17,6 +19,9 @@ export 'texture/map_texture_controller.dart'
         MapTextureStats,
         RenderError,
         StyleLoaded;
+export 'map/mapigrade_frame.dart' show MapigradeFrameInternals;
+export 'map/mapigrade_map.dart' show MapigradeMapState;
+export 'map/markers.dart' show RenderMapigradeMarkers;
 export 'texture/map_texture_view.dart' show MapTextureView;
 export 'texture/native_library.dart' show nativeLibraryAvailableOverride;
 export 'texture/test_hooks.dart'

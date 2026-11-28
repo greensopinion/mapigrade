@@ -1,5 +1,5 @@
 name: mapigrade
-description: "Renders a MapLibre Native map into a Flutter Texture on the GPU, through MapLibre Native FFI, without flutter_map."
+description: "Renders a MapLibre Native map into a Flutter Texture on the GPU, through MapLibre Native FFI, with a map widget whose camera MapLibre owns."
 version: 0.1.0
 repository: https://github.com/greensopinion/mapigrade
 issue_tracker: https://github.com/greensopinion/mapigrade/issues

@@ -1,4 +1,5 @@
-// Unit tests for CommandQueue, BufferState, RenderGate and the projection.
+// Unit tests for CommandQueue, BufferState, RenderGate, the projection, the
+// overlay placement and layer plans, and the feature state store.
 #include <atomic>
 #include <cmath>
 #include <chrono>
@@ -557,7 +558,7 @@ void PauseWithoutRenderReturnsAtOnce() {
 }
 
 // Expected values are those of `mercator` and `screenPosition` in
-// lib/src/layer/camera_projection.dart for the same inputs.
+// lib/src/camera_projection.dart for the same inputs.
 struct ProjectionCase {
   Camera camera;
   double width;

@@ -53,6 +53,15 @@ struct RenderedQuery {
   std::optional<std::string> filter;
 };
 
+// The start of a map that owns its camera (design D235): the fields of
+// `camera` that `fields` sets, as mln_camera_option_field bits, and the
+// limits.
+struct OwnedCamera {
+  Camera camera;
+  uint32_t fields = 0;
+  CameraLimits limits;
+};
+
 class MapTexture : public std::enable_shared_from_this<MapTexture> {
  public:
   // Creates the platform render target with the textures of the engine of
@@ -60,13 +69,15 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // created the runtime and map. With `copy_free`, the session renders
   // directly into the display buffers. With `maximum_cache_size`, the maximum
   // size in bytes of the runtime's tile cache is that value; otherwise it is
-  // MapLibre's default.
+  // MapLibre's default. With `owned_camera`, the map owns its camera and
+  // starts at it; otherwise Dart owns the camera.
   // Returns null on failure and sets `out_error`.
   static std::shared_ptr<MapTexture> Create(
       int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
       std::optional<uint64_t> maximum_cache_size,
       std::vector<HttpHeaderRule> header_rules,
-      map_texture_event_callback callback, std::string* out_error);
+      map_texture_event_callback callback, std::string* out_error,
+      std::optional<OwnedCamera> owned_camera = std::nullopt);
 
   ~MapTexture();
 
@@ -77,8 +88,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   int slot_count() const;
   int64_t texture_id(int slot) const;
 
+  // Whether the map owns its camera (design D235).
+  bool owns_camera() const { return owned_camera_.has_value(); }
+
   // Commands. Any thread; they queue work and wake the map thread.
   void LoadStyleUrl(std::string url);
+  // A camera command of a map that owns its camera (design D236).
+  void SubmitCameraCommand(const CameraCommand& command);
   void LoadStyleJson(std::string json);
   // `seq` is the camera's sequence number.
   void SetCamera(const Camera& camera, int64_t seq);
@@ -105,6 +121,20 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
                         std::vector<int32_t> layer_sources, Placement placement,
                         OrderKey order);
   void OverlayRemove(int64_t id);
+
+  // The gesture recognizer (designs D237 and D240), on any thread. Each
+  // returns the FFI's status. Create fails with MLN_STATUS_INVALID_STATE when
+  // the map has a recognizer, or doesn't own its camera; the others fail with
+  // it when the map has none.
+  mln_status GestureCreate(const mln_gesture_options& options,
+                           std::string* out_error);
+  mln_status GestureSetOptions(const mln_gesture_options& options);
+  mln_status GestureHandle(const mln_gesture_input& input, double time_ms,
+                           mln_gesture_result* out_result);
+  mln_status GestureTick(double time_ms, mln_gesture_result* out_result);
+
+  // For tests, any thread: the map's camera as of the last command that ran.
+  std::optional<Camera> CameraForTesting();
 
   // Any thread except the map thread. While paused, the map thread submits no
   // GPU work; pausing returns after a render in progress has ended. Resuming
@@ -133,7 +163,6 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // are then unregistered on the platform thread (see FinishReleases).
   void Dispose();
 
-  // Whether Dispose() has been called.
   bool disposed() const { return disposed_.load(); }
 
   // The release thread: waits until the map thread has stopped.
@@ -173,9 +202,18 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
 
   map_texture_stats stats();
 
+  // Any thread: reports the end of the camera command `request_id`, as a
+  // MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED with the MAP_TEXTURE_OUTCOME_*
+  // `outcome`. The commands' end handlers call it.
+  void ReportTransitionEnded(int64_t request_id, int32_t outcome);
+
   // For tests: the view of the last frame the session rendered, or nothing
   // before the first.
   std::optional<RenderedView> LastRenderedViewForTesting();
+  // For tests, any thread: the position at which MapLibre's projection of the
+  // last rendered frame's view places the coordinate, or nothing.
+  std::optional<ScreenPoint> ProjectForTesting(double latitude,
+                                               double longitude);
   // For tests: the frame in `slot`, or the last frame that was in it.
   FrameInfo SlotFrameForTesting(int slot) { return buffers_.info(slot); }
   // For tests, any thread: the style's layers in style order, as
@@ -195,7 +233,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
              std::optional<uint64_t> maximum_cache_size,
              std::vector<HttpHeaderRule> header_rules,
-             map_texture_event_callback callback);
+             map_texture_event_callback callback,
+             std::optional<OwnedCamera> owned_camera);
 
   bool Start(bool copy_free, std::string* out_error);
   void Run();
@@ -284,6 +323,14 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // services the session until it completes.
   void EndDemands();
   void ApplyCamera();
+  // Map thread: submits a camera command of a map that owns its camera.
+  void ApplyCameraCommand(const CameraCommand& command);
+  // Map thread, for a map that owns its camera: applies the initial camera
+  // and limits. Returns false and sets init_error_ on failure.
+  bool ApplyOwnedCamera();
+  // Map thread: after a camera event, reports MAP_TEXTURE_EVENT_CAMERA_SETTLED
+  // once nothing moves the camera (design D243).
+  void CheckSettled();
   // Map thread: waits until the completion of every submitted camera command
   // has run.
   void WaitForCamera();
@@ -381,6 +428,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   const int64_t engine_;
   const double initial_pixel_ratio_;
   const std::optional<uint64_t> maximum_cache_size_;
+  const std::optional<OwnedCamera> owned_camera_;
 
   // Fixed after the constructor. The runtime copies them into its native
   // header rules.
@@ -432,6 +480,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // for LastRenderedViewForTesting().
   std::mutex rendered_view_mutex_;
   std::optional<RenderedView> rendered_view_;
+  std::optional<mln_map_view> rendered_mln_view_;
   // Map thread: frame results with the disposition RENDERED.
   uint64_t rendered_results_ = 0;
   // Queries that the map thread hasn't run yet, in the order of the calls.
@@ -583,7 +632,24 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Map thread: the acquired frame that each display slot holds, for a target
   // that renders into the buffers.
   std::array<mln_acquired_frame, kMaxBufferCount> held_frames_{};
+
+  // Camera events of a map that owns its camera (design D243): the source of
+  // the last camera change the runtime reported (OnEvents), the events
+  // reported, the events the map thread has seen, and whether the map thread
+  // waits for the camera to settle.
+  std::atomic<int32_t> last_camera_source_{0};
+  std::atomic<uint64_t> camera_events_{0};
+  uint64_t camera_events_seen_ = 0;
+  bool settle_pending_ = false;
+
+  // The gesture recognizer, or MLN_HANDLE_NULL.
+  std::mutex recognizer_mutex_;
+  mln_gesture_recognizer recognizer_ = MLN_HANDLE_NULL;
 };
+
+// Writes the camera fields beyond the center, zoom and bearing, the matrix,
+// the camera source and the map update generation of `info` to `out`.
+void FillFrameView(const FrameInfo& info, map_texture_frame_view* out);
 
 // Pauses or resumes every live map, and maps created while paused start
 // paused. The platform calls this when the application can't use the GPU, for

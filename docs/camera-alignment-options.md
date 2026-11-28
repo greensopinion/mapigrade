@@ -1,6 +1,6 @@
 # Map and overlay alignment during camera changes: options
 
-This document describes the alignment problem that Stage 3 measured (flutter-map-layer change) and the options for the Stage 3 decision. The measurements are in `benchmarks.md` (Alignment during camera changes). Logical pixels are abbreviated px.
+This document describes the alignment problem that Stage 3 measured (flutter-map-layer change) and the options for the Stage 3 decision. The measurements are in `benchmarks.md` at commit `c40d6aa` (Alignment during camera changes). Logical pixels are abbreviated px.
 
 Decision (2026-10-11): option 1, accept the current behavior, with option 5, camera prediction, as the next experiment. The reasons and the criteria for the experiment are in the change's design (`openspec/changes/archive/2026-10-11-flutter-map-layer/design.md`, Results and decision).
 
@@ -83,7 +83,7 @@ Send MapLibre the camera that `flutter_map` is expected to have when the map fra
 - Strips: depend on whether the transform stays, and how far it then moves the frame.
 - Work: small. The alignment benchmark measures the result directly.
 - Measured (camera-prediction change, 2026-10-11), without the transform, with leads of 1 to 3 refresh intervals. With a lead of 1, pans at 1,000 px/s had a p50 error of 0 or 8.33 px on the Mac and 8.33 px on the iPhone, with the map lagging by 4.2–7.9 px on average and no strips; after abrupt stops and reversals the map ran ahead by 7–8 px and 22–25 px. A lead of 2 had a p50 error of 0.02 px on the iPhone but felt worse in a manual check. In the manual check on both devices a lead of 1 felt best; the overlays floated only while a fling decelerated.
-- Decision (2026-10-11): make a lead of 1 the default. Results in `benchmarks.md`; the decision in the camera-prediction change's design. The camera-prediction-default change made `CameraAlignment.prediction()` the layer's default, and the remove-camera-transform change removed `CameraAlignment.transform`, which selected the behavior of option 1. `CameraAlignment.none` selects that of option 3.
+- Decision (2026-10-11): make a lead of 1 the default. Results in `benchmarks.md` at commit `c40d6aa`; the decision in the camera-prediction change's design. The camera-prediction-default change made `CameraAlignment.prediction()` the layer's default, and the remove-camera-transform change removed `CameraAlignment.transform`, which selected the behavior of option 1. `CameraAlignment.none` selects that of option 3.
 
 ### 6. One Flutter texture per display buffer
 
@@ -140,5 +140,5 @@ The android-layer-children-alignment change brought children to Android: six dis
 
 The synchronous-frame-choice change made the map choose its newest finished frame in each Flutter frame that Dart builds, and return that frame's camera (designs D139 to D141). On 2026-10-19 the user compared release builds of the demo on the Pixel 4a (5G), with the route and the pins as children, before the change (commit `f3a80bb`) and after it: pans, flings and stops.
 
-- Smoothness: the build before the change stuttered during pans; the build after the change didn't. The benchmark agrees: the longest displayed map frame interval decreased from 137–203 ms to 45–47 ms (`benchmarks.md`, "Choice of the newest finished frame").
+- Smoothness: the build before the change stuttered during pans; the build after the change didn't. The benchmark agrees: the longest displayed map frame interval decreased from 137–203 ms to 45–47 ms (`benchmarks.md` at commit `c40d6aa`, "Choice of the newest finished frame").
 - Alignment: with the build after the change, the route and the pins stayed on the map.

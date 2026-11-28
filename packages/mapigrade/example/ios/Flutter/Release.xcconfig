@@ -1,0 +1,5 @@
+#include "Generated.xcconfig"
+
+// MapLibre Native FFI is built for arm64 only (ios-arm64-metal and
+// ios-simulator-arm64-metal), so the simulator build leaves out x86_64.
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64

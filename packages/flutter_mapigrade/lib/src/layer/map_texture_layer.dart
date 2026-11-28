@@ -266,7 +266,9 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
         }
       case RenderError(:final message):
         _report(MapigradeRenderException(message));
-      case MapIdle():
+      // A layer's map doesn't own its camera, so it reports no camera
+      // events.
+      case MapIdle() || CameraTransitionEnded() || CameraSettled():
         break;
     }
   }

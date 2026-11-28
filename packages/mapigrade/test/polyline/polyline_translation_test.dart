@@ -1,4 +1,3 @@
-// Task 2.3 of the add-mapigrade-polyline-layer change.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;

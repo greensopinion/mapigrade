@@ -5,6 +5,7 @@ import 'src/flyover/flyover_screen.dart';
 import 'src/flyover/recording.dart';
 import 'src/gallery.dart';
 import 'src/inspect/inspect_screen.dart';
+import 'src/pitch/pitch_screen.dart';
 import 'src/polylines/polyline_screen.dart';
 
 void main() {
@@ -29,6 +30,13 @@ final _showcases = [
     'See routes through downtown New York drawn in the map below its 3D '
         'buildings and labels, and draw them on top instead.',
     (context) => const PolylineScreen(),
+  ),
+  Showcase(
+    'Pitch and markers',
+    'Tilt and turn a map of the Alps with two fingers, see pins stand upright '
+        'and wind arrows lie on the ground, tap for a coordinate and '
+        'long-press to drop a pin.',
+    (context) => const PitchScreen(),
   ),
 ];
 

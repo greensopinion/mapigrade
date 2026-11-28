@@ -587,7 +587,7 @@ void main() {
         isA<AssertionError>().having(
           (e) => '${e.message}',
           'message',
-          contains('MapigradeLayer'),
+          contains('must be below a map widget'),
         ),
       );
     });

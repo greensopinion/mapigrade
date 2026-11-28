@@ -616,8 +616,8 @@ void main() {
     expect(errors, isEmpty);
   });
 
-  // Memory reduction is driver work under #760, so while rendering is paused
-  // it waits and runs when rendering resumes (design D185 of the
+  // Memory reduction is driver work, so while rendering is paused it waits
+  // and runs when rendering resumes (design D185 of the
   // adopt-ffi-core-executor change).
   testWidgets('memory reduction while paused runs after resume', (
     tester,

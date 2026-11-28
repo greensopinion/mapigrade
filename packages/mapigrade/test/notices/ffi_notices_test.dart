@@ -4,8 +4,8 @@
 // item, D108 of the publish-readiness change, D217 of the update-ffi-0-202610-3
 // change, and D219, D227 and D248 of the port-ffi-gesture-recognizer change).
 // An HTML notice's copy is compared with the text that
-// scripts/html_notice_to_text.py writes of it. The test reads the tarballs of the
-// presets in the lock file that scripts/fetch_ffi_release.sh downloads into
+// scripts/html_notice_to_text.py writes of it. The test reads the tarballs of
+// the presets in the lock file that scripts/fetch_ffi_release.sh downloads into
 // third_party/maplibre-native-ffi-release/<version>/, or while the lock names
 // no release, the installs of MAPLIBRE_FFI_COMMIT that
 // scripts/build_maplibre_ffi.sh makes in third_party/maplibre-native-ffi/. It

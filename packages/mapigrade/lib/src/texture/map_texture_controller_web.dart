@@ -9,6 +9,8 @@ Future<MapTextureController> createMapTextureController({
   required double pixelRatio,
   required bool copyFree,
   required List<HeaderRule> httpHeaders,
+  NativeCamera? initialCamera,
+  NativeLimits? limits,
 }) => throw StateError('mapigrade has no native library on web');
 
 /// Not reached on web; see the comment at the top of this file.

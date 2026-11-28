@@ -17,9 +17,9 @@ final class OverlayPlacement {
   const OverlayPlacement.belowLabels() : this._(_Kind.belowLabels, null);
 
   /// Directly below the style layer with the ID [id]. When the style has no
-  /// such layer, the overlay is drawn above all style layers, and the
-  /// `MapigradeLayer` reports a `MapigradeLoadException` that names [id], once
-  /// for each style load.
+  /// such layer, the overlay is drawn above all style layers, and the map
+  /// widget reports a `MapigradeLoadException` that names [id], once for each
+  /// style load.
   const OverlayPlacement.belowLayer(String id) : this._(_Kind.belowLayer, id);
 
   /// Above all style layers.

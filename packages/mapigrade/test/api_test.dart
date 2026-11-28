@@ -1,9 +1,8 @@
 // The API test of the package-api spec for mapigrade (design D70 of the
 // public-api change, D230 of the split-mapigrade-package change): what the
 // main library exports, the naming rule for its exported names, and the
-// class modifiers of exported classes. The prefix rule applies to the names
-// that flutter_mapigrade re-exports, so flutter_mapigrade's API test checks
-// it. Adding API requires editing `expectedNames`.
+// class modifiers of exported classes. Adding API requires editing
+// `expectedNames`.
 @Timeout(Duration(minutes: 3))
 library;
 
@@ -33,6 +32,21 @@ const expectedNames = {
   'MapigradePolyline',
   'MapigradePolylineLayer',
   'OverlayPlacement',
+  'MapigradeMap',
+  'Mapigrade',
+  'MapigradeCameraController',
+  'MapigradeCamera',
+  'CameraChange',
+  'CameraChangeSource',
+  'CameraTransitionOutcome',
+  'CameraLimits',
+  'GeoBounds',
+  'MapigradeGestures',
+  'MapigradeTap',
+  'MapigradeFrame',
+  'MapigradeMarkers',
+  'MapigradeMarker',
+  'MarkerAlignment',
 };
 
 /// Libraries whose exported names the main library doesn't export.
@@ -44,7 +58,7 @@ const otherLibraries = [
 
 /// Abstract final, so that applications can't extend it and a new subclass is
 /// a compatible change (design D68); every other exported class is final.
-const abstractFinalClasses = {'MapigradeException'};
+const abstractFinalClasses = {'MapigradeException', 'Mapigrade'};
 
 /// The Dart SDK of the Flutter SDK that runs the test. The analyzer's default
 /// is the SDK of the running executable, which under `flutter test` is
@@ -136,6 +150,8 @@ void main() {
   test('exported classes are closed to applications', () {
     final violations = <String>[];
     for (final MapEntry(key: name, :value) in exportsOf(library).entries) {
+      // Applications can't extend or implement an enum.
+      if (value is EnumElement) continue;
       if (value is! ClassElement) {
         violations.add('$name is not a class');
         continue;

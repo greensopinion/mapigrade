@@ -37,6 +37,13 @@ constexpr mln_runtime_event_flags kMapEventMask =
     MLN_RUNTIME_EVENT_FLAG_MAP_STYLE_LOADED |
     MLN_RUNTIME_EVENT_FLAG_MAP_LOADING_FAILED |
     MLN_RUNTIME_EVENT_FLAG_MAP_RENDER_ERROR | MLN_RUNTIME_EVENT_FLAG_MAP_IDLE;
+// A map that owns its camera also follows its camera changes (design D243).
+constexpr mln_runtime_event_flags kOwnedCameraEventMask =
+    kMapEventMask | MLN_RUNTIME_EVENT_FLAG_MAP_CAMERA_WILL_CHANGE |
+    MLN_RUNTIME_EVENT_FLAG_MAP_CAMERA_DID_CHANGE;
+// While the map thread waits for the camera to settle, it checks at least
+// this often, for a gesture that ends without a camera event.
+constexpr int64_t kSettleCheckMs = 50;
 
 // Park bound with nothing to do. Wakes come from the session's wakes and from
 // commands, so this only bounds a missed wake.
@@ -227,14 +234,15 @@ std::shared_ptr<MapTexture> MapTexture::Create(
     int64_t handle, int64_t engine, double pixel_ratio, bool copy_free,
     std::optional<uint64_t> maximum_cache_size,
     std::vector<HttpHeaderRule> header_rules,
-    map_texture_event_callback callback, std::string* out_error) {
+    map_texture_event_callback callback, std::string* out_error,
+    std::optional<OwnedCamera> owned_camera) {
   if (!(pixel_ratio > 0) || !std::isfinite(pixel_ratio)) {
     *out_error = "invalid pixel ratio";
     return nullptr;
   }
   std::shared_ptr<MapTexture> texture(
       new MapTexture(handle, engine, pixel_ratio, maximum_cache_size,
-                     std::move(header_rules), callback));
+                     std::move(header_rules), callback, owned_camera));
   if (!texture->Start(copy_free, out_error)) return nullptr;
   return texture;
 }
@@ -242,11 +250,13 @@ std::shared_ptr<MapTexture> MapTexture::Create(
 MapTexture::MapTexture(int64_t handle, int64_t engine, double pixel_ratio,
                        std::optional<uint64_t> maximum_cache_size,
                        std::vector<HttpHeaderRule> header_rules,
-                       map_texture_event_callback callback)
+                       map_texture_event_callback callback,
+                       std::optional<OwnedCamera> owned_camera)
     : handle_(handle),
       engine_(engine),
       initial_pixel_ratio_(pixel_ratio),
       maximum_cache_size_(maximum_cache_size),
+      owned_camera_(owned_camera),
       header_rules_(std::move(header_rules)),
       callback_(callback) {
   map_scale_factor_ = pixel_ratio;
@@ -449,8 +459,101 @@ void MapTexture::LoadStyleJson(std::string json) {
 }
 
 void MapTexture::SetCamera(const Camera& camera, int64_t seq) {
+  if (owns_camera()) return;
   commands_.SetCamera(camera, seq, NowNs());
   Signal();
+}
+
+void MapTexture::SubmitCameraCommand(const CameraCommand& command) {
+  if (!owns_camera()) return;
+  commands_.Push(Command::ForCamera(command));
+  Signal();
+}
+
+mln_status MapTexture::GestureCreate(const mln_gesture_options& options,
+                                     std::string* out_error) {
+  std::lock_guard lock(recognizer_mutex_);
+  if (!owns_camera() || recognizer_ != MLN_HANDLE_NULL || disposed()) {
+    if (out_error != nullptr) {
+      *out_error = "the map has a recognizer or doesn't own its camera";
+    }
+    return MLN_STATUS_INVALID_STATE;
+  }
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_gesture_recognizer_create(map_, &options, &recognizer_, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    recognizer_ = MLN_HANDLE_NULL;
+    if (out_error != nullptr) *out_error = diagnostic.message;
+  }
+  return status;
+}
+
+mln_status MapTexture::GestureSetOptions(const mln_gesture_options& options) {
+  std::lock_guard lock(recognizer_mutex_);
+  if (recognizer_ == MLN_HANDLE_NULL) return MLN_STATUS_INVALID_STATE;
+  return mln_gesture_recognizer_set_options(recognizer_, &options, nullptr);
+}
+
+mln_status MapTexture::GestureHandle(const mln_gesture_input& input,
+                                     double time_ms,
+                                     mln_gesture_result* out_result) {
+  std::lock_guard lock(recognizer_mutex_);
+  if (recognizer_ == MLN_HANDLE_NULL) return MLN_STATUS_INVALID_STATE;
+  return mln_gesture_recognizer_handle(recognizer_, &input, time_ms,
+                                       out_result, nullptr);
+}
+
+mln_status MapTexture::GestureTick(double time_ms,
+                                   mln_gesture_result* out_result) {
+  std::lock_guard lock(recognizer_mutex_);
+  if (recognizer_ == MLN_HANDLE_NULL) return MLN_STATUS_INVALID_STATE;
+  return mln_gesture_recognizer_tick(recognizer_, time_ms, out_result, nullptr);
+}
+
+namespace {
+
+FrameProjection ProjectionOf(const mln_frame_projection& projection) {
+  FrameProjection out;
+  const mln_vec4* columns[] = {&projection.matrix.x, &projection.matrix.y,
+                               &projection.matrix.z, &projection.matrix.w};
+  for (int c = 0; c < 4; ++c) {
+    out.matrix[c * 4 + 0] = columns[c]->x;
+    out.matrix[c * 4 + 1] = columns[c]->y;
+    out.matrix[c * 4 + 2] = columns[c]->z;
+    out.matrix[c * 4 + 3] = columns[c]->w;
+  }
+  out.clip_depth_range = static_cast<uint32_t>(projection.clip_depth_range);
+  out.near_distance = projection.near_distance;
+  out.far_distance = projection.far_distance;
+  out.far_depth = projection.far_depth;
+  out.globe = projection.globe;
+  return out;
+}
+
+
+Camera CameraOf(const mln_camera& camera) {
+  return {camera.center.latitude,
+          camera.center.longitude,
+          camera.zoom,
+          camera.bearing,
+          camera.pitch,
+          camera.center_altitude,
+          {camera.padding.top, camera.padding.left, camera.padding.bottom,
+           camera.padding.right},
+          camera.roll,
+          camera.field_of_view};
+}
+
+}  // namespace
+
+std::optional<Camera> MapTexture::CameraForTesting() {
+  mln_map_snapshot snapshot{};
+  snapshot.size = sizeof(snapshot);
+  if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK) {
+    return std::nullopt;
+  }
+  return CameraOf(snapshot.view.camera);
 }
 
 void MapTexture::Resize(const Viewport& viewport) {
@@ -574,6 +677,13 @@ void MapTexture::Dispose() {
   {
     std::lock_guard lock(callback_mutex_);
     callback_ = nullptr;
+  }
+  {
+    std::lock_guard lock(recognizer_mutex_);
+    if (recognizer_ != MLN_HANDLE_NULL) {
+      mln_gesture_recognizer_release(recognizer_);
+      recognizer_ = MLN_HANDLE_NULL;
+    }
   }
   disposed_ = true;
   commands_.Push(Command::Dispose());
@@ -726,6 +836,27 @@ std::optional<RenderedView> MapTexture::LastRenderedViewForTesting() {
   return rendered_view_;
 }
 
+std::optional<ScreenPoint> MapTexture::ProjectForTesting(double latitude,
+                                                         double longitude) {
+  std::optional<mln_map_view> view;
+  {
+    std::lock_guard lock(rendered_view_mutex_);
+    view = rendered_mln_view_;
+  }
+  if (!view) return std::nullopt;
+  mln_map_projection projection = MLN_HANDLE_NULL;
+  if (mln_map_projection_create(&*view, &projection, nullptr) !=
+      MLN_STATUS_OK) {
+    return std::nullopt;
+  }
+  mln_screen_point point{};
+  mln_status status = mln_map_projection_pixel_for_lat_lng(
+      projection, {latitude, longitude}, &point, nullptr);
+  mln_map_projection_release(projection);
+  if (status != MLN_STATUS_OK) return std::nullopt;
+  return ScreenPoint{point.x, point.y};
+}
+
 map_texture_stats MapTexture::stats() {
   int max_in_use = buffers_.max_in_use();
   std::lock_guard lock(stats_mutex_);
@@ -788,6 +919,7 @@ bool MapTexture::RunOnce() {
     int64_t until_ms = (notify_after_resize_at_ns_ - NowNs()) / 1'000'000;
     timeout_ms = std::clamp<int64_t>(until_ms, 0, timeout_ms);
   }
+  if (settle_pending_) timeout_ms = std::min(timeout_ms, kSettleCheckMs);
   WaitForWake(timeout_ms);
   bool stop = false;
   ApplyCommands(&stop);
@@ -804,8 +936,37 @@ bool MapTexture::RunOnce() {
   // A newly armed demand renders at once if the map has an update.
   ServiceDriver();
   MaybeNotifyAfterResize();
+  CheckSettled();
   AnswerRestProbes();
   return false;
+}
+
+void MapTexture::CheckSettled() {
+  if (!owns_camera()) return;
+  uint64_t events = camera_events_.load();
+  if (events != camera_events_seen_) {
+    camera_events_seen_ = events;
+    settle_pending_ = true;
+  }
+  if (!settle_pending_) return;
+  mln_map_snapshot snapshot{};
+  snapshot.size = sizeof(snapshot);
+  if (mln_map_get_snapshot(map_, &snapshot, nullptr) != MLN_STATUS_OK ||
+      snapshot.transition_in_progress || snapshot.gesture_in_progress) {
+    return;
+  }
+  settle_pending_ = false;
+  FrameInfo info;
+  info.map_update_generation = snapshot.latest_render_update_generation;
+  std::lock_guard lock(callback_mutex_);
+  if (callback_ == nullptr) return;
+  auto* event =
+      static_cast<map_texture_event*>(std::calloc(1, sizeof(map_texture_event)));
+  event->handle = handle_;
+  event->type = MAP_TEXTURE_EVENT_CAMERA_SETTLED;
+  event->view.map_update_generation =
+      static_cast<int64_t>(snapshot.latest_render_update_generation);
+  callback_(event);
 }
 
 bool MapTexture::AtRestForTesting() {
@@ -862,7 +1023,7 @@ bool MapTexture::AtRest() {
     return false;
   }
   return snapshot.fully_loaded && !snapshot.transition_in_progress &&
-         !repaint_wanted_ &&
+         !snapshot.gesture_in_progress && !repaint_wanted_ &&
          rendered_update_generation_ >= snapshot.latest_render_update_generation;
 }
 
@@ -995,7 +1156,7 @@ bool MapTexture::Init() {
   map_options.initial_extent.scale_factor = initial_pixel_ratio_;
   // Without the field bit, the map queues every event type.
   map_options.fields = MLN_MAP_OPTION_EVENT_MASK;
-  map_options.event_mask = kMapEventMask;
+  map_options.event_mask = owns_camera() ? kOwnedCameraEventMask : kMapEventMask;
   auto created = std::make_shared<Waiter>();
   mln_completion create_done = Waiter::For(created);
   // An accepted creation writes the map before it completes; Teardown()
@@ -1013,7 +1174,194 @@ bool MapTexture::Init() {
     Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
     return false;
   }
+  return !owns_camera() || ApplyOwnedCamera();
+}
+
+namespace {
+
+mln_bound_options BoundOptions(const CameraLimits& limits) {
+  mln_bound_options options{};
+  options.size = sizeof(options);
+  options.fields = MLN_BOUND_OPTION_MIN_ZOOM | MLN_BOUND_OPTION_MAX_ZOOM |
+                   MLN_BOUND_OPTION_MIN_PITCH | MLN_BOUND_OPTION_MAX_PITCH;
+  options.fields |=
+      limits.has_bounds ? MLN_BOUND_OPTION_BOUNDS : MLN_BOUND_OPTION_UNBOUNDED;
+  options.min_zoom = limits.min_zoom;
+  options.max_zoom = limits.max_zoom;
+  options.min_pitch = limits.min_pitch;
+  options.max_pitch = limits.max_pitch;
+  options.bounds = {{limits.south, limits.west}, {limits.north, limits.east}};
+  return options;
+}
+
+mln_camera_options CameraOptionsOf(const Camera& camera, uint32_t fields) {
+  mln_camera_options options{};
+  options.size = sizeof(options);
+  options.fields = fields;
+  options.center = {camera.latitude, camera.longitude};
+  options.center_altitude = camera.center_altitude;
+  options.padding = {camera.padding.top, camera.padding.left,
+                     camera.padding.bottom, camera.padding.right};
+  options.zoom = camera.zoom;
+  options.bearing = camera.bearing;
+  options.pitch = camera.pitch;
+  options.roll = camera.roll;
+  options.field_of_view = camera.field_of_view;
+  return options;
+}
+
+// The end handler of a camera command, which reports its outcome with the
+// command's request id.
+struct TransitionEnd {
+  std::weak_ptr<MapTexture> map;
+  int64_t request_id = 0;
+
+  static void OnEnd(void* user_data, const mln_camera_transition_end* end) {
+    auto* self = static_cast<TransitionEnd*>(user_data);
+    if (auto map = self->map.lock()) {
+      map->ReportTransitionEnded(self->request_id,
+                                 static_cast<int32_t>(end->outcome));
+    }
+  }
+  static void Release(void* user_data) {
+    delete static_cast<TransitionEnd*>(user_data);
+  }
+};
+
+}  // namespace
+
+bool MapTexture::ApplyOwnedCamera() {
+  const OwnedCamera& start = *owned_camera_;
+  mln_bound_options bounds = BoundOptions(start.limits);
+  auto bounded = std::make_shared<Waiter>();
+  mln_completion bounds_done = Waiter::For(bounded);
+  mln_diagnostic diagnostic = NewDiagnostic();
+  mln_status status =
+      mln_map_set_bounds(map_, &bounds, &bounds_done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    Waiter::Discard(bounds_done);
+    ReportInitStatus("mln_map_set_bounds", status, &diagnostic);
+    return false;
+  }
+  bounded->WaitFor(5'000'000'000);
+  if (!bounded->Done() || bounded->status != MLN_STATUS_OK) {
+    init_error_ = "mln_map_set_bounds failed: " + bounded->diagnostic;
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
+    return false;
+  }
+  if (start.fields == 0) return true;
+  mln_camera_update update{};
+  update.size = sizeof(update);
+  update.mode = MLN_CAMERA_UPDATE_MODE_JUMP;
+  update.camera = CameraOptionsOf(start.camera, start.fields);
+  auto jumped = std::make_shared<Waiter>();
+  mln_completion jump_done = Waiter::For(jumped);
+  status = mln_map_update_camera(map_, &update, &jump_done, &diagnostic);
+  if (status != MLN_STATUS_OK) {
+    Waiter::Discard(jump_done);
+    ReportInitStatus("mln_map_update_camera", status, &diagnostic);
+    return false;
+  }
+  jumped->WaitFor(5'000'000'000);
+  if (!jumped->Done() || jumped->status != MLN_STATUS_OK) {
+    init_error_ = "mln_map_update_camera failed: " + jumped->diagnostic;
+    Emit(MAP_TEXTURE_EVENT_RENDER_ERROR, init_error_.c_str());
+    return false;
+  }
   return true;
+}
+
+void MapTexture::ApplyCameraCommand(const CameraCommand& command) {
+  mln_diagnostic diagnostic = NewDiagnostic();
+  if (command.type == CameraCommand::Type::kCancel) {
+    mln_status status =
+        mln_map_cancel_camera_transitions(map_, nullptr, &diagnostic);
+    if (status != MLN_STATUS_OK) {
+      ReportStatus("mln_map_cancel_camera_transitions", status, &diagnostic);
+    }
+    return;
+  }
+  if (command.type == CameraCommand::Type::kLimits) {
+    mln_bound_options bounds = BoundOptions(command.limits);
+    mln_completion done = ReportingCompletion("mln_map_set_bounds");
+    mln_status status = mln_map_set_bounds(map_, &bounds, &done, &diagnostic);
+    if (status != MLN_STATUS_OK) {
+      DiscardFunctionCompletion(done);
+      ReportStatus("mln_map_set_bounds", status, &diagnostic);
+    }
+    return;
+  }
+  mln_animation_options animation{};
+  if (command.duration_ms >= 0) {
+    animation.fields |= MLN_ANIMATION_OPTION_DURATION;
+    animation.duration_ms = command.duration_ms;
+  }
+  auto* end = new TransitionEnd{weak_from_this(), command.request_id};
+  animation.end_handler.callback = &TransitionEnd::OnEnd;
+  animation.end_handler.user_data = end;
+  animation.end_handler.release_user_data = &TransitionEnd::Release;
+  mln_status status;
+  const char* what;
+  if (command.type == CameraCommand::Type::kUpdate) {
+    mln_camera_update update{};
+    update.size = sizeof(update);
+    update.mode = static_cast<mln_camera_update_mode>(command.mode);
+    update.camera = CameraOptionsOf(command.camera, command.fields);
+    update.animation = animation;
+    what = "mln_map_update_camera";
+    status = mln_map_update_camera(map_, &update, nullptr, &diagnostic);
+  } else {
+    mln_camera_fit_update update{};
+    update.size = sizeof(update);
+    update.mode = static_cast<mln_camera_update_mode>(command.mode);
+    update.fit.size = sizeof(update.fit);
+    update.fit.fields = command.fields;
+    const EdgeInsets& padding = command.camera.padding;
+    update.fit.padding = {padding.top, padding.left, padding.bottom,
+                          padding.right};
+    update.fit.bearing = command.camera.bearing;
+    update.fit.pitch = command.camera.pitch;
+    update.animation = animation;
+    mln_lat_lng_bounds bounds{{command.south, command.west},
+                              {command.north, command.east}};
+    what = "mln_map_fit_camera_to_lat_lng_bounds";
+    status = mln_map_fit_camera_to_lat_lng_bounds(map_, bounds, &update,
+                                                  nullptr, &diagnostic);
+  }
+  if (status != MLN_STATUS_OK) {
+    // A refused command gives the end handler's user data back.
+    TransitionEnd::Release(end);
+    ReportStatus(what, status, &diagnostic);
+    ReportTransitionEnded(command.request_id, MAP_TEXTURE_OUTCOME_CANCELLED);
+  }
+}
+
+void FillFrameView(const FrameInfo& info, map_texture_frame_view* out) {
+  const Camera& camera = info.camera;
+  out->pitch = camera.pitch;
+  out->center_altitude = camera.center_altitude;
+  out->padding_top = camera.padding.top;
+  out->padding_left = camera.padding.left;
+  out->padding_bottom = camera.padding.bottom;
+  out->padding_right = camera.padding.right;
+  out->roll = camera.roll;
+  out->field_of_view = camera.field_of_view;
+  for (int i = 0; i < 16; ++i) out->matrix[i] = info.projection.matrix[i];
+  out->clip_depth_range = static_cast<int32_t>(info.projection.clip_depth_range);
+  out->camera_source = info.camera_source;
+  out->map_update_generation = static_cast<int64_t>(info.map_update_generation);
+}
+
+void MapTexture::ReportTransitionEnded(int64_t request_id, int32_t outcome) {
+  std::lock_guard lock(callback_mutex_);
+  if (callback_ == nullptr) return;
+  auto* event =
+      static_cast<map_texture_event*>(std::calloc(1, sizeof(map_texture_event)));
+  event->handle = handle_;
+  event->type = MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED;
+  event->request_id = request_id;
+  event->status = outcome;
+  callback_(event);
 }
 
 void MapTexture::ServiceUntil(const std::function<bool()>& done) {
@@ -1150,6 +1498,9 @@ void MapTexture::ApplyCommands(bool* stop) {
       case Command::Kind::kOverlaySetLayers:
       case Command::Kind::kOverlayRemove:
         ApplyOverlayCommand(command);
+        break;
+      case Command::Kind::kCamera:
+        ApplyCameraCommand(command.camera);
         break;
       case Command::Kind::kTargetTask:
       case Command::Kind::kRestProbe:
@@ -1798,8 +2149,8 @@ void MapTexture::ApplyCamera() {
   ++cameras_submitted_;
 }
 
-// Rendering before the camera's update is published would render the previous
-// camera, which cost the iPhone one more display frame of lag.
+// A render before the camera's update is published renders the previous
+// camera; on the iPhone that added one display frame of lag.
 // The completion signals the wake, so the map thread waits without spinning.
 // Every command completes, and a dispose also signals the wake.
 void MapTexture::WaitForCamera() {
@@ -1843,6 +2194,15 @@ void MapTexture::OnEvents(void* user_data, const mln_event_batch_view* events) {
         break;
       case MLN_RUNTIME_EVENT_MAP_IDLE:
         self->Emit(MAP_TEXTURE_EVENT_IDLE);
+        break;
+      case MLN_RUNTIME_EVENT_MAP_CAMERA_WILL_CHANGE:
+      case MLN_RUNTIME_EVENT_MAP_CAMERA_DID_CHANGE:
+        if (event->payload_type == MLN_RUNTIME_EVENT_PAYLOAD_CAMERA_CHANGE) {
+          self->last_camera_source_.store(
+              static_cast<int32_t>(event->payload.camera_change.source));
+        }
+        self->camera_events_.fetch_add(1);
+        self->Signal();
         break;
       default:
         break;
@@ -2208,8 +2568,16 @@ void MapTexture::RunQueries() {
       outcome->Set(MLN_STATUS_OK, "[]");
       continue;
     }
-    ScreenBox box =
-        ScreenBounds(view.camera, view.width, view.height, query.corners);
+    // A map that owns its camera can be pitched (design D241).
+    std::optional<ScreenBox> projected =
+        owns_camera()
+            ? MatrixScreenBounds(view, query.corners)
+            : ScreenBounds(view.camera, view.width, view.height, query.corners);
+    if (!projected) {
+      outcome->Set(MLN_STATUS_OK, "[]");
+      continue;
+    }
+    ScreenBox box = *projected;
     mln_rendered_query_geometry geometry{};
     geometry.size = sizeof(geometry);
     geometry.type = MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX;
@@ -2283,11 +2651,11 @@ void MapTexture::HandleFrameResult(const mln_render_frame_result& result,
     rendered_update_generation_ = result.map_update_generation;
     const mln_map_view& view = result.view;
     std::lock_guard lock(rendered_view_mutex_);
-    rendered_view_ = RenderedView{
-        {view.camera.center.latitude, view.camera.center.longitude,
-         view.camera.zoom, view.camera.bearing},
-        static_cast<double>(view.extent.width),
-        static_cast<double>(view.extent.height)};
+    rendered_mln_view_ = view;
+    rendered_view_ = RenderedView{CameraOf(view.camera),
+                                  static_cast<double>(view.extent.width),
+                                  static_cast<double>(view.extent.height),
+                                  ProjectionOf(result.frame_projection).matrix};
   }
   if (!demand_outstanding_ || result.token != demand_token_) return;
   demand_outstanding_ = false;
@@ -2491,27 +2859,6 @@ void MapTexture::RecordRender(int64_t start, int64_t elapsed) {
   stats_.render_update_max_ns = std::max(stats_.render_update_max_ns, elapsed);
 }
 
-namespace {
-
-FrameProjection ProjectionOf(const mln_frame_projection& projection) {
-  FrameProjection out;
-  const mln_vec4* columns[] = {&projection.matrix.x, &projection.matrix.y,
-                               &projection.matrix.z, &projection.matrix.w};
-  for (int c = 0; c < 4; ++c) {
-    out.matrix[c * 4 + 0] = columns[c]->x;
-    out.matrix[c * 4 + 1] = columns[c]->y;
-    out.matrix[c * 4 + 2] = columns[c]->z;
-    out.matrix[c * 4 + 3] = columns[c]->w;
-  }
-  out.clip_depth_range = static_cast<uint32_t>(projection.clip_depth_range);
-  out.near_distance = projection.near_distance;
-  out.far_distance = projection.far_distance;
-  out.far_depth = projection.far_depth;
-  out.globe = projection.globe;
-  return out;
-}
-
-}  // namespace
 
 FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   FrameInfo info;
@@ -2520,10 +2867,10 @@ FrameInfo MapTexture::RenderedFrameInfo(const mln_render_frame_result& result) {
   info.physical_height = size_.physical_height;
   info.scale_factor = size_.extent.scale_factor;
   // The view that the frame drew. Its center longitude is unwrapped.
-  const mln_camera& camera = result.view.camera;
-  info.camera = {camera.center.latitude, camera.center.longitude, camera.zoom,
-                 camera.bearing};
+  info.camera = CameraOf(result.view.camera);
   info.projection = ProjectionOf(result.frame_projection);
+  info.camera_source = last_camera_source_.load();
+  info.map_update_generation = result.map_update_generation;
   {
     // The newest camera command whose generation the frame's update includes.
     // Older entries are no longer needed.
@@ -2590,6 +2937,7 @@ void MapTexture::Emit(int32_t type, const char* message,
     event->display_time_us = display_time_us;
     event->slot = slot;
     event->seq = frame->seq;
+    FillFrameView(*frame, &event->view);
   }
   if (message != nullptr) event->message = strdup(message);
   callback_(event);

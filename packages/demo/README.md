@@ -1,6 +1,6 @@
 # mapigrade_demo
 
-An app for trying `flutter_mapigrade` on your devices. It opens at a gallery of showcases, each a screen with its own map. It runs on Android, iOS and macOS, and uses only the public library `package:flutter_mapigrade/flutter_mapigrade.dart`, so its code shows what an application can use.
+An app for trying `flutter_mapigrade` on your devices. It opens at a gallery of showcases, each a screen with its own map. It runs on Android, iOS and macOS, and uses only the public libraries `package:flutter_mapigrade/flutter_mapigrade.dart` and `package:mapigrade/mapigrade.dart`, so its code shows what an application can use.
 
 The demo isn't published, and there are no built apps to download: build it from source.
 
@@ -9,6 +9,7 @@ The demo isn't published, and there are no built apps to download: build it from
 - **Flyover**: a drone's-eye flight along three stages of the Tour de France Femmes avec Zwift 2026, with route and pin overlays that stay on the map while it moves, and the map's and Flutter's frame rates. The video in the repository's README is a recording of it.
 - **Inspect features**: tap the map to highlight the feature on top with feature state, and see its style layer, source, ID and properties, and the other features at the tap.
 - **Polylines**: routes through downtown New York drawn in the map below its 3D buildings and labels, or on top.
+- **Pitch and markers**: a `MapigradeMap` of the Mont Blanc massif, without `flutter_map`, that you tilt and turn by gesture, with upright pins, wind arrows on the ground, taps and long presses.
 
 Each screen offers four styles that need no API key: OpenFreeMap Liberty, Bright and Positron, and the MapLibre demo tiles. The routes are approximate.
 

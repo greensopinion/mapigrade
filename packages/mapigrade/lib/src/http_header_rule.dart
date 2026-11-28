@@ -1,4 +1,4 @@
-/// HTTP headers that `MapigradeLayer` adds to requests whose URL matches
+/// HTTP headers that a map widget adds to requests whose URL matches
 /// [url]. Each HTTP request that the map sends gets the headers of the first
 /// rule whose [url] matches the request's complete URL, and no headers when no
 /// rule matches. Requests that the map serves from its cache or from assets

@@ -87,9 +87,8 @@ final class MapigradePolyline {
   final List<Color>? gradientColors;
 
   /// The position of each of [gradientColors] along the line, from 0 for the
-  /// first point to 1 for the last. Two
-  /// equal consecutive stops give a hard edge. When null, the colors are
-  /// spaced evenly from 0 to 1.
+  /// first point to 1 for the last. Two equal consecutive stops give a hard
+  /// edge. When null, the colors are spaced evenly from 0 to 1.
   final List<double>? gradientStops;
 
   @override

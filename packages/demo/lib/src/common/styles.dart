@@ -41,17 +41,18 @@ const demoStyles = [
   ),
 ];
 
-/// The attribution of [style] and of the routes (design D120).
+/// The attribution entries of [style] and of the routes (design D120), as
+/// text and link.
+List<(String, String)> attributionEntriesOf(DemoStyle style) => [
+  ...style.attributions,
+  ('© OpenStreetMap contributors', 'https://www.openstreetmap.org/copyright'),
+];
+
+/// The attribution of [style] and of the routes in a `flutter_map` map.
 RichAttributionWidget attributionOf(DemoStyle style) => RichAttributionWidget(
   popupInitialDisplayDuration: const Duration(seconds: 5),
   attributions: [
-    for (final (text, url) in [
-      ...style.attributions,
-      (
-        '© OpenStreetMap contributors',
-        'https://www.openstreetmap.org/copyright',
-      ),
-    ])
+    for (final (text, url) in attributionEntriesOf(style))
       TextSourceAttribution(text, onTap: () => launchUrl(Uri.parse(url))),
   ],
 );

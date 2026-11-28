@@ -8,7 +8,7 @@ import 'queried_feature.dart';
 
 /// Controls everything about a map except its camera: in this version, it
 /// queries the features that the map renders and sets their feature state.
-/// Create one, give it to a map widget, such as `MapigradeLayer` through its
+/// Create one, give it to a map widget, such as `MapigradeMap` through its
 /// `controller`, and call it while that widget is in the tree.
 ///
 /// A controller is attached to the widget it was given to while that widget
@@ -21,16 +21,17 @@ final class MapigradeController {
 
   Object? _owner;
   MapTextureController? _map;
-  ViewCamera Function()? _displayedCamera;
+  // The normalized Web Mercator point at a logical position on the displayed
+  // map frame, or null where the frame draws no ground.
+  Offset? Function(Offset position)? _worldOf;
 
   /// The features that the displayed map frame draws within [radius] logical
   /// pixels of [point]: those whose rendered shape intersects the square of
   /// side `2 * radius` centered on [point], aligned with the screen axes.
   ///
   /// [point] is a logical position relative to the top-left corner of the
-  /// map widget. The query
-  /// looks where the map frame on screen draws the features, also while the
-  /// camera moves. Labels and icons are an exception: MapLibre matches them
+  /// map widget. The query looks where the map frame on screen draws the
+  /// features, also while the camera moves. Labels and icons are an exception: MapLibre matches them
   /// where it placed them last, which can be behind the displayed frame while
   /// the camera moves.
   ///
@@ -154,16 +155,19 @@ final class MapigradeController {
     String? filterJson,
   ) async {
     final map = _attachedMap();
-    final camera = _displayedCamera!();
-    final corners = [
-      for (final corner in [
-        rect.topLeft,
-        rect.topRight,
-        rect.bottomRight,
-        rect.bottomLeft,
-      ])
-        worldPosition(camera, corner),
-    ];
+    final worldOf = _worldOf!;
+    final corners = <Offset>[];
+    for (final corner in [
+      rect.topLeft,
+      rect.topRight,
+      rect.bottomRight,
+      rect.bottomLeft,
+    ]) {
+      // Above the horizon of a pitched frame there is no ground to query.
+      final world = worldOf(corner);
+      if (world == null) return const [];
+      corners.add(world);
+    }
     try {
       final entries = await map.queryRenderedFeatures(
         corners,
@@ -248,7 +252,25 @@ void bindController(
     'a MapigradeController can be given to one map widget at a time',
   );
   controller._owner = owner;
-  controller._displayedCamera = displayedCamera;
+  controller._worldOf = (position) =>
+      worldPosition(displayedCamera(), position);
+}
+
+/// Attaches [controller] to the state [owner] of a map widget whose displayed
+/// frame converts a logical position to a normalized Web Mercator point with
+/// [worldOf], which returns null where the frame draws no ground. Fails an
+/// assertion if another widget has it.
+void bindControllerWithWorld(
+  MapigradeController controller,
+  Object owner,
+  Offset? Function(Offset position) worldOf,
+) {
+  assert(
+    controller._owner == null || identical(controller._owner, owner),
+    'a MapigradeController can be given to one map widget at a time',
+  );
+  controller._owner = owner;
+  controller._worldOf = worldOf;
 }
 
 /// Gives [controller] the map of its widget state [owner], once it has one.
@@ -265,5 +287,5 @@ void releaseController(MapigradeController controller, Object owner) {
   if (!identical(controller._owner, owner)) return;
   controller._owner = null;
   controller._map = null;
-  controller._displayedCamera = null;
+  controller._worldOf = null;
 }

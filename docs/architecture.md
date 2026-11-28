@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the implementation on macOS and iOS (Threads, Frame path) and how Android differs from it (Android). Paths are relative to `packages/mapigrade/`.
+This document describes the implementation on macOS and iOS (Threads, Frame path), what `MapigradeMap` adds to it (`MapigradeMap`), and how Android differs from it (Android). Paths are relative to `packages/mapigrade/`.
 
 ## Threads
 
@@ -109,6 +109,37 @@ A `MapigradePolylineLayer` draws nothing in Flutter. It gives its polylines to t
 Commands only change the map thread's kept state of each overlay (`MapTexture::Overlay` in `src/core/map_texture.h`). After the commands of a loop iteration, and again before `MaybeRender` requests a frame, `SyncOverlays` queries `mln_map_list_style_layers` when the overlays changed or a style has loaded, and makes the style match the kept state: `ComputeAnchor` (`src/core/overlay.h`) resolves each placement to the layer the overlay's layers go before, and `PlanLayers` plans the layer additions, moves and removals. A layer list queried before a later style command or style load is dropped and queried again (design D199).
 
 A style load removes every runtime source and layer. `OnEvents` counts style loads (`style_loads_`) and wakes the map thread, which installs every overlay again in the new style from the GeoJSON text it kept, without a round trip to Dart (designs D201 and D224). The FFI also removes every feature's state when a style loads, so the map thread keeps the net state of the feature-state commands (`src/core/feature_state.h`) and sets it again at the same point (design D249 of the port-ffi-gesture-recognizer change). A failed overlay command is reported as a render error that names the operation (design D203).
+
+## `MapigradeMap`
+
+`MapigradeMap` (`lib/src/map/`) displays the map with the frame path above, but MapLibre owns its camera (design D235 of the add-mapigrade-map change). `map_texture_create` takes an initial camera and limits; the map starts at that camera, Dart never writes the camera slot, and `map_texture_set_camera` is refused. Only camera commands and the FFI's gesture recognizer move the camera.
+
+```
+ Dart (main isolate, platform thread)                   map thread                 FFI runtime
+ ───────────────────────────────────                    ──────────                 ───────────
+ MapigradeCameraController
+   jumpTo/easeTo/flyTo/fitBounds (request id) ──► ordered queue ──► camera command ──► transition
+   cancelTransitions, limits ───────────────────► ordered queue ──► with an end handler
+                       Future ◄── CAMERA_TRANSITION_ENDED (request id, outcome) ◄──────── ends
+
+ MapGestureAdapter (gesture arena member)
+   pointer, trackpad, wheel and key input
+     ──► map_texture_gesture_handle / _tick, on the platform thread
+           mln_gesture_recognizer_handle / _tick ─────────────────────────────► camera commands
+     ◄── result: tick request, box zoom rectangle, events (tap, long press, notch)
+
+ build: selectNewest() ──► frame, camera, matrix ──► MapigradeFrame ──► markers, children
+```
+
+Camera commands go through the ordered command queue, and the map thread submits each as an FFI camera command whose end handler reports `MAP_TEXTURE_EVENT_CAMERA_TRANSITION_ENDED` with the command's request id and outcome, which completes the command's `Future` (design D236).
+
+The input adapter (`lib/src/map/gestures/map_gesture_adapter.dart`) is a gesture recognizer in a `RawGestureDetector` around the texture. It keeps each pointer's events until it wins or loses the arena, and on a win passes the kept events to the FFI's gesture recognizer in order. It accepts a pointer that moves past the pan slop or a second pointer on the map, and doesn't accept a pointer on its lift, so a child's tap recognizer wins a tap on the child (design D238). The adapter calls the recognizer on the platform thread through `map_texture_gesture_handle` and `map_texture_gesture_tick`. mln-rs allows calls from any thread, and a call doesn't wait for the map: the recognizer reads the map's last published snapshot and posts its camera moves as commands (design D237). A `Ticker` calls the tick function while the result asks for a tick every frame. Trackpad events become continuous deltas and pinches, the mouse wheel goes through `PointerSignalResolver`, and the keyboard goes through a `Focus` around the map. The recognizer decides what is a tap; when double-tap zoom is on, the adapter holds a tap for `kDoubleTapTimeout` (design D239).
+
+`map_texture_select_newest` also returns the chosen frame's projection matrix, every field of its camera, and the clip depth convention of the device's graphics API (designs D241 and D247). The matrix is the frame result's `frame_projection`: it takes Web Mercator x and y in [0, 1] and z in meters to the frame's clip space. `MapigradeFrame` (`lib/src/map/mapigrade_frame.dart`) projects a coordinate with that matrix, in the copy of the world nearest the camera's center, and projects a position by intersecting its ray with the plane z = 0, so neither waits for the map. `MapigradeMap` provides each displayed frame through an `InheritedWidget` and through a `ValueListenable`. The render object of `MapigradeMarkers` (`lib/src/map/markers.dart`) listens to the `ValueListenable` and repaints its children with a transform per marker, without rebuilding them; it lays its children out only when they or its size change (design D242).
+
+The map thread records the source of each FFI camera event, and each frame carries the source of the last camera event that the runtime delivered before the frame's result was handled. `cameraChanges` emits for each displayed frame whose camera differs from the previous one. After a camera event, once the map's snapshot shows no transition and no gesture, the map thread sends `MAP_TEXTURE_EVENT_CAMERA_SETTLED` with the snapshot's render update generation; `rests` emits once a displayed frame includes that generation, no pointer is down, and the recognizer asks for no tick (design D243).
+
+`MapigradeMap` provides an `OverlayHost` and `OverlayChildIndex` to its children as `MapTextureLayer` does, so polylines work as in the layer, and attaches a `MapigradeController` with the displayed frame's camera for feature queries.
 
 ## Flutter engines
 

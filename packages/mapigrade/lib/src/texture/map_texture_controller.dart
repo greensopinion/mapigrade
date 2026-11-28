@@ -33,6 +33,76 @@ class MapCamera {
       'MapCamera(lat: $latitude, lon: $longitude, zoom: $zoom, bearing: $bearing)';
 }
 
+/// What moved the camera last before a frame; `MAP_TEXTURE_CAMERA_SOURCE_*`.
+enum NativeCameraSource {
+  /// A camera command, or the map itself.
+  command,
+
+  /// A gesture of the gesture recognizer.
+  gesture,
+
+  /// The glide or snap after a gesture.
+  momentum,
+}
+
+/// The camera fields of a frame beyond its center, zoom and bearing, the
+/// matrix it drew the map with, and what moved its camera; see
+/// `map_texture_frame_view` in `map_texture_api.h`.
+class FrameView {
+  /// A frame view with the given values.
+  const FrameView({
+    required this.pitch,
+    required this.centerAltitude,
+    required this.paddingTop,
+    required this.paddingLeft,
+    required this.paddingBottom,
+    required this.paddingRight,
+    required this.roll,
+    required this.fieldOfView,
+    required this.matrix,
+    required this.clipDepthRange,
+    required this.cameraSource,
+    required this.mapUpdateGeneration,
+  });
+
+  /// The pitch in degrees.
+  final double pitch;
+
+  /// The altitude of the center in meters.
+  final double centerAltitude;
+
+  /// The top padding in logical pixels.
+  final double paddingTop;
+
+  /// The left padding in logical pixels.
+  final double paddingLeft;
+
+  /// The bottom padding in logical pixels.
+  final double paddingBottom;
+
+  /// The right padding in logical pixels.
+  final double paddingRight;
+
+  /// The roll in degrees.
+  final double roll;
+
+  /// The vertical field of view in degrees.
+  final double fieldOfView;
+
+  /// The frame's clip matrix, column-major: Web Mercator x and y in [0, 1)
+  /// and z in meters to clip space.
+  final Float64List matrix;
+
+  /// `mln_clip_depth_range`: 1 for clip z from 0 to w, 2 for -w to w.
+  final int clipDepthRange;
+
+  /// What moved the camera last before the frame.
+  final NativeCameraSource cameraSource;
+
+  /// The map update that the frame shows.
+  final int mapUpdateGeneration;
+}
+
 /// The camera and viewport size a frame was rendered with, and where it is.
 class FrameCamera {
   /// The camera and viewport size of the frame [frameId].
@@ -44,7 +114,12 @@ class FrameCamera {
     required this.displayTime,
     this.slot = 0,
     this.seq = 0,
+    this.view,
   });
+
+  /// The rest of the frame's camera and its matrix, for a map that reports
+  /// them. Fakes in tests may leave it null.
+  final FrameView? view;
 
   /// Increases by one for each frame the map renders.
   final int frameId;
@@ -117,6 +192,445 @@ class RenderError extends MapEvent {
 class MapIdle extends MapEvent {
   /// An idle event.
   const MapIdle();
+}
+
+/// A camera command of a map that owns its camera ended.
+class CameraTransitionEnded extends MapEvent {
+  /// The end of the command [requestId] with the `MAP_TEXTURE_OUTCOME_*`
+  /// [outcome].
+  const CameraTransitionEnded(this.requestId, this.outcome);
+
+  /// The request id that the command was given.
+  final int requestId;
+
+  /// 0 completed, 1 cancelled, 2 closed, 3 replaced.
+  final int outcome;
+}
+
+/// Nothing moves the camera of a map that owns its camera any more. Frames
+/// whose [FrameView.mapUpdateGeneration] is at least [mapUpdateGeneration]
+/// show the camera at rest.
+class CameraSettled extends MapEvent {
+  /// A settled event.
+  const CameraSettled(this.mapUpdateGeneration);
+
+  /// The first map update that shows the camera at rest.
+  final int mapUpdateGeneration;
+}
+
+/// A camera for the native map: the fields that [fields] sets, as the bits
+/// `MAP_TEXTURE_CAMERA_*` of `map_texture_api.h`.
+class NativeCamera {
+  /// A native camera with the given values.
+  const NativeCamera({
+    required this.fields,
+    this.latitude = 0,
+    this.longitude = 0,
+    this.centerAltitude = 0,
+    this.paddingTop = 0,
+    this.paddingLeft = 0,
+    this.paddingBottom = 0,
+    this.paddingRight = 0,
+    this.zoom = 0,
+    this.bearing = 0,
+    this.pitch = 0,
+    this.roll = 0,
+    this.fieldOfView = 0,
+  });
+
+  /// The bits of the fields that are set.
+  final int fields;
+
+  /// The center's latitude in degrees.
+  final double latitude;
+
+  /// The center's longitude in degrees.
+  final double longitude;
+
+  /// The center's altitude in meters.
+  final double centerAltitude;
+
+  /// The top padding in logical pixels.
+  final double paddingTop;
+
+  /// The left padding in logical pixels.
+  final double paddingLeft;
+
+  /// The bottom padding in logical pixels.
+  final double paddingBottom;
+
+  /// The right padding in logical pixels.
+  final double paddingRight;
+
+  /// The zoom.
+  final double zoom;
+
+  /// The bearing in degrees.
+  final double bearing;
+
+  /// The pitch in degrees.
+  final double pitch;
+
+  /// The roll in degrees.
+  final double roll;
+
+  /// The vertical field of view in degrees.
+  final double fieldOfView;
+}
+
+/// The camera limits of the native map; `map_texture_limits`.
+class NativeLimits {
+  /// Limits with the given values, and with [south], [west], [north] and
+  /// [east] when [hasBounds].
+  const NativeLimits({
+    required this.minZoom,
+    required this.maxZoom,
+    required this.minPitch,
+    required this.maxPitch,
+    this.hasBounds = false,
+    this.south = 0,
+    this.west = 0,
+    this.north = 0,
+    this.east = 0,
+  });
+
+  /// The minimum zoom.
+  final double minZoom;
+
+  /// The maximum zoom.
+  final double maxZoom;
+
+  /// The minimum pitch in degrees.
+  final double minPitch;
+
+  /// The maximum pitch in degrees.
+  final double maxPitch;
+
+  /// Whether the center is limited to the bounds.
+  final bool hasBounds;
+
+  /// The southern edge of the bounds in degrees.
+  final double south;
+
+  /// The western edge of the bounds in degrees.
+  final double west;
+
+  /// The northern edge of the bounds in degrees.
+  final double north;
+
+  /// The eastern edge of the bounds in degrees.
+  final double east;
+}
+
+/// The area and options of a fit; `map_texture_fit`.
+class NativeFit {
+  /// A fit of the area from [south], [west] to [north], [east].
+  const NativeFit({
+    required this.south,
+    required this.west,
+    required this.north,
+    required this.east,
+    this.fields = 0,
+    this.paddingTop = 0,
+    this.paddingLeft = 0,
+    this.paddingBottom = 0,
+    this.paddingRight = 0,
+    this.bearing = 0,
+    this.pitch = 0,
+  });
+
+  /// The southern edge in degrees.
+  final double south;
+
+  /// The western edge in degrees.
+  final double west;
+
+  /// The northern edge in degrees.
+  final double north;
+
+  /// The eastern edge in degrees.
+  final double east;
+
+  /// 1 for the padding, 2 for the bearing, 4 for the pitch.
+  final int fields;
+
+  /// The top padding in logical pixels.
+  final double paddingTop;
+
+  /// The left padding in logical pixels.
+  final double paddingLeft;
+
+  /// The bottom padding in logical pixels.
+  final double paddingBottom;
+
+  /// The right padding in logical pixels.
+  final double paddingRight;
+
+  /// The bearing in degrees.
+  final double bearing;
+
+  /// The pitch in degrees.
+  final double pitch;
+}
+
+/// The options of the gesture recognizer; `map_texture_gesture_options`.
+class NativeGestureOptions {
+  /// Options with the given values.
+  const NativeGestureOptions({
+    required this.pan,
+    required this.zoom,
+    required this.rotate,
+    required this.pitch,
+    required this.glides,
+    required this.snapToNorth,
+    required this.doubleTapZoom,
+    required this.twoFingerTapZoom,
+    required this.momentumModel,
+    required this.halfLifeMs,
+  });
+
+  /// Whether drags pan.
+  final bool pan;
+
+  /// Whether gestures zoom.
+  final bool zoom;
+
+  /// Whether gestures turn the bearing.
+  final bool rotate;
+
+  /// Whether gestures change the pitch.
+  final bool pitch;
+
+  /// Whether releases glide.
+  final bool glides;
+
+  /// Whether the bearing snaps to north.
+  final bool snapToNorth;
+
+  /// Zoom levels of a double tap; 0 leaves double taps to Dart.
+  final double doubleTapZoom;
+
+  /// Zoom levels of a two-finger tap; 0 leaves them to Dart.
+  final double twoFingerTapZoom;
+
+  /// `mln_momentum_decay_model`: 0 friction, 1 curve.
+  final int momentumModel;
+
+  /// The half-life of friction.
+  final double halfLifeMs;
+
+  @override
+  bool operator ==(Object other) =>
+      other is NativeGestureOptions &&
+      other.pan == pan &&
+      other.zoom == zoom &&
+      other.rotate == rotate &&
+      other.pitch == pitch &&
+      other.glides == glides &&
+      other.snapToNorth == snapToNorth &&
+      other.doubleTapZoom == doubleTapZoom &&
+      other.twoFingerTapZoom == twoFingerTapZoom &&
+      other.momentumModel == momentumModel &&
+      other.halfLifeMs == halfLifeMs;
+
+  @override
+  int get hashCode => Object.hash(
+    pan,
+    zoom,
+    rotate,
+    pitch,
+    glides,
+    snapToNorth,
+    doubleTapZoom,
+    twoFingerTapZoom,
+    momentumModel,
+    halfLifeMs,
+  );
+
+  @override
+  String toString() =>
+      'NativeGestureOptions(pan: $pan, zoom: $zoom, rotate: $rotate, '
+      'pitch: $pitch, glides: $glides, snapToNorth: $snapToNorth, '
+      'doubleTapZoom: $doubleTapZoom, twoFingerTapZoom: $twoFingerTapZoom, '
+      'momentumModel: $momentumModel, halfLifeMs: $halfLifeMs)';
+}
+
+/// The kinds of [GestureInput]; `mln_gesture_input_type`.
+abstract final class GestureInputType {
+  /// A pointer went down.
+  static const pointerDown = 1;
+
+  /// A pointer moved.
+  static const pointerMove = 2;
+
+  /// A pointer went up.
+  static const pointerUp = 3;
+
+  /// The platform took a pointer away.
+  static const pointerCancel = 4;
+
+  /// The modes that held keys select.
+  static const modes = 5;
+
+  /// Camera movement from a wheel, a trackpad scroll or keys.
+  static const delta = 6;
+
+  /// A pinch that the platform recognized.
+  static const pinch = 7;
+}
+
+/// One input of the gesture recognizer; `map_texture_gesture_input`.
+class GestureInput {
+  /// An input of [type] with the fields that it uses.
+  const GestureInput({
+    required this.type,
+    this.pointerId = 0,
+    this.pointerKind = 0,
+    this.modes = 0,
+    this.position = Offset.zero,
+    this.discrete = false,
+    this.pan = Offset.zero,
+    this.zoom = 0,
+    this.bearing = 0,
+    this.pitch = 0,
+    this.scale = 1,
+    this.rotation = 0,
+    this.phase = 0,
+  });
+
+  /// A [GestureInputType].
+  final int type;
+
+  /// The pointer, for pointer inputs.
+  final int pointerId;
+
+  /// `mln_pointer_kind`: 0 mouse, 1 touch, 2 pen.
+  final int pointerKind;
+
+  /// `mln_gesture_mode` bits.
+  final int modes;
+
+  /// The pointer's position, a delta's position or a pinch's center.
+  final Offset position;
+
+  /// For a delta: whether it eases.
+  final bool discrete;
+
+  /// For a delta: how far the content moves, in logical pixels.
+  final Offset pan;
+
+  /// For a delta: zoom levels to add.
+  final double zoom;
+
+  /// For a delta: degrees to turn clockwise.
+  final double bearing;
+
+  /// For a delta: degrees to tilt.
+  final double pitch;
+
+  /// For a pinch: the scale since the last update.
+  final double scale;
+
+  /// For a pinch: degrees turned clockwise since the last update.
+  final double rotation;
+
+  /// For a pinch: the `mln_pinch_phase`.
+  final int phase;
+
+  @override
+  String toString() =>
+      'GestureInput(type: $type, id: $pointerId, kind: $pointerKind, '
+      'modes: $modes, position: $position, discrete: $discrete, pan: $pan, '
+      'zoom: $zoom, bearing: $bearing, pitch: $pitch, scale: $scale, '
+      'rotation: $rotation, phase: $phase)';
+}
+
+/// The kinds of [GestureEvent]; `mln_gesture_event_type`.
+abstract final class GestureEventType {
+  /// A tap.
+  static const tap = 1;
+
+  /// The second tap of a double tap.
+  static const doubleTap = 2;
+
+  /// Two fingers tapped together.
+  static const twoFingerTap = 3;
+
+  /// A part reached a notch.
+  static const notch = 4;
+
+  /// A pointer stayed pressed and still for 500 ms.
+  static const longPress = 5;
+}
+
+/// An event of the gesture recognizer; `map_texture_gesture_event`.
+class GestureEvent {
+  /// An event of [type].
+  const GestureEvent({
+    required this.type,
+    this.pointerId = 0,
+    this.position = Offset.zero,
+    this.axis = 0,
+    this.kind = 0,
+    this.value = 0,
+  });
+
+  /// A [GestureEventType].
+  final int type;
+
+  /// For taps and long presses: the pointer.
+  final int pointerId;
+
+  /// For taps and long presses: the position in logical pixels.
+  final Offset position;
+
+  /// For notches: the `mln_gesture_axis`.
+  final int axis;
+
+  /// For notches: the notch's kind.
+  final int kind;
+
+  /// For notches: the value in the part's unit.
+  final double value;
+}
+
+/// When the recognizer next needs a tick; `mln_gesture_next_tick`.
+enum GestureNextTick {
+  /// Not until the next input.
+  none,
+
+  /// Every display frame.
+  frame,
+
+  /// At [GestureResult.nextTickMs].
+  at,
+}
+
+/// What an input or a tick did; `map_texture_gesture_result`.
+class GestureResult {
+  /// A result with the given values.
+  const GestureResult({
+    this.handled = false,
+    this.nextTick = GestureNextTick.none,
+    this.nextTickMs = 0,
+    this.boxZoom,
+    this.events = const [],
+  });
+
+  /// Whether the recognizer used the input.
+  final bool handled;
+
+  /// When the recognizer next needs a tick.
+  final GestureNextTick nextTick;
+
+  /// For [GestureNextTick.at].
+  final double nextTickMs;
+
+  /// The box of a box zoom that is being drawn, in logical pixels.
+  final Rect? boxZoom;
+
+  /// The events, in order.
+  final List<GestureEvent> events;
 }
 
 /// Counters from the native map thread.
@@ -309,10 +823,17 @@ abstract interface class MapTextureController {
   /// Throws [MapTextureException] without calling native code when the native
   /// library isn't available in this process, which is always the case on
   /// web, and when the plugin doesn't give the engine's token.
+  ///
+  /// With [initialCamera], which needs [limits], the map owns its camera
+  /// (design D235): it starts at [initialCamera], and only the camera commands
+  /// and the gesture recognizer of this controller move it. [setCamera] then
+  /// throws a [MapTextureException].
   static Future<MapTextureController> create({
     required double pixelRatio,
     bool copyFree = true,
     List<HeaderRule> httpHeaders = const [],
+    NativeCamera? initialCamera,
+    NativeLimits? limits,
   }) async {
     if (!nativeLibraryAvailable) {
       throw const MapTextureException(
@@ -324,6 +845,8 @@ abstract interface class MapTextureController {
       pixelRatio: pixelRatio,
       copyFree: copyFree,
       httpHeaders: httpHeaders,
+      initialCamera: initialCamera,
+      limits: limits,
     );
   }
 
@@ -496,6 +1019,50 @@ abstract interface class MapTextureController {
 
   /// The counters of the map thread at the time of the call.
   MapTextureStats stats();
+
+  /// For a map that owns its camera: moves the camera to [camera], `mode` 0
+  /// jumping, 1 easing and 2 flying, over [durationMs] or MapLibre's duration
+  /// when it is negative. The end arrives as a [CameraTransitionEnded] with
+  /// [requestId].
+  void cameraCommand(
+    int requestId,
+    int mode,
+    NativeCamera camera, {
+    double durationMs = -1,
+  });
+
+  /// For a map that owns its camera: fits the camera to [fit], as
+  /// [cameraCommand] does.
+  void fitBounds(
+    int requestId,
+    int mode,
+    NativeFit fit, {
+    double durationMs = -1,
+  });
+
+  /// For a map that owns its camera: cancels the running transitions.
+  void cancelTransitions();
+
+  /// For a map that owns its camera: replaces the camera limits.
+  void setLimits(NativeLimits limits);
+
+  /// For a map that owns its camera: creates its gesture recognizer.
+  void createGestureRecognizer(NativeGestureOptions options);
+
+  /// Changes the gesture recognizer's options from the next input on.
+  void setGestureOptions(NativeGestureOptions options);
+
+  /// Passes [input] at [timeMs], on a clock that only goes forward, to the
+  /// gesture recognizer.
+  GestureResult handleGesture(GestureInput input, double timeMs);
+
+  /// Ticks the gesture recognizer at [timeMs].
+  GestureResult tickGesture(double timeMs);
+
+  /// For tests: the logical position at which MapLibre's projection of the
+  /// last frame the map rendered places the coordinate, or null before the
+  /// first frame.
+  Offset? projectForTesting(double latitude, double longitude);
 
   /// Stops the map thread and releases the map, its GPU resources and the
   /// texture. Waits for a frame that is rendering to finish.

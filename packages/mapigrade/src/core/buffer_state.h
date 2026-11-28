@@ -86,6 +86,9 @@ struct FrameInfo {
   uint32_t physical_height = 0;
   double scale_factor = 1;
   FrameProjection projection;
+  // A MAP_TEXTURE_CAMERA_SOURCE_* value (design D243).
+  int32_t camera_source = 0;
+  uint64_t map_update_generation = 0;
 };
 
 class BufferState {
@@ -238,9 +241,9 @@ class BufferState {
 
   // Records that Dart chose the ready slot, which holds the newest finished
   // frame, and returns its index. A ready frame is newer than every held frame,
-  // because a slot becomes held only by a choice. Returns
-  // -1 and changes nothing if no slot is ready. `on_selected(index, info)`
-  // runs under the state lock when the choice is recorded.
+  // because a slot becomes held only by a choice. Returns -1 and changes
+  // nothing if no slot is ready. `on_selected(index, info)` runs under the
+  // state lock when the choice is recorded.
   template <typename F>
   int SelectNewest(F&& on_selected) {
     std::lock_guard lock(mutex_);
