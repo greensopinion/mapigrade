@@ -1,6 +1,6 @@
-import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
-import 'package:flutter_mapigrade/src/layer/queried_feature.dart';
-import 'package:flutter_mapigrade/src/texture/pending_queries.dart';
+import 'package:mapigrade/src/mapigrade_exception.dart';
+import 'package:mapigrade/src/queried_feature.dart';
+import 'package:mapigrade/src/texture/pending_queries.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 QueriedFeature _decode(String json) =>
@@ -48,14 +48,14 @@ void main() {
     expect(feature.properties, isEmpty);
   });
 
-  test('LayerQueryException names its type', () {
+  test('MapigradeQueryException names its type', () {
     expect(
-      const LayerQueryException('bad filter').toString(),
-      'LayerQueryException: bad filter',
+      const MapigradeQueryException('bad filter').toString(),
+      'MapigradeQueryException: bad filter',
     );
     expect(
-      const LayerQueryException('m'),
-      isNot(const LayerRenderException('m')),
+      const MapigradeQueryException('m'),
+      isNot(const MapigradeRenderException('m')),
     );
   });
 }

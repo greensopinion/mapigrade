@@ -1,1 +1,1 @@
-rootProject.name = "flutter_mapigrade"
+rootProject.name = "mapigrade"

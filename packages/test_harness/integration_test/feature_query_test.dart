@@ -18,6 +18,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -28,11 +29,11 @@ const _size = Size(360, 280);
 const _center = LatLng(0, 0);
 const _zoom = 12.0;
 
-/// A map with [LayerController], displayed and at rest.
+/// A map with [MapigradeController], displayed and at rest.
 class _Map {
   _Map(this.controller, this.boundary);
 
-  final LayerController controller;
+  final MapigradeController controller;
   final GlobalKey boundary;
   final mapController = fm.MapController();
   MapTextureController? texture;
@@ -122,7 +123,7 @@ Future<_Map> _show(
   double rotation = 0,
   LayerAlignment alignment = const LayerAlignment.prediction(),
 }) async {
-  final map = _Map(LayerController(), GlobalKey());
+  final map = _Map(MapigradeController(), GlobalKey());
   await tester.pumpWidget(
     _app(
       map,
@@ -348,7 +349,7 @@ void main() {
       );
     });
 
-    testWidgets('an invalid filter fails with a LayerQueryException', (
+    testWidgets('an invalid filter fails with a MapigradeQueryException', (
       tester,
     ) async {
       final map = await _show(tester);
@@ -357,7 +358,7 @@ void main() {
           map.at(const LatLng(routeLatitude, primaryRouteLongitude)),
           filter: ['no-such-operator'],
         ),
-        throwsA(isA<LayerQueryException>()),
+        throwsA(isA<MapigradeQueryException>()),
       );
     });
 

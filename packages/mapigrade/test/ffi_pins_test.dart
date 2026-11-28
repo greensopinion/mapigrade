@@ -1,5 +1,5 @@
 // Checks that the URL and checksum of the remote binary target in
-// darwin/flutter_mapigrade/Package.swift equal MAPLIBRE_FFI_XCFRAMEWORK_URL and
+// darwin/mapigrade/Package.swift equal MAPLIBRE_FFI_XCFRAMEWORK_URL and
 // MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM in maplibre_ffi.lock (design D99 of the
 // publish-readiness change). scripts/update_ffi_pins.sh writes them from the
 // lock file.
@@ -36,8 +36,7 @@ void main() {
     'Package.swift has the xcframework URL and checksum of the lock file',
     () {
       final lock = File('maplibre_ffi.lock').readAsStringSync();
-      final package = File('darwin/flutter_mapigrade/Package.swift')
-          .readAsStringSync();
+      final package = File('darwin/mapigrade/Package.swift').readAsStringSync();
       final problems = <String>[];
       for (final (label, key) in [
         ('url', 'MAPLIBRE_FFI_XCFRAMEWORK_URL'),

@@ -5,6 +5,7 @@
 // multiple-flutter-engines).
 // The other scenarios need the native map and are integration tests in
 // packages/test_harness/integration_test/.
+// ignore_for_file: implementation_imports
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
@@ -12,16 +13,16 @@ import 'package:flutter_map/flutter_map.dart' hide MapCamera, MapEvent;
 import 'package:flutter_map/flutter_map.dart' as fm show MapCamera;
 // The layer's children read the camera through MapInheritedModel; the test
 // that builds it directly fails when a flutter_map release changes it.
-// ignore: implementation_imports
 import 'package:flutter_map/src/map/inherited_model.dart';
-import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
+import 'package:mapigrade/src/camera_projection.dart';
+import 'package:flutter_mapigrade/src/layer/flutter_map_camera.dart';
 import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
-import 'package:flutter_mapigrade/src/layer/layer_controller.dart';
-import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
-import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
-import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
+import 'package:mapigrade/src/mapigrade_controller.dart';
+import 'package:mapigrade/src/http_header_rule.dart';
+import 'package:mapigrade/src/mapigrade_exception.dart';
+import 'package:mapigrade/src/mapigrade_metrics.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -207,7 +208,7 @@ Widget _map(
 
 void main() {
   testWidgets('reports a creation failure once to onError', (tester) async {
-    final failures = <LayerException>[];
+    final failures = <MapigradeException>[];
     MapTextureLayer layer() => MapTextureLayer(
       styleUrl: 'https://example.com/style.json',
       createController: _failingCreate,
@@ -220,7 +221,7 @@ void main() {
     await tester.pumpWidget(_map(layer(), pixelRatio: 3));
 
     expect(failures, [
-      const LayerCreateException('map_texture_create failed with -3'),
+      const MapigradeCreateException('map_texture_create failed with -3'),
     ]);
   });
 
@@ -261,7 +262,7 @@ void main() {
     expect(reports, hasLength(1));
     expect(
       reports.single.exception,
-      const LayerCreateException('map_texture_create failed with -3'),
+      const MapigradeCreateException('map_texture_create failed with -3'),
     );
     expect(reports.single.library, 'flutter_mapigrade');
     expect(find.byKey(_markerKey), findsOneWidget);
@@ -313,7 +314,7 @@ void main() {
     tester,
   ) async {
     const message = 'HTTP header "Host" is managed by MapLibre';
-    final failures = <LayerException>[];
+    final failures = <MapigradeException>[];
     await tester.pumpWidget(
       _map(
         MapTextureLayer(
@@ -328,7 +329,7 @@ void main() {
       ),
     );
 
-    expect(failures, [const LayerCreateException(message)]);
+    expect(failures, [const MapigradeCreateException(message)]);
   });
 
   group('asynchronous creation', () {
@@ -343,7 +344,7 @@ void main() {
       creations = 0;
     }
 
-    MapTextureLayer layer({void Function(LayerException)? onError}) =>
+    MapTextureLayer layer({void Function(MapigradeException)? onError}) =>
         MapTextureLayer(
           styleUrl: style,
           createController:
@@ -394,11 +395,11 @@ void main() {
       expect(controller.styleUrls, isEmpty);
     });
 
-    testWidgets('a failed creation reports one LayerCreateException', (
+    testWidgets('a failed creation reports one MapigradeCreateException', (
       tester,
     ) async {
       start();
-      final failures = <LayerException>[];
+      final failures = <MapigradeException>[];
       await tester.pumpWidget(_map(layer(onError: failures.add)));
       await tester.pumpWidget(
         _map(layer(onError: failures.add), pixelRatio: 2),
@@ -409,7 +410,7 @@ void main() {
         _map(layer(onError: failures.add), pixelRatio: 3),
       );
 
-      expect(failures, [const LayerCreateException('no engine token')]);
+      expect(failures, [const MapigradeCreateException('no engine token')]);
       expect(creations, 1);
       expect(
         tester.getSize(find.byType(MapTextureLayer)),
@@ -431,7 +432,7 @@ void main() {
     }
 
     MapTextureLayer layer(
-      LayerMetrics metrics, {
+      MapigradeMetrics metrics, {
       Key? key,
       String style = 'https://example.com/style.json',
     }) => MapTextureLayer(
@@ -449,7 +450,7 @@ void main() {
         );
 
     void expectValues(
-      LayerMetrics metrics,
+      MapigradeMetrics metrics,
       int displayed,
       int rendered,
       int renderMs,
@@ -463,7 +464,7 @@ void main() {
     setUp(() => controllers = []);
 
     testWidgets('No map yet', (tester) async {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       expectValues(metrics, 0, 0, 0);
       // The layer creates its map when the window's size has arrived.
       await tester.pumpWidget(_map(layer(metrics), size: Size.zero));
@@ -472,7 +473,7 @@ void main() {
     });
 
     testWidgets("Map can't be created", (tester) async {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       await tester.pumpWidget(
         _map(
           MapTextureLayer(
@@ -487,7 +488,7 @@ void main() {
     });
 
     testWidgets('Style change', (tester) async {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       await tester.pumpWidget(_map(layer(metrics)));
       controllers.single.values = stats(2, 3, 10);
       expectValues(metrics, 2, 3, 10);
@@ -502,7 +503,7 @@ void main() {
     });
 
     testWidgets('Layer removed', (tester) async {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       await tester.pumpWidget(_map(layer(metrics)));
       final controller = controllers.single;
       controller.values = stats(2, 3, 10);
@@ -518,7 +519,7 @@ void main() {
     });
 
     testWidgets('New key with the same object', (tester) async {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       await tester.pumpWidget(_map(layer(metrics, key: const ValueKey(1))));
       controllers.single.values = stats(4, 5, 20);
       expectValues(metrics, 4, 5, 20);
@@ -533,12 +534,12 @@ void main() {
     });
 
     testWidgets('Different object for the same map', (tester) async {
-      final previous = LayerMetrics();
+      final previous = MapigradeMetrics();
       await tester.pumpWidget(_map(layer(previous)));
       final controller = controllers.single;
       controller.values = stats(2, 3, 10);
 
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       await tester.pumpWidget(_map(layer(metrics)));
       controller.values = stats(4, 5, 20);
 
@@ -881,7 +882,7 @@ void main() {
     );
 
     MapTextureLayer layer(
-      LayerController? controller,
+      MapigradeController? controller,
       MapTextureController fake, {
       Key? key,
     }) => MapTextureLayer(
@@ -898,7 +899,7 @@ void main() {
     }
 
     testWidgets('queries the map of the layer it was given to', (tester) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final fake = _FakeController()
         ..queryResult = () async => [
           {
@@ -937,7 +938,7 @@ void main() {
 
     testWidgets('converts the query square with the camera of the displayed '
         'frame', (tester) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final fake = _FakeController();
       await show(tester, map([layer(controller, fake)]));
       // The first frame is rendered with the first camera, and displayed.
@@ -985,7 +986,7 @@ void main() {
     testWidgets('a controller that is not attached fails with a StateError', (
       tester,
     ) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       await expectLater(
         controller.queryRenderedFeatures(Offset.zero),
         throwsStateError,
@@ -1003,7 +1004,7 @@ void main() {
     testWidgets('a layer without a map fails queries with a StateError', (
       tester,
     ) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final creation = Completer<MapTextureController>();
       await tester.pumpWidget(
         map([
@@ -1023,7 +1024,7 @@ void main() {
         throwsStateError,
       );
 
-      final failed = LayerController();
+      final failed = MapigradeController();
       await show(
         tester,
         map([
@@ -1043,7 +1044,7 @@ void main() {
 
     testWidgets('detaches when the layer is removed, and attaches to the next '
         'layer', (tester) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final first = _FakeController();
       await show(tester, map([layer(controller, first)]));
       await show(tester, map([]));
@@ -1062,8 +1063,8 @@ void main() {
     testWidgets('detaches when the layer is rebuilt with another controller', (
       tester,
     ) async {
-      final a = LayerController();
-      final b = LayerController();
+      final a = MapigradeController();
+      final b = MapigradeController();
       final fake = _FakeController();
       await show(tester, map([layer(a, fake, key: const Key('layer'))]));
       await show(tester, map([layer(b, fake, key: const Key('layer'))]));
@@ -1073,25 +1074,25 @@ void main() {
     });
 
     test('fails an assertion when given to a second layer', () {
-      final controller = LayerController();
+      final controller = MapigradeController();
       ViewCamera camera() => throw UnimplementedError();
       final first = Object();
-      bindLayerController(controller, first, camera);
+      bindController(controller, first, camera);
       expect(
-        () => bindLayerController(controller, Object(), camera),
+        () => bindController(controller, Object(), camera),
         throwsAssertionError,
       );
       // The layer that has it may bind it again, and another may after the
       // release.
-      bindLayerController(controller, first, camera);
-      releaseLayerController(controller, first);
-      bindLayerController(controller, Object(), camera);
+      bindController(controller, first, camera);
+      releaseController(controller, first);
+      bindController(controller, Object(), camera);
     });
 
-    testWidgets('a failed query completes with a LayerQueryException', (
+    testWidgets('a failed query completes with a MapigradeQueryException', (
       tester,
     ) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final fake = _FakeController()
         ..queryResult = () async =>
             throw const MapTextureException('invalid filter');
@@ -1101,12 +1102,12 @@ void main() {
           const Rect.fromLTWH(0, 0, 10, 10),
           filter: ['no-such-operator'],
         ),
-        throwsA(const LayerQueryException('invalid filter')),
+        throwsA(const MapigradeQueryException('invalid filter')),
       );
     });
 
     testWidgets('checks arguments and converts feature IDs', (tester) async {
-      final controller = LayerController();
+      final controller = MapigradeController();
       final fake = _FakeController();
       await show(tester, map([layer(controller, fake)]));
 

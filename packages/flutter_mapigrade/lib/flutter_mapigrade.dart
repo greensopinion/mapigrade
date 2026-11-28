@@ -2,19 +2,21 @@
 /// see [MapigradeLayer].
 library;
 
-export 'src/layer/http_header_rule.dart' show HttpHeaderRule;
-export 'src/layer/layer_alignment.dart' show LayerAlignment;
-export 'src/layer/layer_controller.dart' show LayerController;
-export 'src/layer/layer_exception.dart'
+export 'package:mapigrade/mapigrade.dart'
     show
-        LayerCreateException,
-        LayerException,
-        LayerLoadException,
-        LayerQueryException,
-        LayerRenderException;
-export 'src/layer/layer_metrics.dart' show LayerMetrics, LayerMetricsSnapshot;
-export 'src/layer/layer_placement.dart' show LayerPlacement;
+        HttpHeaderRule,
+        MapigradeController,
+        MapigradeCreateException,
+        MapigradeException,
+        MapigradeLoadException,
+        MapigradeMetrics,
+        MapigradeMetricsSnapshot,
+        MapigradePolyline,
+        MapigradePolylineLayer,
+        MapigradeQueryException,
+        MapigradeRenderException,
+        OverlayPlacement,
+        QueriedFeature;
+
+export 'src/layer/layer_alignment.dart' show LayerAlignment;
 export 'src/layer/mapigrade_layer.dart' show MapigradeLayer;
-export 'src/layer/queried_feature.dart' show QueriedFeature;
-export 'src/polyline/mapigrade_polyline.dart' show MapigradePolyline;
-export 'src/polyline/mapigrade_polyline_layer.dart' show MapigradePolylineLayer;

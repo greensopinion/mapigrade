@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# Builds an application that depends on flutter_mapigrade as the published
-# archive contains it, outside this checkout (design D106 of the
-# publish-readiness change). The workflow consumer-build.yml runs it.
+# Builds an application that depends on flutter_mapigrade, with
+# flutter_mapigrade and mapigrade as their published archives contain them,
+# outside this checkout (design D106 of the publish-readiness change, D233 of
+# the split-mapigrade-package change). The workflow consumer-build.yml runs it.
 #
 #   scripts/consumer_build.sh <work-dir> <platform>...
 #
 # The platforms are android, ios, macos and web. The script:
 #
-# 1. Runs `flutter pub publish --dry-run` in packages/flutter_mapigrade and
-#    copies the files it lists, with symlinks resolved, to
+# 1. Runs `flutter pub publish --dry-run` in packages/mapigrade and
+#    packages/flutter_mapigrade, and copies the files that each lists, with
+#    symlinks resolved, to <work-dir>/mapigrade and
 #    <work-dir>/flutter_mapigrade. Flutter can't write the archive to a file.
 # 2. Creates the application <work-dir>/consumer_app with `flutter create`, with
-#    a path dependency on that copy and the example's lib/main.dart, and sets
-#    the minimum Android SDK and iOS and macOS versions that the package needs.
+#    a path dependency on the copy of flutter_mapigrade, a dependency override
+#    that resolves mapigrade from its copy, and the example's lib/main.dart,
+#    and sets the minimum Android SDK and iOS and macOS versions that the package needs.
 #    For web it creates a second application, <work-dir>/consumer_web_app,
 #    whose lib/main.dart places MapigradeLayer only when
 #    MapigradeLayer.isSupported is true, as the package's README shows.
@@ -20,13 +23,13 @@
 #    device build without code signing; macos, a release build; web, a build
 #    compiled to JavaScript and a build compiled to WebAssembly.
 # 4. Checks that the APK's lib/ has libmaplibre-native-c.so and
-#    libflutter_mapigrade.so for arm64-v8a, armeabi-v7a and x86_64, and that
-#    the iOS and macOS applications contain MaplibreNativeC.framework.
+#    libmapigrade.so for arm64-v8a, armeabi-v7a and x86_64, and that the iOS
+#    and macOS applications contain MaplibreNativeC.framework.
 #
 # <work-dir> must be outside the checkout, so that a build that reads a file
 # through a path outside the package fails. The script deletes and recreates
-# <work-dir>/flutter_mapigrade, <work-dir>/consumer_app and
-# <work-dir>/consumer_web_app.
+# <work-dir>/mapigrade, <work-dir>/flutter_mapigrade, <work-dir>/consumer_app
+# and <work-dir>/consumer_web_app.
 #
 # Requires: flutter, python3, unzip; for ios and macos, Xcode.
 set -euo pipefail
@@ -59,23 +62,26 @@ for platform in "${platforms[@]}"; do
   esac
 done
 
-archive_dir="$work_dir/flutter_mapigrade"
 app_dir="$work_dir/consumer_app"
 web_app_dir="$work_dir/consumer_web_app"
-rm -rf "$archive_dir" "$app_dir" "$web_app_dir"
+rm -rf "$work_dir/mapigrade" "$work_dir/flutter_mapigrade" "$app_dir" "$web_app_dir"
 
-# 1. The archive. The dry run prints the file list as a tree: each entry is
+# 1. The archives. The dry run prints the file list as a tree: each entry is
 # indented by four characters per level and ends with its size, and a
 # directory has no size.
-echo "== Archive"
-dry_run_output="$work_dir/dry_run.txt"
-(cd "$package_dir" && flutter pub publish --dry-run) > "$dry_run_output" 2>&1 || {
-  cat "$dry_run_output"
-  echo "flutter pub publish --dry-run failed" >&2
-  exit 1
-}
-file_list="$work_dir/archive_files.txt"
-python3 - "$dry_run_output" > "$file_list" <<'EOF'
+copy_archive() {
+  local package=$1
+  local source_dir="$repo_root/packages/$package"
+  local archive_dir="$work_dir/$package"
+  local dry_run_output="$work_dir/dry_run_$package.txt"
+  local file_list="$work_dir/archive_files_$package.txt"
+  echo "== Archive of $package"
+  (cd "$source_dir" && flutter pub publish --dry-run) > "$dry_run_output" 2>&1 || {
+    cat "$dry_run_output"
+    echo "flutter pub publish --dry-run failed in packages/$package" >&2
+    exit 1
+  }
+  python3 - "$dry_run_output" > "$file_list" <<'EOF'
 import re
 import sys
 
@@ -94,20 +100,23 @@ for line in open(sys.argv[1], encoding="utf-8"):
     if sized.search(line):
         print("/".join(path))
 EOF
-if [[ ! -s "$file_list" ]]; then
-  cat "$dry_run_output"
-  echo "The dry run listed no files" >&2
-  exit 1
-fi
-while IFS= read -r file; do
-  mkdir -p "$archive_dir/$(dirname "$file")"
-  cp -L "$package_dir/$file" "$archive_dir/$file"
-done < "$file_list"
-echo "Copied $(wc -l < "$file_list" | tr -d ' ') files to $archive_dir"
-# The package is a member of this repository's workspace, which the copy is
-# not part of.
-sed -i.bak '/^resolution: workspace$/d' "$archive_dir/pubspec.yaml"
-rm "$archive_dir/pubspec.yaml.bak"
+  if [[ ! -s "$file_list" ]]; then
+    cat "$dry_run_output"
+    echo "The dry run of $package listed no files" >&2
+    exit 1
+  fi
+  while IFS= read -r file; do
+    mkdir -p "$archive_dir/$(dirname "$file")"
+    cp -L "$source_dir/$file" "$archive_dir/$file"
+  done < "$file_list"
+  echo "Copied $(wc -l < "$file_list" | tr -d ' ') files to $archive_dir"
+  # The package is a member of this repository's workspace, which the copy is
+  # not part of.
+  sed -i.bak '/^resolution: workspace$/d' "$archive_dir/pubspec.yaml"
+  rm "$archive_dir/pubspec.yaml.bak"
+}
+copy_archive mapigrade
+copy_archive flutter_mapigrade
 
 # 2. The application.
 echo "== Application"
@@ -116,7 +125,8 @@ cp "$package_dir/example/lib/main.dart" "$app_dir/lib/main.dart"
 rm -f "$app_dir/test/widget_test.dart"
 (
   cd "$app_dir"
-  flutter pub add flutter_mapigrade --path ../flutter_mapigrade
+  flutter pub add 'flutter_mapigrade:{"path":"../flutter_mapigrade"}' \
+    'override:mapigrade:{"path":"../mapigrade"}'
   flutter pub add flutter_map:8.3.2 latlong2:^0.10.1
 )
 # The minimum versions of the package: iOS 15.0 and macOS 14.3. On Android the
@@ -144,7 +154,8 @@ if [[ " ${platforms[*]} " == *" web "* ]]; then
   rm -f "$web_app_dir/test/widget_test.dart"
   (
     cd "$web_app_dir"
-    flutter pub add flutter_mapigrade --path ../flutter_mapigrade
+    flutter pub add 'flutter_mapigrade:{"path":"../flutter_mapigrade"}' \
+      'override:mapigrade:{"path":"../mapigrade"}'
     flutter pub add flutter_map:8.3.2 latlong2:^0.10.1
   )
   cat > "$web_app_dir/lib/main.dart" <<'EOF'
@@ -189,7 +200,7 @@ for platform in "${platforms[@]}"; do
       apk="$app_dir/build/app/outputs/flutter-apk/app-release.apk"
       apk_files=$(unzip -Z1 "$apk")
       for abi in arm64-v8a armeabi-v7a x86_64; do
-        for library in libmaplibre-native-c.so libflutter_mapigrade.so; do
+        for library in libmaplibre-native-c.so libmapigrade.so; do
           grep -qx "lib/$abi/$library" <<< "$apk_files" \
             || fail "the APK has no lib/$abi/$library"
         done

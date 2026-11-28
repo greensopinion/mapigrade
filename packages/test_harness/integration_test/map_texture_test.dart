@@ -9,7 +9,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_mapigrade/flutter_mapigrade.dart' show MapigradeLayer;
-import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 import 'package:test_harness/main.dart' as app;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';

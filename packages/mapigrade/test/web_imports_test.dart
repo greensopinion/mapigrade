@@ -12,9 +12,9 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
-const mainLibrary = 'lib/flutter_mapigrade.dart';
+const mainLibrary = 'lib/mapigrade.dart';
 const webCondition = 'dart.library.js_interop';
-const packagePrefix = 'package:flutter_mapigrade/';
+const packagePrefix = 'package:mapigrade/';
 
 /// Libraries that dart2js or dart2wasm reject.
 const unavailableOnWeb = {

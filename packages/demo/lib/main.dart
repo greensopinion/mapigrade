@@ -62,7 +62,7 @@ class _UnsupportedScreen extends StatelessWidget {
         padding: EdgeInsets.all(24),
         child: Text(
           'The map isn\'t supported on this device: '
-          'flutter_mapigrade\'s native library isn\'t available.',
+          'mapigrade\'s native library isn\'t available.',
           textAlign: TextAlign.center,
         ),
       ),

@@ -9,7 +9,7 @@
 MAPLIBRE_FFI_VERSION=
 # The xcframework zip of that release and its `swift package compute-checksum`
 # value. scripts/update_ffi_pins.sh writes both into
-# darwin/flutter_mapigrade/Package.swift. Empty without a release.
+# darwin/mapigrade/Package.swift. Empty without a release.
 MAPLIBRE_FFI_XCFRAMEWORK_URL=
 MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git

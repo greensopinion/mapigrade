@@ -110,7 +110,7 @@ static void MLTObserveApplicationLifecycle(void) {
   // The channel belongs to this engine, so Dart in this engine receives this
   // engine's token.
   FlutterMethodChannel* channel =
-      [FlutterMethodChannel methodChannelWithName:@"flutter_mapigrade"
+      [FlutterMethodChannel methodChannelWithName:@"mapigrade"
                                   binaryMessenger:registrar.messenger];
   [registrar addMethodCallDelegate:instance channel:channel];
 #if TARGET_OS_IOS

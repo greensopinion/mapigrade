@@ -1,4 +1,4 @@
-/// A feature that the map renders where a query of a `LayerController`
+/// A feature that the map renders where a query of a `MapigradeController`
 /// looked.
 final class QueriedFeature {
   /// A feature with the given values, for example to test code that handles
@@ -15,7 +15,7 @@ final class QueriedFeature {
   /// The feature's ID: an `int`, a `double` or a `String`, or null when the
   /// feature has none. Vector tiles have integer IDs; an ID of 2^63 or more
   /// is a `double` and loses precision, so it can't select the feature in
-  /// `LayerController.setFeatureState`.
+  /// `MapigradeController.setFeatureState`.
   final Object? id;
 
   /// The feature's properties. Values are `String`, `num`, `bool`, null,

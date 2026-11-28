@@ -1,5 +1,5 @@
 name: test_harness
-description: "Integration tests, benchmarks and measurement tools for the flutter_mapigrade plugin."
+description: "Integration tests, benchmarks and measurement tools for mapigrade and flutter_mapigrade."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -21,6 +21,8 @@ dependencies:
 
   flutter_mapigrade:
     path: ../flutter_mapigrade
+  mapigrade:
+    path: ../mapigrade
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

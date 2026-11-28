@@ -33,7 +33,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/scheduler.dart';
-import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 
 const benchmarkEnabled = bool.fromEnvironment('BENCHMARK');
 

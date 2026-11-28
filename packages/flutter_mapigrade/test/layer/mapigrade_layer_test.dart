@@ -1,15 +1,16 @@
 // Widget tests for the public layer (design D66 of the public-api change, D86
 // of unsupported-architectures, D111 of layer-metrics, D127 of
 // layer-children-alignment).
+// ignore_for_file: implementation_imports
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
+import 'package:mapigrade/src/http_header_rule.dart';
 import 'package:flutter_mapigrade/src/layer/layer_alignment.dart';
-import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
-import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
+import 'package:mapigrade/src/mapigrade_exception.dart';
+import 'package:mapigrade/src/mapigrade_metrics.dart';
 import 'package:flutter_mapigrade/src/layer/mapigrade_layer.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
-import 'package:flutter_mapigrade/src/texture/native_library.dart';
+import 'package:mapigrade/src/texture/native_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -22,7 +23,7 @@ void main() {
     tester,
   ) async {
     void onStyleLoaded() {}
-    void onError(LayerException exception) {}
+    void onError(MapigradeException exception) {}
     final httpHeaders = [
       HttpHeaderRule(url: 'https://a.example.com/**', headers: {'X-Key': 'k'}),
     ];
@@ -98,7 +99,7 @@ void main() {
   });
 
   testWidgets('passes metrics', (tester) async {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(size: Size.zero),
@@ -142,8 +143,8 @@ void main() {
     tester,
   ) async {
     nativeLibraryAvailableOverride = false;
-    final failures = <LayerException>[];
-    final metrics = LayerMetrics();
+    final failures = <MapigradeException>[];
+    final metrics = MapigradeMetrics();
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(size: Size(800, 600)),
@@ -176,10 +177,10 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(failures, hasLength(1));
-    expect(failures.single, isA<LayerCreateException>());
+    expect(failures.single, isA<MapigradeCreateException>());
     expect(
       failures.single.message,
-      contains('native library of flutter_mapigrade is not available'),
+      contains('native library of mapigrade is not available'),
     );
     expect(find.byKey(_markerKey), findsOneWidget);
     expect(metrics.snapshot().renderedFrames, 0);

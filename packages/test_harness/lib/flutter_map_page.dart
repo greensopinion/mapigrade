@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'alignment_mode.dart';

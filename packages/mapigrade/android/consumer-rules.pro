@@ -1,6 +1,6 @@
 # Native code creates MapSurface and calls these methods through JNI, which R8
 # can't see.
--keep class com.greensopinion.flutter_mapigrade.MapSurface {
+-keep class com.greensopinion.mapigrade.MapSurface {
     <init>(io.flutter.view.TextureRegistry, long);
     long id();
     android.view.Surface resize(int, int);
@@ -9,6 +9,6 @@
     void releaseReaders();
     void release();
 }
--keepclasseswithmembernames class com.greensopinion.flutter_mapigrade.** {
+-keepclasseswithmembernames class com.greensopinion.mapigrade.** {
     native <methods>;
 }

@@ -1,5 +1,5 @@
 // Designs D80 and D82 of the http-headers-and-assets change.
-import 'package:flutter_mapigrade/src/layer/http_header_rule.dart';
+import 'package:mapigrade/src/http_header_rule.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

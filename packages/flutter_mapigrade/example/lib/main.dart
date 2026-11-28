@@ -49,7 +49,7 @@ class ExampleApp extends StatelessWidget {
 
 final _messenger = GlobalKey<ScaffoldMessengerState>();
 
-void _showError(LayerException exception) {
+void _showError(MapigradeException exception) {
   _messenger.currentState?.showSnackBar(
     SnackBar(content: Text(exception.message)),
   );

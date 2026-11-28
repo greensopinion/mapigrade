@@ -11,17 +11,13 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 // that a flutter_map release that changes it fails the tests.
 // ignore: implementation_imports
 import 'package:flutter_map/src/map/inherited_model.dart';
+import 'package:mapigrade/mapigrade.dart';
+// ignore: implementation_imports
+import 'package:mapigrade/src/integration.dart';
 
-import '../texture/map_texture_controller.dart';
-import '../texture/map_texture_view.dart';
 import 'camera_prediction.dart';
-import 'camera_projection.dart';
-import 'http_header_rule.dart';
+import 'flutter_map_camera.dart';
 import 'layer_alignment.dart';
-import 'layer_controller.dart';
-import 'layer_exception.dart';
-import 'layer_metrics.dart';
-import 'overlay_host.dart';
 
 /// Creates the map of a [MapTextureLayer]; the signature of
 /// [MapTextureController.create], with [HttpHeaderRule]s.
@@ -73,7 +69,7 @@ class MapTextureLayer extends StatefulWidget {
 
   /// Called with each failure of the map. When null, the layer reports the
   /// failure through [FlutterError.reportError].
-  final void Function(LayerException exception)? onError;
+  final void Function(MapigradeException exception)? onError;
 
   /// Read when the layer creates its map.
   final List<HttpHeaderRule> httpHeaders;
@@ -84,7 +80,7 @@ class MapTextureLayer extends StatefulWidget {
   final bool copyFree;
 
   /// Reports the frame counts of the layer's map.
-  final LayerMetrics? metrics;
+  final MapigradeMetrics? metrics;
 
   /// Drawn above the map at the `flutter_map` camera of the displayed map
   /// frame.
@@ -92,7 +88,7 @@ class MapTextureLayer extends StatefulWidget {
 
   /// Queries the layer's map and sets its feature state while the layer is
   /// in the tree.
-  final LayerController? controller;
+  final MapigradeController? controller;
 
   /// Called with the layer's controller after it is created, for tests and
   /// measurements.
@@ -146,7 +142,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   void initState() {
     super.initState();
     if (widget.controller case final controller?) {
-      bindLayerController(controller, this, _displayedCamera);
+      bindController(controller, this, _displayedCamera);
     }
   }
 
@@ -189,7 +185,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
         _creating = false;
         _createFailed = true;
       });
-      _report(LayerCreateException(e.message));
+      _report(MapigradeCreateException(e.message));
       return;
     }
     if (!mounted) {
@@ -201,7 +197,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       _controller = controller;
     });
     if (widget.controller case final layerController?) {
-      setLayerControllerMap(layerController, this, controller);
+      setControllerMap(layerController, this, controller);
     }
     if (widget.metrics case final metrics?) bindMetrics(metrics, controller);
     _events = controller.events.listen(_onEvent);
@@ -230,12 +226,12 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
     }
     if (!identical(widget.controller, oldWidget.controller)) {
       if (oldWidget.controller case final old?) {
-        releaseLayerController(old, this);
+        releaseController(old, this);
       }
       if (widget.controller case final controller?) {
-        bindLayerController(controller, this, _displayedCamera);
+        bindController(controller, this, _displayedCamera);
         if (_controller case final map?) {
-          setLayerControllerMap(controller, this, map);
+          setControllerMap(controller, this, map);
         }
       }
     }
@@ -265,15 +261,17 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
       // MapLibre retries a request that failed to connect, and reports each
       // failed attempt with the same message.
       case LoadingFailed(:final message):
-        if (_loadFailures.add(message)) _report(LayerLoadException(message));
+        if (_loadFailures.add(message)) {
+          _report(MapigradeLoadException(message));
+        }
       case RenderError(:final message):
-        _report(LayerRenderException(message));
+        _report(MapigradeRenderException(message));
       case MapIdle():
         break;
     }
   }
 
-  void _report(LayerException exception) {
+  void _report(MapigradeException exception) {
     if (widget.onError case final onError?) {
       onError(exception);
       return;
@@ -290,7 +288,7 @@ class _MapTextureLayerState extends State<MapTextureLayer> {
   @override
   void dispose() {
     if (widget.controller case final controller?) {
-      releaseLayerController(controller, this);
+      releaseController(controller, this);
     }
     _host.detach();
     _events?.cancel();

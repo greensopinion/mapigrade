@@ -1,7 +1,8 @@
-// The API test of the package-api spec (design D70 of the public-api change):
-// what the main library exports, the naming rule for exported names, and the
-// class modifiers of exported classes. Adding API requires editing
-// `expectedNames`.
+// The API test of the package-api spec (design D70 of the public-api change,
+// D229 and D230 of the split-mapigrade-package change): what the main library
+// exports, the naming rule for exported names, the class modifiers of
+// exported classes, and which libraries of mapigrade lib/ imports. Adding API
+// requires editing `expectedNames`.
 @Timeout(Duration(minutes: 3))
 library;
 
@@ -17,22 +18,25 @@ import 'package:path/path.dart' as p;
 
 const mainLibrary = 'package:flutter_mapigrade/flutter_mapigrade.dart';
 
+/// The names that flutter_mapigrade declares; the others are mapigrade's.
+const ownNames = {'MapigradeLayer', 'LayerAlignment'};
+
 const expectedNames = {
   'MapigradeLayer',
   'LayerAlignment',
-  'LayerException',
-  'LayerLoadException',
-  'LayerRenderException',
-  'LayerCreateException',
-  'LayerQueryException',
+  'MapigradeException',
+  'MapigradeLoadException',
+  'MapigradeRenderException',
+  'MapigradeCreateException',
+  'MapigradeQueryException',
   'HttpHeaderRule',
-  'LayerMetrics',
-  'LayerMetricsSnapshot',
-  'LayerController',
+  'MapigradeMetrics',
+  'MapigradeMetricsSnapshot',
+  'MapigradeController',
   'QueriedFeature',
   'MapigradePolyline',
   'MapigradePolylineLayer',
-  'LayerPlacement',
+  'OverlayPlacement',
 };
 
 /// Names that `flutter_map` uses for its own types. Exported names must not
@@ -57,7 +61,7 @@ const otherLibraries = [
 
 /// Abstract final, so that applications can't extend it and a new subclass is
 /// a compatible change (design D68); every other exported class is final.
-const abstractFinalClasses = {'LayerException'};
+const abstractFinalClasses = {'MapigradeException'};
 
 /// The Dart SDK of the Flutter SDK that runs the test. The analyzer's default
 /// is the SDK of the running executable, which under `flutter test` is
@@ -114,6 +118,75 @@ void main() {
       isEmpty,
       reason: 'in the spec but not exported',
     );
+  });
+
+  test(
+    'the shared names are the declarations that mapigrade exports',
+    () async {
+      final result = await context.currentSession.getLibraryByUri(
+        'package:mapigrade/mapigrade.dart',
+      );
+      final mapigrade = exportsOf((result as LibraryElementResult).element);
+      final violations = <String>[];
+      for (final MapEntry(key: name, :value) in exportsOf(library).entries) {
+        if (ownNames.contains(name)) continue;
+        if (!identical(mapigrade[name], value)) {
+          violations.add('$name is not the declaration that mapigrade exports');
+        }
+      }
+      expect(violations, isEmpty);
+    },
+  );
+
+  test('no class of lib/ extends, implements or mixes in a type of '
+      'mapigrade', () async {
+    final violations = <String>[];
+    for (final file
+        in Directory(p.join(packageRoot, 'lib'))
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.dart'))) {
+      final result = await context.currentSession.getResolvedLibrary(file.path);
+      if (result is! ResolvedLibraryResult) continue;
+      for (final element in result.element.classes) {
+        for (final supertype in element.allSupertypes) {
+          final uri = supertype.element.library.uri.toString();
+          if (uri.startsWith('package:mapigrade/')) {
+            violations.add(
+              '${element.name} has the supertype ${supertype.element.name} of $uri',
+            );
+          }
+        }
+      }
+    }
+    expect(violations, isEmpty);
+  });
+
+  test('lib/ imports mapigrade only through its main library and '
+      'src/integration.dart', () {
+    const allowed = {
+      'package:mapigrade/mapigrade.dart',
+      'package:mapigrade/src/integration.dart',
+    };
+    final violations = <String>[];
+    for (final file
+        in Directory(p.join(packageRoot, 'lib'))
+            .listSync(recursive: true)
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.dart'))) {
+      final unit = (context.currentSession.getParsedUnit(
+        file.path,
+      ) as ParsedUnitResult).unit;
+      for (final directive in unit.directives.whereType<NamespaceDirective>()) {
+        final uri = directive.uri.stringValue ?? '';
+        if (uri.startsWith('package:mapigrade/') && !allowed.contains(uri)) {
+          violations.add(
+            '${p.relative(file.path, from: packageRoot)} imports $uri',
+          );
+        }
+      }
+    }
+    expect(violations, isEmpty);
   });
 
   test('every export directive of the main library has a show list', () {

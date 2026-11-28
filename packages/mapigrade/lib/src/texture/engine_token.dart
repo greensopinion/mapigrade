@@ -5,7 +5,7 @@ import 'map_texture_controller.dart' show MapTextureException;
 
 /// The channel that the plugin registers with each engine.
 @visibleForTesting
-const engineChannel = MethodChannel('flutter_mapigrade');
+const engineChannel = MethodChannel('mapigrade');
 
 int? _token;
 Future<int>? _request;
@@ -28,7 +28,7 @@ Future<int> _requestToken() async {
     final token = await engineChannel.invokeMethod<int>('engineToken');
     if (token == null) {
       throw const MapTextureException(
-        'flutter_mapigrade returned no token for the Flutter engine',
+        'mapigrade returned no token for the Flutter engine',
       );
     }
     _token = token;
@@ -37,7 +37,7 @@ Future<int> _requestToken() async {
     rethrow;
   } on Exception catch (e) {
     throw MapTextureException(
-      'failed to get the token of the Flutter engine from flutter_mapigrade: '
+      'failed to get the token of the Flutter engine from mapigrade: '
       '$e',
     );
   } finally {

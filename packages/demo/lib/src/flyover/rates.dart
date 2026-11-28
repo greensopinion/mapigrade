@@ -1,4 +1,4 @@
-/// The map's counts at one time, from a `LayerMetricsSnapshot`.
+/// The map's counts at one time, from a `MapigradeMetricsSnapshot`.
 typedef Counts = ({
   Duration time,
   int displayedFrames,

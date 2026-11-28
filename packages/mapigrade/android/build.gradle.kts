@@ -1,5 +1,5 @@
 // The Android part of the plugin (design D57): the Kotlin plugin class, and
-// libflutter_mapigrade.so, built with CMake from src/core/ and
+// libmapigrade.so, built with CMake from src/core/ and
 // src/main/cpp/, linked against the MapLibre Native FFI library
 // libmaplibre-native-c.so.
 //
@@ -17,7 +17,7 @@
 //   for the ABIs of the Android presets it installed. The plugin packages the
 //   library itself. The example and the test harness set the property in their
 //   android/gradle.properties.
-group = "com.greensopinion.flutter_mapigrade"
+group = "com.greensopinion.mapigrade"
 version = "1.0-SNAPSHOT"
 
 buildscript {
@@ -69,12 +69,12 @@ if (localFfiDir != null) {
         "mapigrade.ffiDir ($localFfiDir) has no Android preset; run scripts/build_maplibre_ffi.sh android-arm64"
     }
     logger.lifecycle(
-        "flutter_mapigrade: MapLibre Native FFI local build in $localFfiDir, ABIs ${localPresets.keys.joinToString()}")
+        "mapigrade: MapLibre Native FFI local build in $localFfiDir, ABIs ${localPresets.keys.joinToString()}")
 } else {
     check(ffiVersion.isNotEmpty()) {
         "maplibre_ffi.lock names no MapLibre Native FFI release; build the FFI with scripts/build_maplibre_ffi.sh and set the Gradle property mapigrade.ffiDir"
     }
-    logger.lifecycle("flutter_mapigrade: MapLibre Native FFI $ffiVersion from Maven Central")
+    logger.lifecycle("mapigrade: MapLibre Native FFI $ffiVersion from Maven Central")
 }
 val abis = if (localFfiDir != null) localPresets.keys.toList() else releaseAbis
 
@@ -92,7 +92,7 @@ plugins {
 val ffiLibraryDir = layout.buildDirectory.dir("ffi-lib")
 
 android {
-    namespace = "com.greensopinion.flutter_mapigrade"
+    namespace = "com.greensopinion.mapigrade"
 
     compileSdk = 36
     ndkVersion = "30.0.16248370"

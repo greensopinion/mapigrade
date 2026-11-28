@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Writes MAPLIBRE_FFI_XCFRAMEWORK_URL and MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM from
-# packages/flutter_mapigrade/maplibre_ffi.lock into the remote binary target of
-# packages/flutter_mapigrade/darwin/flutter_mapigrade/Package.swift (design D99
+# packages/mapigrade/maplibre_ffi.lock into the remote binary target of
+# packages/mapigrade/darwin/mapigrade/Package.swift (design D99
 # and D102 of the publish-readiness change). Run it after changing either value
-# in the lock file; packages/flutter_mapigrade/test/ffi_pins_test.dart fails
+# in the lock file; packages/mapigrade/test/ffi_pins_test.dart fails
 # while the two files disagree. While the lock names no release, both values
 # are empty, and Package.swift then fails without a local FFI build, with a
 # message that names scripts/build_maplibre_ffi.sh.
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
-source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
-package_swift="$repo_root/packages/flutter_mapigrade/darwin/flutter_mapigrade/Package.swift"
+# shellcheck source=../packages/mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/mapigrade/maplibre_ffi.lock"
+package_swift="$repo_root/packages/mapigrade/darwin/mapigrade/Package.swift"
 
 if [[ -z "$MAPLIBRE_FFI_XCFRAMEWORK_URL" && -z "$MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM" ]]; then
   echo "The lock file names no FFI release; writing an empty URL and checksum"

@@ -41,11 +41,11 @@ Alternative: keep `LayerController` as a wrapper that forwards to a `MapigradeCo
 
 Alternative: a public `package:mapigrade/integration.dart` marked unsupported. A file outside `lib/src/` is API by convention and by the requirement "Exported names", so applications would have a supported-looking way to depend on internals.
 
-### D231. One version number, exact constraint, released together
+### D231. One version number, a one-release range, released together
 
-Both packages always have the same version, and `flutter_mapigrade` depends on exactly that version of `mapigrade`, with no range. The first release of `mapigrade` is 0.2.0, the same version as the next `flutter_mapigrade`. Because of the exact constraint, a release of one package is unusable without a release of the other, so every release releases both; a package without changes gets a CHANGELOG entry that says so.
+Both packages always have the same version, and `flutter_mapigrade` depends on `mapigrade` with the range from that version to the next patch version, for example `>=0.2.0 <0.2.1`. The range allows that version and its versions with build metadata, such as `0.2.0+1`, and no other version; we don't publish versions with build metadata, so it allows one release. We first chose an exact constraint, `mapigrade: 0.2.0`, but `flutter pub publish --dry-run` warns that a dependency should allow more than one version, and the requirement "Published archive contents" allows no warning. The first release of `mapigrade` is 0.2.0, the same version as the next `flutter_mapigrade`. Because of the range, a release of one package is unusable without a release of the other, so every release releases both; a package without changes gets a CHANGELOG entry that says so.
 
-`scripts/set_version.sh <version>` writes the three values: the `version` of each `pubspec.yaml` and `flutter_mapigrade`'s constraint on `mapigrade`. A unit test fails, and names the value that differs, when the three aren't equal. Between releases, both pubspecs keep the last released version, and the pub workspace resolves `mapigrade` to `packages/mapigrade/` because its version satisfies the constraint.
+`scripts/set_version.sh <version>` writes the three values: the `version` of each `pubspec.yaml` and `flutter_mapigrade`'s constraint on `mapigrade`, the range from `<version>`. A unit test fails, and names the value that differs, when the two versions differ or the constraint isn't the range from the version of `flutter_mapigrade`. Between releases, both pubspecs keep the last released version, and the pub workspace resolves `mapigrade` to `packages/mapigrade/` because its version satisfies the constraint.
 
 `flutter pub publish` resolves `mapigrade` from pub.dev, so `docs/releasing.md` orders the release: run pana on both packages from the clean clone, publish `mapigrade`, then dry-run and publish `flutter_mapigrade` once `mapigrade` is on pub.dev.
 
@@ -67,9 +67,9 @@ The web stubs of the native library move with it. `web_imports_test.dart` runs i
 
 ## Risks / Trade-offs
 
-- [pub.dev lists platforms of a package without a `plugin` section from what pana infers, so `flutter_mapigrade` could lose its Android, iOS and macOS tags] → Run pana on both dry-run archives before the release; if `flutter_mapigrade` loses tags, state the platforms in its `pubspec.yaml` `platforms` field.
+- [pub.dev lists platforms of a package without a `plugin` section from what pana infers, so `flutter_mapigrade` could lose its Android, iOS and macOS tags] → `flutter_mapigrade`'s `pubspec.yaml` states Android, iOS and macOS in its `platforms` field, which pana uses in place of inferring them, and a unit test checks that they equal the platforms of `mapigrade`'s plugin. We couldn't check the inferred tags before the release: pana resolves dependencies from pub.dev and ignores dependency overrides, and `mapigrade` isn't published yet.
 - [An application that pinned `flutter_mapigrade: ^0.1.0` doesn't get 0.2.0, and one that upgrades must rename types] → Expected for a 0.x minor version; the CHANGELOG lists each rename.
-- [The integration library couples the two packages tightly] → Accepted, with the exact version constraint (D231). It is the price of keeping the API closed (D229).
+- [The integration library couples the two packages tightly] → Accepted, with the one-release range (D231). It is the price of keeping the API closed (D229).
 - [`git mv` and edits in one commit lose history] → D228 moves files in their own commit.
 
 ## Migration Plan

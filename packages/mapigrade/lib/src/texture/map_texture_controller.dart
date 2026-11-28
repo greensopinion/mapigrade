@@ -316,7 +316,7 @@ abstract interface class MapTextureController {
   }) async {
     if (!nativeLibraryAvailable) {
       throw const MapTextureException(
-        'the native library of flutter_mapigrade is not available in this '
+        'the native library of mapigrade is not available in this '
         'process',
       );
     }

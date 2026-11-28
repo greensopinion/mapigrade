@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the MapLibre Native FFI release tarballs that the package uses, and
 # the release's SHA256SUMS, for MAPLIBRE_FFI_VERSION in
-# packages/flutter_mapigrade/maplibre_ffi.lock, into
+# packages/mapigrade/maplibre_ffi.lock, into
 # third_party/maplibre-native-ffi-release/<version>/ (design D106 of the
 # publish-readiness change). It checks every tarball against SHA256SUMS, and
 # skips a file that is already present and, for a tarball, matches SHA256SUMS.
@@ -18,7 +18,7 @@
 # MAPLIBRE_FFI_PRESETS and MAPLIBRE_FFI_ANDROID_PRESETS. The script also
 # downloads the release's MaplibreNativeC.xcframework.zip and unpacks it into
 # MaplibreNativeC.xcframework/ next to the tarballs, for the native tests in
-# packages/flutter_mapigrade/test/native/ (design D186 of the
+# packages/mapigrade/test/native/ (design D186 of the
 # adopt-ffi-core-executor change). The script fails and names the file when one
 # doesn't match SHA256SUMS; delete the file and run the script again to
 # download it again.
@@ -30,8 +30,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
-source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
+# shellcheck source=../packages/mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/mapigrade/maplibre_ffi.lock"
 
 if [[ $# -gt 0 ]]; then
   release_tag=$1

@@ -238,7 +238,7 @@ void main() {
     testWidgets('a header that MapLibre manages reports a creation failure '
         'that names it and doesn\'t contain its value', (tester) async {
       const secret = 'secret-host-value';
-      final failed = Completer<LayerException>();
+      final failed = Completer<MapigradeException>();
       await tester.pumpWidget(
         appWith(
           MapigradeLayer(
@@ -255,7 +255,7 @@ void main() {
       final exception = await failed.future.timeout(
         const Duration(seconds: 20),
       );
-      expect(exception, isA<LayerCreateException>());
+      expect(exception, isA<MapigradeCreateException>());
       expect(exception.message, contains('Host'));
       expect(exception.message, isNot(contains(secret)));
       expect(exception.toString(), isNot(contains(secret)));
@@ -335,7 +335,7 @@ void main() {
       // Answers every glyph request with 404.
       final server = await LoopbackServer.start({});
       addTearDown(server.close);
-      final failed = Completer<LayerException>();
+      final failed = Completer<MapigradeException>();
       await tester.pumpWidget(
         appWith(
           MapigradeLayer(
@@ -370,7 +370,7 @@ void main() {
       final exception = await failed.future.timeout(
         const Duration(seconds: 20),
       );
-      expect(exception, isA<LayerLoadException>());
+      expect(exception, isA<MapigradeLoadException>());
       expect(exception.message, contains('glyph'));
       expect(exception.message, contains('Missing Font'));
       expect(
@@ -380,7 +380,7 @@ void main() {
     });
 
     testWidgets('a missing asset reports a load failure', (tester) async {
-      final failed = Completer<LayerException>();
+      final failed = Completer<MapigradeException>();
       await tester.pumpWidget(
         appWith(
           MapigradeLayer(
@@ -394,7 +394,7 @@ void main() {
       final exception = await failed.future.timeout(
         const Duration(seconds: 20),
       );
-      expect(exception, isA<LayerLoadException>());
+      expect(exception, isA<MapigradeLoadException>());
     });
   });
 
@@ -407,7 +407,7 @@ void main() {
           '/style.json': json({'version': 8, 'sources': {}, 'layers': []}),
         });
         addTearDown(server.close);
-        final failed = Completer<LayerException>();
+        final failed = Completer<MapigradeException>();
         await tester.pumpWidget(
           appWith(
             MapigradeLayer(
@@ -424,7 +424,7 @@ void main() {
           const Duration(seconds: 20),
         );
         debugPrint('blocked cleartext request: ${exception.message}');
-        expect(exception, isA<LayerLoadException>());
+        expect(exception, isA<MapigradeLoadException>());
         expect(exception.message, isNotEmpty);
         expect(server.requests, isEmpty);
       },

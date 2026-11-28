@@ -2,8 +2,8 @@
 // message of a MAP_TEXTURE_EVENT_QUERY_RESULT event.
 import 'dart:async';
 
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
-import 'package:flutter_mapigrade/src/texture/pending_queries.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/texture/pending_queries.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _line =

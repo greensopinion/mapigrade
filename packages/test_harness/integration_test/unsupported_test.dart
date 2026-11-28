@@ -38,7 +38,7 @@ void main() {
       }
       expect(MapigradeLayer.isSupported, isFalse);
 
-      final failures = <LayerException>[];
+      final failures = <MapigradeException>[];
       await tester.pumpWidget(
         MaterialApp(
           home: FlutterMap(
@@ -59,10 +59,10 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(failures, hasLength(1));
-      expect(failures.single, isA<LayerCreateException>());
+      expect(failures.single, isA<MapigradeCreateException>());
       expect(
         failures.single.message,
-        contains('native library of flutter_mapigrade is not available'),
+        contains('native library of mapigrade is not available'),
       );
     },
   );

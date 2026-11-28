@@ -1,9 +1,9 @@
 // Unit tests of MapTextureController and the engine token request that don't
 // need the native library.
 import 'package:flutter/services.dart';
-import 'package:flutter_mapigrade/src/texture/engine_token.dart';
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
-import 'package:flutter_mapigrade/src/texture/native_library.dart';
+import 'package:mapigrade/src/texture/engine_token.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/texture/native_library.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -37,7 +37,7 @@ void main() {
         isA<MapTextureException>().having(
           (e) => e.message,
           'message',
-          'the native library of flutter_mapigrade is not available in this '
+          'the native library of mapigrade is not available in this '
               'process',
         ),
       ),

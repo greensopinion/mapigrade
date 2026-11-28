@@ -12,6 +12,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -450,7 +451,7 @@ void main() {
   testWidgets('a style that fails to load is reported to onError', (
     tester,
   ) async {
-    final failed = Completer<LayerException>();
+    final failed = Completer<MapigradeException>();
     await tester.pumpWidget(
       appWith(
         MapigradeLayer(
@@ -462,7 +463,7 @@ void main() {
       ),
     );
     final exception = await failed.future.timeout(const Duration(seconds: 20));
-    expect(exception, isA<LayerLoadException>());
+    expect(exception, isA<MapigradeLoadException>());
     expect(exception.message, isNotEmpty);
     // The application continues to run.
     await tester.pump();
@@ -492,7 +493,7 @@ void main() {
       FlutterError.onError = previous;
     }
     expect(reports, hasLength(1), reason: '$reports');
-    expect(reports.single.exception, isA<LayerLoadException>());
+    expect(reports.single.exception, isA<MapigradeLoadException>());
     expect(reports.single.library, 'flutter_mapigrade');
     expect(find.byType(MapigradeLayer), findsOneWidget);
   });
@@ -501,7 +502,7 @@ void main() {
   // library only.
   testWidgets('metrics increase while the camera moves', (tester) async {
     final mapController = MapController();
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final loaded = Completer<void>();
     await tester.pumpWidget(
       MaterialApp(
@@ -550,7 +551,7 @@ void main() {
   });
 
   testWidgets('metrics stay the same while the map is at rest', (tester) async {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     MapTextureController? controller;
     // Subscribed before the style loads, so that no idle event is missed.
     final idle = Completer<void>();

@@ -40,7 +40,7 @@ class _FlyoverScreenState extends State<FlyoverScreen>
 
   /// One metrics object for the life of the screen: the layer keeps its key,
   /// so a style change keeps its map (design D115).
-  final _metrics = LayerMetrics();
+  final _metrics = MapigradeMetrics();
   late final FlyoverPlayer _player;
 
   /// Updated on every camera change; only the readout listens, so a camera
@@ -139,7 +139,7 @@ class _FlyoverScreenState extends State<FlyoverScreen>
 
   /// Shows a failure of the map. The layer can report one while it builds,
   /// so the snack bar is shown after the frame.
-  void _showError(LayerException exception) {
+  void _showError(MapigradeException exception) {
     if (_recording != null) Recording.fail(exception.message);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

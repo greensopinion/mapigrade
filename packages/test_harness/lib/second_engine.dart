@@ -12,7 +12,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 
 const enginesChannel = MethodChannel('mapigrade_test/engines');
 

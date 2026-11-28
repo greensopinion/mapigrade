@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Clones MapLibre Native FFI at the commit in
-# packages/flutter_mapigrade/maplibre_ffi.lock, builds the presets listed in the
+# packages/mapigrade/maplibre_ffi.lock, builds the presets listed in the
 # lock file (or the ones given as arguments) with the FFI's own mise tasks, and
 # installs each into third_party/maplibre-native-ffi/<preset>/. It combines the
 # MaplibreNativeC.framework that the install of every Apple preset creates into
 # third_party/maplibre-native-ffi/MaplibreNativeC.xcframework, which
-# darwin/flutter_mapigrade/Package.swift uses, and deletes Swift Package
+# darwin/mapigrade/Package.swift uses, and deletes Swift Package
 # Manager's manifest cache so that the next build does. Android builds use the
 # install of each Android preset through the Gradle property mapigrade.ffiDir.
 #
@@ -25,8 +25,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
-source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
+# shellcheck source=../packages/mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/mapigrade/maplibre_ffi.lock"
 
 src_dir="$repo_root/third_party/maplibre-native-ffi-src"
 out_dir="$repo_root/third_party/maplibre-native-ffi"

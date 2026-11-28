@@ -1,7 +1,7 @@
-// Unit tests for LayerMetrics (designs D109 and D110 of the layer-metrics
+// Unit tests for MapigradeMetrics (designs D109 and D110 of the layer-metrics
 // change).
-import 'package:flutter_mapigrade/src/layer/layer_metrics.dart';
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/mapigrade_metrics.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // A controller without a native map that returns [values] from stats().
@@ -33,7 +33,7 @@ MapTextureStats _stats(int displayed, int rendered, int renderMs) =>
     );
 
 void _expectValues(
-  LayerMetricsSnapshot snapshot,
+  MapigradeMetricsSnapshot snapshot,
   int displayed,
   int rendered,
   int renderMs,
@@ -45,11 +45,11 @@ void _expectValues(
 
 void main() {
   test('an unbound object returns zeros', () {
-    _expectValues(LayerMetrics().snapshot(), 0, 0, 0);
+    _expectValues(MapigradeMetrics().snapshot(), 0, 0, 0);
   });
 
   test("a bound object returns the controller's values", () {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final controller = _FakeController()..values = _stats(3, 4, 20);
     bindMetrics(metrics, controller);
     _expectValues(metrics.snapshot(), 3, 4, 20);
@@ -58,7 +58,7 @@ void main() {
   });
 
   test('release keeps the last values for later snapshots', () {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final controller = _FakeController()..values = _stats(3, 4, 20);
     bindMetrics(metrics, controller);
     releaseMetrics(metrics, controller);
@@ -69,7 +69,7 @@ void main() {
   });
 
   test('release with a different controller does nothing', () {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final old = _FakeController()..values = _stats(3, 4, 20);
     final current = _FakeController()..values = _stats(1, 1, 5);
     bindMetrics(metrics, old);
@@ -81,7 +81,7 @@ void main() {
   });
 
   test('a bind after a release starts from the new map', () {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final old = _FakeController()..values = _stats(3, 4, 20);
     bindMetrics(metrics, old);
     releaseMetrics(metrics, old);
@@ -90,7 +90,7 @@ void main() {
   });
 
   test('stats() throwing MapTextureException returns the kept values', () {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final controller = _FakeController()
       ..error = const MapTextureException('failed');
     bindMetrics(metrics, controller);
@@ -103,7 +103,7 @@ void main() {
   test(
     'stats() throwing MapTextureDisposedException returns the kept values',
     () {
-      final metrics = LayerMetrics();
+      final metrics = MapigradeMetrics();
       final controller = _FakeController()
         ..error = const MapTextureDisposedException();
       bindMetrics(metrics, controller);
@@ -112,11 +112,11 @@ void main() {
   );
 
   test('time increases between snapshots', () async {
-    final metrics = LayerMetrics();
+    final metrics = MapigradeMetrics();
     final first = metrics.snapshot();
     await Future<void>.delayed(const Duration(milliseconds: 2));
     final second = metrics.snapshot();
     expect(second.time, greaterThan(first.time));
-    expect(LayerMetrics().snapshot().time, greaterThan(first.time));
+    expect(MapigradeMetrics().snapshot().time, greaterThan(first.time));
   });
 }

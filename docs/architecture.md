@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the implementation on macOS and iOS (Threads, Frame path) and how Android differs from it (Android). Paths are relative to `packages/flutter_mapigrade/`.
+This document describes the implementation on macOS and iOS (Threads, Frame path) and how Android differs from it (Android). Paths are relative to `packages/mapigrade/`.
 
 ## Threads
 
@@ -66,7 +66,7 @@ Each displayed frame is reported to Dart with the camera and size it was rendere
 
 ## Feature queries
 
-A rendered feature query (`LayerController.queryRenderedFeatures`) runs against the render session's last rendered frame, not against the camera Dart set last. While the camera moves, three cameras differ: the live `flutter_map` camera, the camera of the displayed frame, and the camera of the last rendered frame, which can be ahead of the displayed one with camera prediction or while the map renders ahead. The query position is converted in two steps:
+A rendered feature query (`MapigradeController.queryRenderedFeatures`) runs against the render session's last rendered frame, not against the camera Dart set last. While the camera moves, three cameras differ: the live `flutter_map` camera, the camera of the displayed frame, and the camera of the last rendered frame, which can be ahead of the displayed one with camera prediction or while the map renders ahead. The query position is converted in two steps:
 
 ```
  tap position (logical px, flutter_map widget)
@@ -115,7 +115,7 @@ A style load removes every runtime source and layer. `OnEvents` counts style loa
 A process can run more than one Flutter engine, for example a background engine that a messaging plugin starts. Each engine registers the plugin, and texture ids are only valid in the engine that issued them, so each map registers its textures with the engine whose Dart code created it (design D153 to D157 of the multiple-flutter-engines change).
 
 - When an engine registers the plugin, the platform code stores the engine's texture registry in a table under a token, a number that is never reused in the process. The table is guarded by a mutex.
-- The plugin registers the method channel `flutter_mapigrade` with each engine. Its handler answers `engineToken` with that engine's token. Dart asks once per isolate, at the first map creation, so `MapTextureController.create` is asynchronous; `MapigradeLayer` builds an empty placeholder until the map exists.
+- The plugin registers the method channel `mapigrade` with each engine. Its handler answers `engineToken` with that engine's token. Dart asks once per isolate, at the first map creation, so `MapTextureController.create` is asynchronous; `MapigradeLayer` builds an empty placeholder until the map exists.
 - `map_texture_create` takes the token, the map keeps it, and `CreatePlatformRenderTarget` registers the map's textures with the token's registry. An unknown token fails the creation.
 - When an engine detaches the plugin (Android `onDetachedFromEngine`, iOS `detachFromEngineForRegistrar:` when the engine is deallocated), the platform code removes the token and disposes the maps that have it (`DisposeEngineMaps`). macOS has no detach callback; its table holds the registry weakly, and a destroyed engine's undisposed maps stay until the process ends.
 
@@ -175,4 +175,4 @@ Android has six display slots, which share the one image texture, so `MapTexture
 
 Flutter gives the plugin no call when it has finished with an image, so a chosen slot becomes free when Dart has chosen three later frames; its image is then closed (design D133). The map thread starts a render no earlier than one display refresh interval after the previous one, and doesn't wait for Dart's choice; a ready frame that Dart hasn't chosen is replaced by the next one (design D134). Deferred renders are counted in `interval_waits`.
 
-Dart finds the plugin's functions through the build hook `hook/build.dart`, which names `libflutter_mapigrade.so` as the bindings' code asset. [packaging.md](packaging.md) describes how the APK contains the libraries.
+Dart finds the plugin's functions through the build hook `hook/build.dart`, which names `libmapigrade.so` as the bindings' code asset. [packaging.md](packaging.md) describes how the APK contains the libraries.

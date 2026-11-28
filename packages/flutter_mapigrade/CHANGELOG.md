@@ -1,5 +1,20 @@
 ## Unreleased
 
+- **BREAKING**: the native code and the types that `MapigradeLayer` shares with other map widgets moved to the new package [`mapigrade`](https://pub.dev/packages/mapigrade), which `flutter_mapigrade` depends on. `flutter_mapigrade` exports the shared types, so an application that imports `package:flutter_mapigrade/flutter_mapigrade.dart` needs no new import. The shared types that were named after the layer have new names, and the old names have no aliases:
+
+  | 0.1.0 | Now |
+  | --- | --- |
+  | `LayerController` | `MapigradeController` |
+  | `LayerException` | `MapigradeException` |
+  | `LayerCreateException` | `MapigradeCreateException` |
+  | `LayerLoadException` | `MapigradeLoadException` |
+  | `LayerQueryException` | `MapigradeQueryException` |
+  | `LayerRenderException` | `MapigradeRenderException` |
+  | `LayerMetrics` | `MapigradeMetrics` |
+  | `LayerMetricsSnapshot` | `MapigradeMetricsSnapshot` |
+  | `LayerPlacement` | `OverlayPlacement` |
+
+- The license page also lists `mapigrade`, with the same license as `flutter_mapigrade`.
 - The map is drawn by mln-rs, the Rust port of MapLibre Native, through MapLibre Native FFI <release>. Rendering details such as anti-aliasing can differ from earlier versions.
 - The license page lists mln-rs, the Rust standard library and the Rust crates of the app's platform in place of MapLibre Native, ICU, FastPFOR, nunicode, PMTiles and the Android NDK C++ runtime.
 

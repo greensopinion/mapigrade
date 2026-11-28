@@ -1,32 +1,23 @@
 import 'dart:convert';
 import 'dart:ui';
 
-import '../texture/map_texture_controller.dart';
+import 'texture/map_texture_controller.dart';
 import 'camera_projection.dart';
-import 'layer_exception.dart';
+import 'mapigrade_exception.dart';
 import 'queried_feature.dart';
 
-/// Queries the features that the map of a `MapigradeLayer` renders, and sets
-/// their feature state. Create one, give it to the layer's `controller`, and
-/// call it while the layer is in the tree, for example from `flutter_map`'s
-/// `MapOptions.onTap`:
+/// Controls everything about a map except its camera: in this version, it
+/// queries the features that the map renders and sets their feature state.
+/// Create one, give it to a map widget, such as `MapigradeLayer` through its
+/// `controller`, and call it while that widget is in the tree.
 ///
-/// ```dart
-/// onTap: (position, _) async {
-///   final features = await controller.queryRenderedFeatures(
-///     position.relative!,
-///     layerIds: ['poi'],
-///   );
-/// }
-/// ```
-///
-/// A controller is attached to the layer it was given to while that layer is
-/// in the tree, and to at most one layer at a time. Calls on a controller that
-/// is not attached, or whose layer has no map because it isn't created yet or
-/// couldn't be created, fail with a [StateError].
-final class LayerController {
-  /// A controller to give to one `MapigradeLayer`.
-  LayerController();
+/// A controller is attached to the widget it was given to while that widget
+/// is in the tree, and to at most one widget at a time. Calls on a controller
+/// that is not attached, or whose widget has no map because the map isn't
+/// created yet or couldn't be created, fail with a [StateError].
+final class MapigradeController {
+  /// A controller to give to one map widget.
+  MapigradeController();
 
   Object? _owner;
   MapTextureController? _map;
@@ -37,7 +28,7 @@ final class LayerController {
   /// side `2 * radius` centered on [point], aligned with the screen axes.
   ///
   /// [point] is a logical position relative to the top-left corner of the
-  /// `flutter_map` map widget, as `TapPosition.relative` gives it. The query
+  /// map widget. The query
   /// looks where the map frame on screen draws the features, also while the
   /// camera moves. Labels and icons are an exception: MapLibre matches them
   /// where it placed them last, which can be behind the displayed frame while
@@ -51,7 +42,7 @@ final class LayerController {
   /// layer IDs.
   ///
   /// Completes with the features, those of the topmost style layer first, or
-  /// with a [LayerQueryException] when MapLibre rejects the query. Queries
+  /// with a [MapigradeQueryException] when MapLibre rejects the query. Queries
   /// complete in the order they were called. A negative [radius] throws an
   /// [ArgumentError].
   Future<List<QueriedFeature>> queryRenderedFeatures(
@@ -97,8 +88,8 @@ final class LayerController {
   /// can't take state; the source's `promoteId` in the style gives features
   /// IDs from one of their properties.
   ///
-  /// Feature state belongs to the layer's map, not to its style: when the
-  /// layer is given a different style, the state is kept and applies to the
+  /// Feature state belongs to the map, not to its style: when the map is
+  /// given a different style, the state is kept and applies to the
   /// features of the new style with the same source ID, source-layer ID and
   /// ID, for example when switching between a light and a dark style.
   ///
@@ -181,7 +172,7 @@ final class LayerController {
       );
       return [for (final entry in entries) queriedFeatureOf(entry)];
     } on MapTextureException catch (e) {
-      throw LayerQueryException(e.message);
+      throw MapigradeQueryException(e.message);
     } on MapTextureDisposedException {
       throw _detached();
     }
@@ -204,8 +195,8 @@ final class LayerController {
 
   StateError _detached() => StateError(
     _owner == null
-        ? 'the LayerController is not attached to a MapigradeLayer in the tree'
-        : 'the MapigradeLayer of the LayerController has no map',
+        ? 'the MapigradeController is not attached to a map widget in the tree'
+        : 'the map widget of the MapigradeController has no map',
   );
 }
 
@@ -244,25 +235,25 @@ String _featureIdOf(Object? id) => switch (id) {
   ),
 };
 
-/// Attaches [controller] to the layer state [owner], which gives queries the
-/// camera of its displayed map frame with [displayedCamera]. Fails an
-/// assertion if another layer has it.
-void bindLayerController(
-  LayerController controller,
+/// Attaches [controller] to the state [owner] of a map widget, which gives
+/// queries the camera of its displayed map frame with [displayedCamera].
+/// Fails an assertion if another widget has it.
+void bindController(
+  MapigradeController controller,
   Object owner,
   ViewCamera Function() displayedCamera,
 ) {
   assert(
     controller._owner == null || identical(controller._owner, owner),
-    'a LayerController can be given to one MapigradeLayer at a time',
+    'a MapigradeController can be given to one map widget at a time',
   );
   controller._owner = owner;
   controller._displayedCamera = displayedCamera;
 }
 
-/// Gives [controller] the map of its layer [owner], once the layer has one.
-void setLayerControllerMap(
-  LayerController controller,
+/// Gives [controller] the map of its widget state [owner], once it has one.
+void setControllerMap(
+  MapigradeController controller,
   Object owner,
   MapTextureController map,
 ) {
@@ -270,7 +261,7 @@ void setLayerControllerMap(
 }
 
 /// Detaches [controller] from [owner], if [owner] has it.
-void releaseLayerController(LayerController controller, Object owner) {
+void releaseController(MapigradeController controller, Object owner) {
   if (!identical(controller._owner, owner)) return;
   controller._owner = null;
   controller._map = null;

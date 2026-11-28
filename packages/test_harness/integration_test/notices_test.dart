@@ -24,7 +24,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-const noticePrefix = 'packages/flutter_mapigrade/notices/';
+const noticePrefix = 'packages/mapigrade/notices/';
 
 /// The text of [entry] as the license page shows it.
 String textOf(LicenseEntry entry) =>

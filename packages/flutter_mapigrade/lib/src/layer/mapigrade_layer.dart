@@ -1,12 +1,9 @@
 import 'package:flutter/widgets.dart';
+import 'package:mapigrade/mapigrade.dart';
+// ignore: implementation_imports
+import 'package:mapigrade/src/integration.dart';
 
-import '../texture/map_texture_controller.dart';
-import '../texture/native_library.dart';
-import 'http_header_rule.dart';
 import 'layer_alignment.dart';
-import 'layer_controller.dart';
-import 'layer_exception.dart';
-import 'layer_metrics.dart';
 import 'map_texture_layer.dart';
 
 /// Displays a MapLibre map as the base layer of a `FlutterMap`. Place it first
@@ -42,7 +39,7 @@ final class MapigradeLayer extends StatelessWidget {
   /// package's native library isn't available, for example on an Android
   /// device without an arm64 ABI. When it is false, place another layer, such
   /// as a `TileLayer`, in place of this one; this layer would report a
-  /// [LayerCreateException] and draw nothing.
+  /// [MapigradeCreateException] and draw nothing.
   static bool get isSupported => nativeLibraryAvailable;
 
   /// The maximum size in bytes of the tile cache for maps created after it is
@@ -71,7 +68,7 @@ final class MapigradeLayer extends StatelessWidget {
   ///
   /// On iOS and macOS, the layer reads assets from the main bundle's
   /// `App.framework`. In an add-to-app host that loads Flutter from another
-  /// framework, `asset://` URLs fail with a [LayerLoadException].
+  /// framework, `asset://` URLs fail with a [MapigradeLoadException].
   final String? styleUrl;
 
   /// The style as MapLibre style JSON. URLs in the style can refer to Flutter
@@ -92,12 +89,12 @@ final class MapigradeLayer extends StatelessWidget {
 
   /// Called with each failure of the map; when null, the layer passes
   /// failures to [FlutterError.reportError].
-  final void Function(LayerException exception)? onError;
+  final void Function(MapigradeException exception)? onError;
 
   /// Reports the frame counts and render time of the layer's map; see
-  /// [LayerMetrics]. Give each layer its own object, and a new object with a
+  /// [MapigradeMetrics]. Give each layer its own object, and a new object with a
   /// new [key].
-  final LayerMetrics? metrics;
+  final MapigradeMetrics? metrics;
 
   /// Layers drawn above the map, in order, such as a `PolylineLayer` or a
   /// `MarkerLayer`. On macOS and iOS the layer draws them at the camera of
@@ -113,9 +110,9 @@ final class MapigradeLayer extends StatelessWidget {
 
   /// Queries the features that the layer's map renders and sets their feature
   /// state, for example to identify and highlight the feature the user
-  /// tapped; see [LayerController]. Give each controller to one layer at a
+  /// tapped; see [MapigradeController]. Give each controller to one layer at a
   /// time.
-  final LayerController? controller;
+  final MapigradeController? controller;
 
   @override
   Widget build(BuildContext context) => MapTextureLayer(

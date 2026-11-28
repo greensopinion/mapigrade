@@ -1,35 +1,9 @@
-/// The internal types and test hooks that the test harness uses. Not API: it
-/// may change in any version, and the naming rule for exported names doesn't
-/// apply to it.
+/// The internal types and test hooks of the layer that the test harness uses.
+/// Not API: it may change in any version, and the naming rule for exported
+/// names doesn't apply to it. The test harness imports the internals of
+/// `mapigrade` from `package:mapigrade/src/testing.dart`.
 library;
 
 export 'layer/alignment_error.dart' show AlignmentError, alignmentError;
-export 'layer/camera_projection.dart' show ViewCamera, viewCameraOf;
+export 'layer/flutter_map_camera.dart' show viewCameraOf;
 export 'layer/map_texture_layer.dart' show MapTextureLayer;
-export 'texture/map_texture_controller.dart'
-    show
-        FrameCamera,
-        LoadingFailed,
-        MapCamera,
-        MapEvent,
-        MapIdle,
-        MapTextureController,
-        MapTextureDisposedException,
-        MapTextureException,
-        MapTextureStats,
-        RenderError,
-        StyleLoaded;
-export 'texture/map_texture_view.dart' show MapTextureView;
-export 'texture/native_library.dart' show nativeLibraryAvailableOverride;
-export 'texture/test_hooks.dart'
-    show
-        memoryFootprintForTesting,
-        processThreadCount,
-        reduceMemoryUseForTesting,
-        releasedBuffersForTesting,
-        resetReleasedBuffersForTesting,
-        setRenderAheadForTesting,
-        setRenderingPausedForTesting,
-        thermalStateForTesting,
-        trimSurfacesForTesting,
-        waitForReleasesForTesting;

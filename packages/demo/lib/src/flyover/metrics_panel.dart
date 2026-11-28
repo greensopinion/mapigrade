@@ -16,7 +16,7 @@ class MetricsPanel extends StatefulWidget {
   const MetricsPanel({super.key, required this.metrics});
 
   /// The metrics object given to the map screen's layer.
-  final LayerMetrics metrics;
+  final MapigradeMetrics metrics;
 
   @override
   State<MetricsPanel> createState() => _MetricsPanelState();
@@ -53,7 +53,7 @@ class _MetricsPanelState extends State<MetricsPanel> {
     _previous = counts;
   }
 
-  static Counts _counts(LayerMetricsSnapshot s) => (
+  static Counts _counts(MapigradeMetricsSnapshot s) => (
     time: s.time,
     displayedFrames: s.displayedFrames,
     renderedFrames: s.renderedFrames,

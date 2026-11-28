@@ -7,7 +7,7 @@ final bool nativeLibraryAvailable = () {
     if (Platform.isAndroid) {
       // Opening the library succeeds even where the plugin skipped it, so ask
       // whether the plugin initialized it.
-      final initialized = DynamicLibrary.open('libflutter_mapigrade.so')
+      final initialized = DynamicLibrary.open('libmapigrade.so')
           .lookupFunction<Int32 Function(), int Function()>(
             'map_texture_android_initialized',
           );

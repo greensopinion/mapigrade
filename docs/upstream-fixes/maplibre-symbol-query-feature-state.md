@@ -69,4 +69,4 @@ Before choosing, check how MapLibre GL JS attaches state to symbol features (`sr
 
 - The demo's inspect screen states, for a feature of a symbol layer, that MapLibre Native doesn't return feature state for labels and icons, in place of the empty state (design D194 of `add-demo-showcases`).
 - The `feature-query` spec (requirement "Query results") states that each `QueriedFeature` has its feature state. We plan a separate Mapigrade change that states this limitation in the spec and in the doc comment of `QueriedFeature.state`, together with the corrections for the other two defects.
-- Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/flutter_mapigrade/maplibre_ffi.lock`.
+- Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/mapigrade/maplibre_ffi.lock`.

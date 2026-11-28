@@ -100,4 +100,4 @@ The render tests in `metrics/integration/render-tests/feature-state/` and `remov
 
 - The demo's inspect screen deselects with `setFeatureState(selected: false)` instead of `removeFeatureState`, so a selection change queues only changes, which `coalesceChanges` merges correctly (design D193 of `add-demo-showcases`).
 - `LayerController.removeFeatureState` passes removals to the FFI's `mln_map_remove_feature_state` without delay, so the defect affects an application that removes and sets state in one source layer before the next render. The `feature-query` spec (requirement "Feature state") states that a later displayed map frame shows the effect of each change; we plan a separate Mapigrade change that states this limitation in the spec and in the doc comment of `removeFeatureState`, together with the corrections for the other two defects.
-- Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/flutter_mapigrade/maplibre_ffi.lock`.
+- Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/mapigrade/maplibre_ffi.lock`.

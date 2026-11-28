@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.greensopinion.mapigrade_test_harness"
     compileSdk = flutter.compileSdkVersion
-    // The NDK version flutter_mapigrade builds with (design D57).
+    // The NDK version mapigrade builds with (design D57).
     ndkVersion = "30.0.16248370"
 
     compileOptions {
@@ -37,14 +37,14 @@ android {
         noCompress += "pmtiles"
     }
 
-    // With -Pmapigrade.omitNativeLibrary=true, the APK lacks flutter_mapigrade's
+    // With -Pmapigrade.omitNativeLibrary=true, the APK lacks mapigrade's
     // native library, as on a device with none of the package's ABIs, for
     // integration_test/unsupported_test.dart (design D88 of the
     // unsupported-architectures change).
     if (providers.gradleProperty("mapigrade.omitNativeLibrary").orNull == "true") {
         packaging {
             jniLibs {
-                excludes += "**/libflutter_mapigrade.so"
+                excludes += "**/libmapigrade.so"
             }
         }
     }

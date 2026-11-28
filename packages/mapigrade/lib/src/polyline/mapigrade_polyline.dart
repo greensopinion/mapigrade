@@ -4,11 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
 /// A line through [points] that `MapigradePolylineLayer` draws in the map.
-///
-/// The properties that `flutter_map`'s `Polyline` also has keep its names,
-/// types and defaults. To switch from `Polyline`, change the class name,
-/// replace `pattern` with [dashes] and `colorsStop` with [gradientStops], and
-/// check each gradient, because [gradientColors] run along the line.
 @immutable
 final class MapigradePolyline {
   /// In debug builds, asserts that the widths aren't negative; that [dashes]
@@ -78,25 +73,21 @@ final class MapigradePolyline {
   /// Alternating dash and gap lengths in multiples of the line's width,
   /// starting with a dash, or null for a solid line.
   ///
-  /// `flutter_map`'s `StrokePattern.dashed` takes lengths in logical pixels:
-  /// divide them by the line's width in logical pixels. A dash of length 0
-  /// with a round [strokeCap] draws a dot, in place of
-  /// `StrokePattern.dotted`. MapLibre repeats the pattern as given and has no
-  /// `PatternFit`, so the pattern isn't scaled to fit the line. It measures
-  /// the pattern from the start of the line in each tile, so the pattern
-  /// restarts where a line crosses a tile boundary.
+  /// A dash of length 0 with a round [strokeCap] draws a dot. MapLibre
+  /// repeats the pattern as given, so the pattern isn't scaled to fit the
+  /// line. It measures the pattern from the start of the line in each tile,
+  /// so the pattern restarts where a line crosses a tile boundary.
   final List<double>? dashes;
 
   /// The colors of a gradient along the length of the line, from the first
   /// point to the last, or null for a line of [color].
   ///
-  /// `flutter_map`'s `Polyline` draws its gradient in a straight screen
-  /// direction from the first point to the last. This gradient follows the
-  /// line, so a line that turns back changes color along its path.
+  /// The gradient follows the line, so a line that turns back changes color
+  /// along its path.
   final List<Color>? gradientColors;
 
   /// The position of each of [gradientColors] along the line, from 0 for the
-  /// first point to 1 for the last, in place of `Polyline.colorsStop`. Two
+  /// first point to 1 for the last. Two
   /// equal consecutive stops give a hard edge. When null, the colors are
   /// spaced evenly from 0 to 1.
   final List<double>? gradientStops;

@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.greensopinion.flutter_mapigrade_example"
     compileSdk = flutter.compileSdkVersion
-    // The NDK version flutter_mapigrade builds with.
+    // The NDK version mapigrade builds with.
     ndkVersion = "30.0.16248370"
 
     compileOptions {

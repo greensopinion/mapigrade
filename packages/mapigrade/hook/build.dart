@@ -1,5 +1,5 @@
 // Declares where Dart finds the plugin's native functions on Android (design
-// D56). The Gradle build packages libflutter_mapigrade.so, and the plugin class
+// D56). The Gradle build packages libmapigrade.so, and the plugin class
 // loads it with System.loadLibrary. Its symbols are not in the scope that
 // @Native's process lookup searches, so the bindings' asset names the library,
 // and Dart loads it by name, which returns the copy that is already loaded.
@@ -7,7 +7,7 @@
 // On macOS and iOS the plugin is linked into the app, and @Native resolves the
 // symbols from the process, so no asset is declared there.
 //
-// The asset id is `package:flutter_mapigrade/native`, which bindings.dart names
+// The asset id is `package:mapigrade/native`, which bindings.dart names
 // with @DefaultAsset (design D71 of the public-api change).
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
@@ -20,7 +20,7 @@ void main(List<String> args) async {
       CodeAsset(
         package: input.packageName,
         name: 'native',
-        linkMode: DynamicLoadingSystem(Uri.file('libflutter_mapigrade.so')),
+        linkMode: DynamicLoadingSystem(Uri.file('libmapigrade.so')),
       ),
     );
   });

@@ -1,4 +1,4 @@
-package com.greensopinion.flutter_mapigrade
+package com.greensopinion.mapigrade
 
 import android.app.Activity
 import android.app.Application
@@ -24,7 +24,7 @@ import io.flutter.view.TextureRegistry
  *
  * Each engine that attaches the plugin has its own instance. The native library keeps the engine's
  * texture registry under a token, which the instance gives to Dart on the channel
- * `flutter_mapigrade`, and the maps that Dart in that engine creates register with that registry.
+ * `mapigrade`, and the maps that Dart in that engine creates register with that registry.
  * When the engine detaches the plugin, the native library releases those maps.
  *
  * When the process can't load the native library, for example on a device without an arm64 ABI,
@@ -150,8 +150,8 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
     private external fun nativeSetReadersReleased(released: Boolean)
 
     companion object {
-        private const val LIBRARY = "flutter_mapigrade"
-        private const val CHANNEL = "flutter_mapigrade"
+        private const val LIBRARY = "mapigrade"
+        private const val CHANNEL = "mapigrade"
 
         // The result of the first load in this process, or null before it. The result applies to
         // the process, so a second engine doesn't load the library again.
@@ -173,7 +173,7 @@ class MapigradePlugin : FlutterPlugin, ActivityAware {
                     true
                 } catch (e: UnsatisfiedLinkError) {
                     Log.w(
-                        "flutter_mapigrade",
+                        "mapigrade",
                         "lib$LIBRARY.so isn't available for this device's ABIs " +
                             "(${Build.SUPPORTED_ABIS.joinToString()}); MapigradeLayer.isSupported " +
                             "is false",

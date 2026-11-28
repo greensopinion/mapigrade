@@ -2,6 +2,7 @@
 // add-mapigrade-polyline-layer) and for MapigradePolylineLayer (D195, D196,
 // D202 and D203), against a map without native code. The tests assert the
 // calls sent to the map.
+// ignore_for_file: implementation_imports
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
@@ -9,13 +10,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart' hide MapCamera, MapEvent;
-import 'package:flutter_mapigrade/src/layer/layer_exception.dart';
-import 'package:flutter_mapigrade/src/layer/layer_placement.dart';
+import 'package:mapigrade/src/mapigrade_exception.dart';
+import 'package:mapigrade/src/overlay_placement.dart';
 import 'package:flutter_mapigrade/src/layer/map_texture_layer.dart';
-import 'package:flutter_mapigrade/src/polyline/mapigrade_polyline.dart';
-import 'package:flutter_mapigrade/src/polyline/mapigrade_polyline_layer.dart';
-import 'package:flutter_mapigrade/src/polyline/polyline_translation.dart';
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/polyline/mapigrade_polyline.dart';
+import 'package:mapigrade/src/polyline/mapigrade_polyline_layer.dart';
+import 'package:mapigrade/src/polyline/polyline_translation.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -165,7 +166,7 @@ int _pointCount(Uint8List geoJson) {
 Widget _app(
   List<Widget> children,
   MapTextureControllerFactory create, {
-  List<LayerException>? errors,
+  List<MapigradeException>? errors,
 }) => MediaQuery(
   data: const MediaQueryData(size: Size(800, 600)),
   child: Directionality(
@@ -195,7 +196,7 @@ Future<void> _settle(WidgetTester tester) async {
 KeyedSubtree _named(
   String name,
   List<MapigradePolyline> polylines, {
-  LayerPlacement placement = const LayerPlacement.belowLabels(),
+  OverlayPlacement placement = const OverlayPlacement.belowLabels(),
 }) => KeyedSubtree(
   key: ValueKey(name),
   child: MapigradePolylineLayer(polylines: polylines, placement: placement),
@@ -203,7 +204,7 @@ KeyedSubtree _named(
 
 void main() {
   late _FakeController fake;
-  late List<LayerException> errors;
+  late List<MapigradeException> errors;
 
   Future<MapTextureController> create({
     required double pixelRatio,
@@ -232,7 +233,7 @@ void main() {
           _named('a', [_polyline()]),
           _named('b', [
             _polyline(points: _points(3)),
-          ], placement: const LayerPlacement.top()),
+          ], placement: const OverlayPlacement.top()),
         ], pending),
       );
       expect(fake.layers, isEmpty);
@@ -426,7 +427,7 @@ void main() {
         app([
           MapigradePolylineLayer(
             polylines: [_polyline()],
-            placement: const LayerPlacement.belowLayer('water'),
+            placement: const OverlayPlacement.belowLayer('water'),
           ),
         ]),
       );
@@ -437,7 +438,7 @@ void main() {
         app([
           MapigradePolylineLayer(
             polylines: [_polyline()],
-            placement: const LayerPlacement.top(),
+            placement: const OverlayPlacement.top(),
           ),
         ]),
       );
@@ -612,7 +613,7 @@ void main() {
           [
             MapigradePolylineLayer(
               polylines: [_polyline(points: _points(4))],
-              placement: const LayerPlacement.top(),
+              placement: const OverlayPlacement.top(),
             ),
           ],
           failing,
@@ -622,7 +623,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
 
       expect(tester.takeException(), isNull);
-      expect(errors, [const LayerCreateException('map_texture_create failed')]);
+      expect(errors, [
+        const MapigradeCreateException('map_texture_create failed'),
+      ]);
     });
 
     testWidgets('reports a data failure as a render error that names the '
@@ -636,7 +639,7 @@ void main() {
       await _settle(tester);
 
       expect(errors, hasLength(1));
-      expect(errors.single, isA<LayerRenderException>());
+      expect(errors.single, isA<MapigradeRenderException>());
       expect(errors.single.message, contains('map_texture_overlay_set_source'));
       expect(errors.single.message, contains('bad GeoJSON'));
     });

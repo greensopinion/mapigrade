@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'camera_projection.dart';
+// ignore: implementation_imports
+import 'package:mapigrade/src/integration.dart';
 
 /// How far the displayed map is from the overlays in one Flutter frame, in
 /// logical pixels: the largest distance, over the viewport corners and

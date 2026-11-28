@@ -1,4 +1,4 @@
-package com.greensopinion.flutter_mapigrade
+package com.greensopinion.mapigrade
 
 import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
@@ -24,7 +24,7 @@ import java.util.IdentityHashMap
 @RequiresApi(Build.VERSION_CODES.Q)
 internal class MapSurface(registry: TextureRegistry, private val target: Long) {
     private val entry = registry.createImageTexture()
-    private val thread = HandlerThread("flutter_mapigrade images").apply { start() }
+    private val thread = HandlerThread("mapigrade images").apply { start() }
     private val handler = Handler(thread.looper)
 
     private val lock = Any()
@@ -160,7 +160,7 @@ internal class MapSurface(registry: TextureRegistry, private val target: Long) {
     private external fun nativeFrameImage(target: Long, frameId: Long, image: Image): Boolean
 
     private companion object {
-        const val TAG = "flutter_mapigrade"
+        const val TAG = "mapigrade"
 
         // One image per display slot.
         const val MAX_IMAGES = 6

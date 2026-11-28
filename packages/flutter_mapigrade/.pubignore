@@ -1,13 +1,6 @@
 # Pub reads this file in place of .gitignore in this directory (design D105 of
-# the publish-readiness change). It repeats the entries of .gitignore, and
-# excludes the local MapLibre Native FFI build, so that a published archive
-# never contains a framework or library and always uses the pinned release.
-# The .gitignore files in subdirectories still apply.
-
-# The local FFI build (scripts/build_maplibre_ffi.sh). Without it the symlink
-# in Frameworks/ doesn't resolve.
-darwin/flutter_mapigrade/Frameworks/
-android/.cxx/
+# the publish-readiness change). It repeats the entries of .gitignore. The
+# .gitignore files in subdirectories still apply.
 
 # The entries of .gitignore.
 # Miscellaneous

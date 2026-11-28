@@ -20,7 +20,7 @@
 /// `Proxy-Connection`, `Range`, `TE`, `Trailer`, `Transfer-Encoding`,
 /// `Upgrade` and `User-Agent`. A rule with one of them, an invalid header
 /// name, or a value with a control character other than horizontal tab makes
-/// the layer report a `LayerCreateException`, whose message names the header
+/// the layer report a `MapigradeCreateException`, whose message names the header
 /// and doesn't contain its value.
 final class HttpHeaderRule {
   /// A rule that keeps a copy of [headers]. In debug builds, asserts that each

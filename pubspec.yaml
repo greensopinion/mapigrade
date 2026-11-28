@@ -5,6 +5,7 @@ environment:
   sdk: ^3.13.4
 
 workspace:
+  - packages/mapigrade
   - packages/flutter_mapigrade
   - packages/flutter_mapigrade/example
   - packages/demo

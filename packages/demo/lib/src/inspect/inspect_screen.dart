@@ -23,7 +23,7 @@ class InspectScreen extends StatefulWidget {
 }
 
 class _InspectScreenState extends State<InspectScreen> {
-  final _layerController = LayerController();
+  final _layerController = MapigradeController();
 
   /// The style that the picker shows, and the style whose JSON the layer
   /// shows; they differ while a fetch runs.
@@ -78,7 +78,7 @@ class _InspectScreenState extends State<InspectScreen> {
         for (final id in layerIds)
           _layerController.queryRenderedFeatures(position, layerIds: [id]),
       ]);
-    } on LayerQueryException catch (e) {
+    } on MapigradeQueryException catch (e) {
       _showMessage(e.message);
       return;
     } on StateError {

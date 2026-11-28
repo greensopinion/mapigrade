@@ -4,9 +4,9 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:flutter_mapigrade/src/layer/overlay_host.dart';
-import 'package:flutter_mapigrade/src/polyline/mapigrade_polyline.dart';
-import 'package:flutter_mapigrade/src/polyline/polyline_translation.dart';
+import 'package:mapigrade/src/overlay_host.dart';
+import 'package:mapigrade/src/polyline/mapigrade_polyline.dart';
+import 'package:mapigrade/src/polyline/polyline_translation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 

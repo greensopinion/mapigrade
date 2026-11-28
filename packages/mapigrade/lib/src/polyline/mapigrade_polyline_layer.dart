@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../layer/layer_placement.dart';
-import '../layer/overlay_host.dart';
+import '../overlay_placement.dart';
+import '../overlay_host.dart';
 import 'mapigrade_polyline.dart';
 import 'polyline_translation.dart';
 
@@ -26,13 +26,9 @@ const polylineBackgroundPointThreshold = 20000;
 /// exist or couldn't be created, the polyline layer does nothing; when the map
 /// is created, it draws the polylines that the layer has then.
 ///
-/// To switch from `flutter_map`'s `PolylineLayer`, change the class name and
-/// turn each `Polyline` into a [MapigradePolyline]. `PolylineLayer`'s
-/// culling, simplification and hit-test parameters have no counterpart: the
-/// map doesn't hit test polylines. Translucent polylines that overlap are
-/// darker where they overlap, because MapLibre blends each polyline with
-/// what is below it, where `PolylineLayer` composites translucent polylines
-/// through one saved layer.
+/// The map doesn't hit test polylines. Translucent polylines that overlap
+/// are darker where they overlap, because MapLibre blends each polyline with
+/// what is below it.
 ///
 /// When the layer is rebuilt with an equal list of equal polylines, it sends
 /// nothing to the map. Otherwise it sends the polylines again, the polylines
@@ -53,7 +49,7 @@ final class MapigradePolylineLayer extends StatefulWidget {
   const MapigradePolylineLayer({
     super.key,
     required this.polylines,
-    this.placement = const LayerPlacement.belowLabels(),
+    this.placement = const OverlayPlacement.belowLabels(),
   });
 
   /// The polylines, drawn in list order: a later polyline is drawn above an
@@ -61,7 +57,7 @@ final class MapigradePolylineLayer extends StatefulWidget {
   final List<MapigradePolyline> polylines;
 
   /// Where the polylines go among the style's layers.
-  final LayerPlacement placement;
+  final OverlayPlacement placement;
 
   @override
   State<MapigradePolylineLayer> createState() => _MapigradePolylineLayerState();

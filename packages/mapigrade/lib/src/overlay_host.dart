@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../texture/map_texture_controller.dart';
-import 'layer_exception.dart';
-import 'layer_placement.dart';
+import 'texture/map_texture_controller.dart';
+import 'mapigrade_exception.dart';
+import 'overlay_placement.dart';
 
 /// Keeps the overlays of the widgets below a `MapTextureLayer` and sends them
 /// to its map: each overlay's latest sources, style layers, placement and
@@ -15,7 +15,7 @@ final class OverlayHost {
   OverlayHost({required this.report});
 
   /// Called with each failure of an overlay command.
-  final void Function(LayerException exception) report;
+  final void Function(MapigradeException exception) report;
 
   MapTextureController? _controller;
   final _registrations = <int, OverlayRegistration>{};
@@ -88,8 +88,8 @@ final class OverlayRegistration {
 
   int _childIndex;
   String? _layersJson;
-  LayerPlacement _placement = const LayerPlacement.belowLabels();
-  ({String json, LayerPlacement placement, int childIndex})? _sentLayers;
+  OverlayPlacement _placement = const OverlayPlacement.belowLabels();
+  ({String json, OverlayPlacement placement, int childIndex})? _sentLayers;
 
   final _sources = <int, _OverlaySource>{};
   bool _removed = false;
@@ -127,7 +127,7 @@ final class OverlayRegistration {
   /// Sets the overlay's style layers, as a JSON array, and their placement.
   /// Does nothing when these are the style layers, placement and child index
   /// that were last sent.
-  void setLayers(String layersJson, LayerPlacement placement) {
+  void setLayers(String layersJson, OverlayPlacement placement) {
     if (_removed) return;
     _layersJson = layersJson;
     _placement = placement;
@@ -256,7 +256,7 @@ final class OverlayRegistration {
   }
 
   void _reportFailure(String operation, MapTextureException e) => _host.report(
-    LayerRenderException(
+    MapigradeRenderException(
       '$operation (mapigrade-overlay-$id) failed: ${e.message}',
     ),
   );

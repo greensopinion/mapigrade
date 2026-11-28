@@ -290,7 +290,7 @@ class MetalRenderTarget : public BufferRenderTarget {
       return;
     }
     if (!logged_select_off_main_.exchange(true)) {
-      NSLog(@"flutter_mapigrade: map_texture_select called off the main "
+      NSLog(@"mapigrade: map_texture_select called off the main "
             @"thread; the slot's texture is marked available asynchronously");
     }
     NSObject<FlutterTextureRegistry>* registry = registry_;
@@ -422,7 +422,7 @@ std::string PlatformCachePath() {
       .firstObject;
   if (caches == nil) return {};
   NSURL* directory =
-      [caches URLByAppendingPathComponent:@"flutter_mapigrade"
+      [caches URLByAppendingPathComponent:@"mapigrade"
                               isDirectory:YES];
   [[NSFileManager defaultManager] createDirectoryAtURL:directory
                            withIntermediateDirectories:YES

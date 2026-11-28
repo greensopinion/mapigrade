@@ -10,6 +10,7 @@ analyzer:
 linter:
   rules:
     # The harness uses the internal types and test hooks through
+    # package:mapigrade/src/testing.dart and
     # package:flutter_mapigrade/src/testing.dart (design D69 of the public-api
-    # change).
+    # change, D230 of the split-mapigrade-package change).
     implementation_imports: false

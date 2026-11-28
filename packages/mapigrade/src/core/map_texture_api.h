@@ -151,7 +151,7 @@ typedef struct map_texture_stats {
 
 // Creates a map that renders at `pixel_ratio` and starts its map thread. The
 // map registers its Flutter textures with the engine of the token `engine`,
-// which the plugin gave to Dart over the channel `flutter_mapigrade`.
+// which the plugin gave to Dart over the channel `mapigrade`.
 // With `copy_free` non-zero (what the Dart API passes by default), MapLibre
 // renders each frame directly into a free display buffer; otherwise it renders
 // into one render texture, and each frame is copied on the GPU into a free

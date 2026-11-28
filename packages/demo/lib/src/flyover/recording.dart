@@ -43,7 +43,7 @@ class Recording {
   /// Waits until [metrics] reports no rendered frame for 1 s, writes `ready`,
   /// and returns when `go` arrives on standard input. Exits on the timeouts
   /// and when standard input closes first.
-  Future<void> ready(LayerMetrics metrics) async {
+  Future<void> ready(MapigradeMetrics metrics) async {
     final waited = Stopwatch()..start();
     final atRest = Stopwatch()..start();
     var rendered = metrics.snapshot().renderedFrames;

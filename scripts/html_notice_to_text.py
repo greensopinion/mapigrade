@@ -1,7 +1,7 @@
 """Writes the text of an HTML notice file to standard output.
 
 scripts/copy_ffi_notices.sh copies an HTML notice of MapLibre Native FFI as
-this text, and packages/flutter_mapigrade/test/notices/ffi_notices_test.dart
+this text, and packages/mapigrade/test/notices/ffi_notices_test.dart
 compares the package's copy with it (design D248 of the
 port-ffi-gesture-recognizer change). The text has no markup: each heading,
 paragraph and list item is on lines of its own, separated by an empty line,

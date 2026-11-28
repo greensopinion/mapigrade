@@ -2,11 +2,11 @@
 //
 // On macOS and iOS the plugin's native code is linked into the app, so the
 // symbols resolve from the process. On Android they are in
-// libflutter_mapigrade.so, which hook/build.dart declares as the code asset
-// `package:flutter_mapigrade/native`. The asset id doesn't depend on this
+// libmapigrade.so, which hook/build.dart declares as the code asset
+// `package:mapigrade/native`. The asset id doesn't depend on this
 // file's path.
 // ignore_for_file: public_member_api_docs
-@DefaultAsset('package:flutter_mapigrade/native')
+@DefaultAsset('package:mapigrade/native')
 library;
 
 import 'dart:ffi';

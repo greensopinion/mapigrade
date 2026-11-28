@@ -6,7 +6,7 @@
 
 Displays a [MapLibre Native](https://github.com/maplibre/maplibre-native) map as the base layer of a [`flutter_map`](https://pub.dev/packages/flutter_map) map. MapLibre renders the map on its own thread into a Flutter `Texture` widget.
 
-Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. The plugin also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
+Because the map is part of Flutter's scene, it appears in screen captures and Flutter's effects apply to it. The package also keeps `flutter_map` overlays aligned with the displayed map frame, including while the camera moves.
 
 The usual way to show a native map in Flutter is a platform view, which Flutter composites separately from its own widgets. Depending on the platform and configuration, this causes defects:
 
@@ -14,9 +14,9 @@ The usual way to show a native map in Flutter is a platform view, which Flutter 
 - Captures with `RepaintBoundary.toImage` don't contain the map.
 - Effects such as `ColorFiltered` and `ShaderMask` leave the map unchanged.
 
-The plugin doesn't use a platform view, so it avoids these defects.
+The package doesn't use a platform view, so it avoids these defects.
 
-The plugin is pre-1.0: the API can change between 0.x releases. We tested it on a MacBook Pro (M2 Max), an iPhone 15 Pro Max, an iPhone 13 and one Android device (Pixel 4a (5G)); see [limitations](https://github.com/greensopinion/mapigrade/blob/main/docs/limitations.md) for what isn't covered yet. A recording and a demo app are in the [repository](https://github.com/greensopinion/mapigrade).
+The package is pre-1.0: the API can change between 0.x releases. We tested it on a MacBook Pro (M2 Max), an iPhone 15 Pro Max, an iPhone 13 and one Android device (Pixel 4a (5G)); see [limitations](https://github.com/greensopinion/mapigrade/blob/main/docs/limitations.md) for what isn't covered yet. A recording and a demo app are in the [repository](https://github.com/greensopinion/mapigrade).
 
 ## Installation
 
@@ -24,7 +24,9 @@ The plugin is pre-1.0: the API can change between 0.x releases. We tested it on 
 flutter pub add flutter_mapigrade
 ```
 
-On iOS and macOS the plugin supports Swift Package Manager only; it has no podspec.
+The package depends on [`mapigrade`](https://pub.dev/packages/mapigrade), which contains the native code and the types that the layer shares with it, such as `MapigradeController` and `MapigradePolyline`. `flutter_mapigrade` exports these types, so an application imports only `package:flutter_mapigrade/flutter_mapigrade.dart`. Both packages always have the same version.
+
+On iOS and macOS `mapigrade`'s plugin supports Swift Package Manager only; it has no podspec.
 
 The package contains no native libraries of MapLibre Native FFI. The first build on a machine downloads them from the FFI release that the package pins, so it needs network access:
 
@@ -105,16 +107,26 @@ MapigradeLayer(
 )
 ```
 
-The map draws the polylines below every Flutter child, such as the markers, whatever the polyline layer's position in `children`. `LayerPlacement.belowLayer` and `LayerPlacement.top` place them below a named style layer or above all style layers.
+The map draws the polylines below every Flutter child, such as the markers, whatever the polyline layer's position in `children`. `OverlayPlacement.belowLayer` and `OverlayPlacement.top` place them below a named style layer or above all style layers.
 
-To switch from `PolylineLayer` and `Polyline`, change the class names to `MapigradePolylineLayer` and `MapigradePolyline`, turn a `pattern` into `dashes` in multiples of the line's width, and replace `colorsStop` with `gradientStops`. A gradient runs along the line, not in a straight screen direction. The documentation of the two classes describes the other differences from `flutter_map`: dots, `PatternFit`, hit testing and translucent polylines that overlap.
+### When to use which polyline layer
+
+Use `MapigradePolylineLayer` when the polylines should be drawn among the style's layers, for example a route below the labels and 3D buildings. Use `flutter_map`'s `PolylineLayer` in the layer's `children` when the polylines must be drawn above the map, or when the application needs what only `PolylineLayer` has:
+
+- hit testing of polylines; the map doesn't hit test them;
+- culling and simplification parameters;
+- `PatternFit`, which scales a pattern to fit the line; MapLibre repeats the pattern as given and restarts it where a line crosses a tile boundary;
+- a gradient in a straight screen direction from the first point to the last; a gradient of `MapigradePolyline` runs along the line, so a line that turns back changes color along its path;
+- translucent polylines that overlap without getting darker; MapLibre blends each polyline with what is below it, where `PolylineLayer` composites translucent polylines through one saved layer.
+
+To switch from `PolylineLayer` and `Polyline`, change the class names to `MapigradePolylineLayer` and `MapigradePolyline`. The properties that `Polyline` also has keep its names, types and defaults. Turn a `pattern` into `dashes`: `StrokePattern.dashed` takes lengths in logical pixels, and `dashes` takes multiples of the line's width, so divide each length by the width. In place of `StrokePattern.dotted`, give a dash of length 0 with a round `strokeCap`. Replace `colorsStop` with `gradientStops`, and check each gradient.
 
 ## Identifying and highlighting features
 
-The features that the map draws, such as POIs, trails and roads, are in the map's tiles, not in Dart. To find the feature the user tapped, give the layer a `LayerController` and query it with the tap position:
+The features that the map draws, such as POIs, trails and roads, are in the map's tiles, not in Dart. To find the feature the user tapped, give the layer a `MapigradeController` and query it with the tap position:
 
 ```dart
-final controller = LayerController();
+final controller = MapigradeController();
 
 FlutterMap(
   options: MapOptions(
@@ -159,9 +171,9 @@ Feature state changes how the style draws a feature, but only where a paint prop
 | iOS | 15.0 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
-Apps built for web build with the package, compiled to JavaScript or to WebAssembly, but the layer draws no map there: `MapigradeLayer.isSupported` is false, and a placed layer reports a `LayerCreateException`.
+Apps built for web build with the package, compiled to JavaScript or to WebAssembly, but the layer draws no map there: `MapigradeLayer.isSupported` is false, and a placed layer reports a `MapigradeCreateException`.
 
-On iOS and macOS the plugin supports Swift Package Manager only.
+On iOS and macOS `mapigrade`'s plugin supports Swift Package Manager only.
 
 On iOS and macOS, set **Strip Style** to **Non-Global Symbols** for the `Runner` target's Release and Profile configurations. In `ios/Runner.xcodeproj/project.pbxproj` and `macos/Runner.xcodeproj/project.pbxproj` that is:
 
@@ -169,9 +181,9 @@ On iOS and macOS, set **Strip Style** to **Non-Global Symbols** for the `Runner`
 STRIP_STYLE = "non-global";
 ```
 
-Swift Package Manager links the plugin's native code into the app executable, and Dart looks up its functions in the process. When Xcode archives an app, the default strip style removes every global symbol from the executable, so in an archived build, such as one installed from TestFlight or the App Store, `MapigradeLayer.isSupported` is false and the layer reports a `LayerCreateException`: "the native library of flutter_mapigrade is not available in this process". Debug builds and `flutter run --release` don't strip the executable, so they don't show the failure. To check an archive, run `nm -gU` on the app executable; the output must include `_map_texture_create`.
+Swift Package Manager links `mapigrade`'s native code into the app executable, and Dart looks up its functions in the process. When Xcode archives an app, the default strip style removes every global symbol from the executable, so in an archived build, such as one installed from TestFlight or the App Store, `MapigradeLayer.isSupported` is false and the layer reports a `MapigradeCreateException`: "the native library of mapigrade is not available in this process". Debug builds and `flutter run --release` don't strip the executable, so they don't show the failure. To check an archive, run `nm -gU` on the app executable; the output must include `_map_texture_create`.
 
-On Android, an app can keep Flutter's default `minSdk`. Below API level 29 the layer draws no map: `MapigradeLayer.isSupported` is false, and a placed layer reports a `LayerCreateException`.
+On Android, an app can keep Flutter's default `minSdk`. Below API level 29 the layer draws no map: `MapigradeLayer.isSupported` is false, and a placed layer reports a `MapigradeCreateException`.
 
 An app that also runs on web, on Android below API level 29, or on Android devices with other ABIs, such as 32-bit `x86`, can read `MapigradeLayer.isSupported` and place another layer when it is false:
 

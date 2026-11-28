@@ -76,7 +76,7 @@ Each package SHALL provide what its test harness and tests need, and the main li
 ## ADDED Requirements
 
 ### Requirement: Integration library for flutter_mapigrade
-`mapigrade` SHALL provide what `flutter_mapigrade` needs and `mapigrade`'s main library doesn't export, such as the map controller that the internal layer widget drives and attaching a `MapigradeController` to a map, through one library under `lib/src/`. That library SHALL NOT be API: the naming rule doesn't apply to it, it MAY change in any version, and `mapigrade`'s README SHALL state that applications must not import it. `flutter_mapigrade` SHALL import `mapigrade`'s internals only through that library, and SHALL depend on exactly the version of `mapigrade` that equals its own version. Both packages SHALL always have the same version.
+`mapigrade` SHALL provide what `flutter_mapigrade` needs and `mapigrade`'s main library doesn't export, such as the map controller that the internal layer widget drives and attaching a `MapigradeController` to a map, through one library under `lib/src/`. That library SHALL NOT be API: the naming rule doesn't apply to it, it MAY change in any version, and `mapigrade`'s README SHALL state that applications must not import it. `flutter_mapigrade` SHALL import `mapigrade`'s internals only through that library, and SHALL depend on `mapigrade` with the range from its own version to the next patch version, such as `>=0.2.0 <0.2.1`, which allows no other release of `mapigrade`. Both packages SHALL always have the same version.
 
 #### Scenario: flutter_mapigrade imports mapigrade internals
 - **WHEN** the Dart files of `flutter_mapigrade` under `lib/` are inspected
@@ -84,7 +84,7 @@ Each package SHALL provide what its test harness and tests need, and the main li
 
 #### Scenario: Version constraint
 - **WHEN** `flutter_mapigrade`'s `pubspec.yaml` is read
-- **THEN** its constraint on `mapigrade` allows exactly one version, which equals the version of `flutter_mapigrade` and of `mapigrade`
+- **THEN** its constraint on `mapigrade` is the range from the version of `flutter_mapigrade` to the next patch version, and the version of `mapigrade` equals the version of `flutter_mapigrade`
 
 #### Scenario: Versions disagree
 - **WHEN** the version of either package, or `flutter_mapigrade`'s constraint on `mapigrade`, differs from the others

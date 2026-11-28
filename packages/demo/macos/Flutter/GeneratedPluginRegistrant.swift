@@ -5,7 +5,7 @@
 import FlutterMacOS
 import Foundation
 
-import flutter_mapigrade
+import mapigrade
 import url_launcher_macos
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {

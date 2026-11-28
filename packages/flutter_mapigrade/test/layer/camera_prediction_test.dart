@@ -1,10 +1,11 @@
 // Unit tests for the camera prediction (designs D32 and D33 of the
 // camera-prediction change).
+// ignore_for_file: implementation_imports
 import 'dart:ui';
 
-import 'package:flutter_mapigrade/src/texture/map_texture_controller.dart';
+import 'package:mapigrade/src/texture/map_texture_controller.dart';
 import 'package:flutter_mapigrade/src/layer/camera_prediction.dart';
-import 'package:flutter_mapigrade/src/layer/camera_projection.dart';
+import 'package:mapigrade/src/camera_projection.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const viewport = Size(400, 300);

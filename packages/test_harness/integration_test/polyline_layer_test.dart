@@ -27,6 +27,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:flutter_mapigrade/flutter_mapigrade.dart';
 import 'package:flutter_mapigrade/src/testing.dart';
+import 'package:mapigrade/src/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -134,7 +135,7 @@ List<MapigradePolyline> _crossing(
 
 Widget _polylines(
   List<MapigradePolyline> polylines, {
-  LayerPlacement placement = const LayerPlacement.belowLabels(),
+  OverlayPlacement placement = const OverlayPlacement.belowLabels(),
   Key? key,
 }) => MapigradePolylineLayer(
   key: key,
@@ -168,7 +169,7 @@ class _Map {
   final boundary = GlobalKey();
   final mapController = fm.MapController();
   MapTextureController? texture;
-  final errors = <LayerException>[];
+  final errors = <MapigradeException>[];
   final renderEvents = <RenderError>[];
   int stylesLoaded = 0;
   int? displayedFrameId;
@@ -1065,7 +1066,7 @@ void main() {
         children: [
           _polylines(
             _crossing(180, 140, _red, _blue),
-            placement: const LayerPlacement.top(),
+            placement: const OverlayPlacement.top(),
           ),
         ],
       );
@@ -1152,7 +1153,7 @@ void main() {
         tester,
         map,
         styleJson: _lightStyle,
-        children: [_polylines(lines, placement: const LayerPlacement.top())],
+        children: [_polylines(lines, placement: const OverlayPlacement.top())],
       );
       await _eventually(
         tester,
@@ -1172,7 +1173,7 @@ void main() {
         children: [
           _polylines([
             _vertical(300),
-          ], placement: const LayerPlacement.belowLayer('water')),
+          ], placement: const OverlayPlacement.belowLayer('water')),
         ],
       );
       await _eventually(
@@ -1207,7 +1208,7 @@ void main() {
         map,
         styleJson: _lightStyle,
         children: [
-          _polylines(line, placement: const LayerPlacement.belowLayer('water')),
+          _polylines(line, placement: const OverlayPlacement.belowLayer('water')),
         ],
       );
       await _eventually(
@@ -1223,7 +1224,7 @@ void main() {
         tester,
         map,
         styleJson: _lightStyle,
-        children: [_polylines(line, placement: const LayerPlacement.top())],
+        children: [_polylines(line, placement: const OverlayPlacement.top())],
       );
       await _eventually(
         tester,
@@ -1240,7 +1241,7 @@ void main() {
       final (map, labels) = await _showWithLabels(tester, _lightStyle, [
         _polylines([
           _horizontal(140, width: 12),
-        ], placement: const LayerPlacement.belowLayer('road-label')),
+        ], placement: const OverlayPlacement.belowLayer('road-label')),
       ]);
       await _eventually(
         tester,
@@ -1257,7 +1258,7 @@ void main() {
       );
       await Future<void>.delayed(const Duration(seconds: 1));
       expect(map.errors, hasLength(1), reason: '${map.errors}');
-      expect(map.errors.single, isA<LayerLoadException>());
+      expect(map.errors.single, isA<MapigradeLoadException>());
       expect(map.errors.single.message, contains('road-label'));
     });
 
@@ -1266,7 +1267,7 @@ void main() {
         _polylines([
           _horizontal(140, width: 12),
           _horizontal(215, width: 12),
-        ], placement: const LayerPlacement.top()),
+        ], placement: const OverlayPlacement.top()),
       ]);
       await _eventually(
         tester,
@@ -1749,7 +1750,7 @@ void main() {
           );
         }
         expect(
-          map.errors.whereType<LayerRenderException>(),
+          map.errors.whereType<MapigradeRenderException>(),
           isEmpty,
           reason: 'render errors during the style switches: ${map.errors}',
         );

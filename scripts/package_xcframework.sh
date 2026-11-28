@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds MaplibreNativeC.xcframework.zip from the Apple tarballs of the MapLibre
 # Native FFI release MAPLIBRE_FFI_VERSION in
-# packages/flutter_mapigrade/maplibre_ffi.lock (design D102 of the
+# packages/mapigrade/maplibre_ffi.lock (design D102 of the
 # publish-readiness change), with the framework steps that
 # scripts/build_maplibre_ffi.sh uses for local builds. Run
 # scripts/fetch_ffi_release.sh first; it downloads the tarballs and checks
@@ -23,8 +23,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
-source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
+# shellcheck source=../packages/mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/mapigrade/maplibre_ffi.lock"
 # shellcheck source=ffi_framework.sh
 source "$repo_root/scripts/ffi_framework.sh"
 

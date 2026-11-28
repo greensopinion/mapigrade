@@ -90,4 +90,4 @@ Points to check while making the fix:
 
 - The demo's inspect screen queries each of the style's own layers with `layerIds: [id]`, sends all the queries at once, and selects the feature of the topmost layer that returns one (design D193 of `add-demo-showcases`).
 - The `feature-query` spec (requirement "Query results") and the doc comment of `LayerController.queryRenderedFeatures` in `packages/flutter_mapigrade/lib/src/layer/layer_controller.dart` state that features of the topmost style layer come first. We plan a separate Mapigrade change that corrects both to state that the order across layers is unspecified. When the pinned FFI release contains the fix, a later change restores the statement.
-- On 2026-10-24, Mapigrade pinned FFI release 0.202610.2. Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/flutter_mapigrade/maplibre_ffi.lock`.
+- On 2026-10-24, Mapigrade pinned FFI release 0.202610.2. Mapigrade gets the fix when we pin an FFI release that vendors a MapLibre Native commit with the fix, in `packages/mapigrade/maplibre_ffi.lock`.

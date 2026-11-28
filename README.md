@@ -40,7 +40,8 @@ Try the demo: [packages/demo](packages/demo/)
 ## Repository layout
 
 ```
-packages/flutter_mapigrade/    Flutter plugin
+packages/mapigrade/            Flutter plugin: native code, map controller, polylines
+packages/flutter_mapigrade/    MapigradeLayer, the flutter_map layer
 packages/demo/                 demo app
 packages/test_harness/         integration tests and benchmarks
 docs/                          architecture, benchmarks and limitations

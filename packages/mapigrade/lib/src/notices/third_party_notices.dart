@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 /// `scripts/copy_ffi_notices.sh` copies from the FFI. `pubspec.yaml` puts the
 /// files in `notices/darwin/` only in the macOS and iOS builds, and the files in
 /// `notices/android/` only in the Android build.
-const noticeKeyPrefix = 'packages/flutter_mapigrade/notices/';
+const noticeKeyPrefix = 'packages/mapigrade/notices/';
 
 /// The package names of the license entries of known notice files, by file
 /// name, in the order the entries are listed. A notice file that isn't here

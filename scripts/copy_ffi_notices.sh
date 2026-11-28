@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copies the third-party notices of the MapLibre Native FFI release in
-# packages/flutter_mapigrade/maplibre_ffi.lock into
-# packages/flutter_mapigrade/notices/, unchanged (design D91 and D92 of the
+# packages/mapigrade/maplibre_ffi.lock into
+# packages/mapigrade/notices/, unchanged (design D91 and D92 of the
 # third-party-notices change, D108 of the publish-readiness change, D217 of the
 # update-ffi-0-202610-3 change). It reads the release tarballs that
 # scripts/fetch_ffi_release.sh downloads into
@@ -31,12 +31,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../packages/flutter_mapigrade/maplibre_ffi.lock
-source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
+# shellcheck source=../packages/mapigrade/maplibre_ffi.lock
+source "$repo_root/packages/mapigrade/maplibre_ffi.lock"
 
 release_dir="$repo_root/third_party/maplibre-native-ffi-release/$MAPLIBRE_FFI_VERSION"
 install_dir="$repo_root/third_party/maplibre-native-ffi"
-notices_dir="$repo_root/packages/flutter_mapigrade/notices"
+notices_dir="$repo_root/packages/mapigrade/notices"
 
 read -r -a presets <<< "$MAPLIBRE_FFI_PRESETS $MAPLIBRE_FFI_ANDROID_PRESETS"
 

@@ -50,7 +50,7 @@ namespace map_texture {
 namespace {
 
 #define LOGE(...) \
-  __android_log_print(ANDROID_LOG_ERROR, "flutter_mapigrade", __VA_ARGS__)
+  __android_log_print(ANDROID_LOG_ERROR, "mapigrade", __VA_ARGS__)
 
 // Set by JNI_OnLoad and nativeInit; the references are global.
 JavaVM* java_vm = nullptr;
@@ -657,7 +657,7 @@ std::unique_ptr<RenderTarget> CreatePlatformRenderTarget(
 std::string PlatformCachePath() {
   std::lock_guard lock(cache_dir_mutex);
   if (cache_dir.empty()) return {};
-  return cache_dir + "/flutter_mapigrade.db";
+  return cache_dir + "/mapigrade.db";
 }
 
 // The FFI reads /android_asset/ from the APK's assets/ directory.
@@ -739,13 +739,13 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
 // Returns the token of the engine's registry, or 0 if the plugin can't create
 // maps.
 JNIEXPORT jlong JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeInit(
+Java_com_greensopinion_mapigrade_MapigradePlugin_nativeInit(
     JNIEnv* env, jobject, jobject registry, jobject context,
     jstring cache_dir) {
   using namespace map_texture;
   if (map_surface_class == nullptr) {
     jclass surface_class =
-        env->FindClass("com/greensopinion/flutter_mapigrade/MapSurface");
+        env->FindClass("com/greensopinion/mapigrade/MapSurface");
     if (CheckException(env, "FindClass(MapSurface)") || surface_class == nullptr) {
       return 0;
     }
@@ -794,7 +794,7 @@ MAP_TEXTURE_EXPORT int32_t map_texture_android_initialized() {
 // The engine of `token` detached the plugin: removes its registry and releases
 // the maps that Dart in that engine created and didn't dispose.
 JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeDetach(
+Java_com_greensopinion_mapigrade_MapigradePlugin_nativeDetach(
     JNIEnv* env, jobject, jlong token) {
   using namespace map_texture;
   {
@@ -809,25 +809,25 @@ Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeDetach(
 }
 
 JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeSetPaused(
+Java_com_greensopinion_mapigrade_MapigradePlugin_nativeSetPaused(
     JNIEnv*, jobject, jboolean paused) {
   map_texture::SetAllPaused(paused);
 }
 
 JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeReduceMemoryUse(
+Java_com_greensopinion_mapigrade_MapigradePlugin_nativeReduceMemoryUse(
     JNIEnv*, jobject) {
   map_texture::ReduceAllMemoryUse();
 }
 
 JNIEXPORT void JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapigradePlugin_nativeSetReadersReleased(
+Java_com_greensopinion_mapigrade_MapigradePlugin_nativeSetReadersReleased(
     JNIEnv*, jobject, jboolean released) {
   map_texture::SetReadersReleased(released);
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_greensopinion_flutter_1mapigrade_MapSurface_nativeFrameImage(
+Java_com_greensopinion_mapigrade_MapSurface_nativeFrameImage(
     JNIEnv* env, jobject, jlong target, jlong frame_id, jobject image) {
   return reinterpret_cast<AndroidSurfaceTarget*>(target)->OnFrameImage(
              env, static_cast<uint64_t>(frame_id), image)

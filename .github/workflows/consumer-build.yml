@@ -1,18 +1,22 @@
-# Builds an application that depends on flutter_mapigrade as the published
-# archive contains it, on a runner without a MapLibre Native FFI build (design
+# Builds an application that depends on flutter_mapigrade, with
+# flutter_mapigrade and mapigrade as their published archives contain them, on
+# a runner without a MapLibre Native FFI build (design
 # D106 of the publish-readiness change).
 name: Consumer build
 
 on:
   pull_request:
     paths:
-      - packages/flutter_mapigrade/android/**
-      - packages/flutter_mapigrade/darwin/**
-      - packages/flutter_mapigrade/src/**
-      - packages/flutter_mapigrade/hook/**
+      - packages/mapigrade/android/**
+      - packages/mapigrade/darwin/**
+      - packages/mapigrade/src/**
+      - packages/mapigrade/hook/**
+      - packages/mapigrade/lib/**
+      - packages/mapigrade/pubspec.yaml
+      - packages/mapigrade/maplibre_ffi.lock
+      - packages/mapigrade/.pubignore
       - packages/flutter_mapigrade/lib/**
       - packages/flutter_mapigrade/pubspec.yaml
-      - packages/flutter_mapigrade/maplibre_ffi.lock
       - packages/flutter_mapigrade/.pubignore
       - scripts/consumer_build.sh
       - scripts/fetch_ffi_release.sh
@@ -61,10 +65,13 @@ jobs:
       - name: Test the layer without the native library in Chrome
         working-directory: packages/flutter_mapigrade
         run: flutter test --platform chrome test/unsupported_platform_test.dart
+      - name: Test the map controller without the native library in Chrome
+        working-directory: packages/mapigrade
+        run: flutter test --platform chrome test/unsupported_platform_test.dart
       - name: Fetch the FFI release
         run: scripts/fetch_ffi_release.sh
       - name: Compare the notices with the FFI release
-        working-directory: packages/flutter_mapigrade
+        working-directory: packages/mapigrade
         run: flutter test test/notices/ffi_notices_test.dart
 
   # The Android emulator on Apple-silicon Macs runs arm64 system images only, so

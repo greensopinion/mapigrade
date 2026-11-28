@@ -211,7 +211,7 @@ class SurfaceRenderTarget : public RenderTarget {
 // The error of a map creation with the token of an engine that has detached
 // the plugin, or that the plugin never gave out.
 inline constexpr const char* kEngineDetachedError =
-    "the Flutter engine of this isolate has detached flutter_mapigrade";
+    "the Flutter engine of this isolate has detached mapigrade";
 
 // Creates the platform render target for `owner` and registers its Flutter
 // textures with the engine of the token `engine`. With `copy_free`, a buffer

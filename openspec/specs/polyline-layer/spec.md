@@ -86,10 +86,10 @@ Within one polyline layer, a polyline later in the list SHALL be drawn above the
 - **THEN** at the crossing, the line of each polyline is drawn above the border of the other
 
 ### Requirement: Placement among the style's layers
-The polyline layer SHALL take a placement, `LayerPlacement`, with three values:
-- `LayerPlacement.belowLabels()`, the default: the polylines SHALL be drawn directly above the last style layer whose type isn't `symbol`, so that every style layer after it is drawn above the polylines, except that when a style layer whose type is `fill-extrusion` comes before that place, the polylines SHALL be drawn directly below the first such layer, so that 3D buildings are drawn above the polylines. When the style has no layer other than `symbol` layers, the polylines SHALL be drawn below all style layers.
-- `LayerPlacement.belowLayer(id)`: the polylines SHALL be drawn directly below the style layer with the ID `id`.
-- `LayerPlacement.top()`: the polylines SHALL be drawn above all style layers.
+The polyline layer SHALL take a placement, `OverlayPlacement`, with three values:
+- `OverlayPlacement.belowLabels()`, the default: the polylines SHALL be drawn directly above the last style layer whose type isn't `symbol`, so that every style layer after it is drawn above the polylines, except that when a style layer whose type is `fill-extrusion` comes before that place, the polylines SHALL be drawn directly below the first such layer, so that 3D buildings are drawn above the polylines. When the style has no layer other than `symbol` layers, the polylines SHALL be drawn below all style layers.
+- `OverlayPlacement.belowLayer(id)`: the polylines SHALL be drawn directly below the style layer with the ID `id`.
+- `OverlayPlacement.top()`: the polylines SHALL be drawn above all style layers.
 
 The style's layers SHALL NOT include the layers that polyline layers add. When the style has no layer with the ID of a `belowLayer` placement, the polylines SHALL be drawn above all style layers, and the `MapigradeLayer` SHALL report a load failure that names the ID, once for each style load. When the application gives a polyline layer a different placement, the map SHALL draw its polylines at the new placement.
 
@@ -103,18 +103,18 @@ The style's layers SHALL NOT include the layers that polyline layers add. When t
 
 #### Scenario: Style with 3D buildings
 - **WHEN** a style has a `fill-extrusion` layer of buildings before its last layer whose type isn't `symbol`, and a polyline layer has the default placement
-- **THEN** the polylines are drawn below the buildings, and with the placement `LayerPlacement.top()` above them
+- **THEN** the polylines are drawn below the buildings, and with the placement `OverlayPlacement.top()` above them
 
 #### Scenario: Below a named layer
-- **WHEN** a polyline layer has the placement `LayerPlacement.belowLayer('water')` and the style has a layer `water`
+- **WHEN** a polyline layer has the placement `OverlayPlacement.belowLayer('water')` and the style has a layer `water`
 - **THEN** the `water` layer is drawn above the polylines
 
 #### Scenario: Named layer missing
-- **WHEN** a polyline layer has the placement `LayerPlacement.belowLayer('road-label')` and the style that loads has no layer with that ID
-- **THEN** the polylines are drawn above all style layers, and the application's failure handler receives one `LayerLoadException` whose message names `road-label`
+- **WHEN** a polyline layer has the placement `OverlayPlacement.belowLayer('road-label')` and the style that loads has no layer with that ID
+- **THEN** the polylines are drawn above all style layers, and the application's failure handler receives one `MapigradeLoadException` whose message names `road-label`
 
 #### Scenario: Above everything
-- **WHEN** a polyline layer has the placement `LayerPlacement.top()`
+- **WHEN** a polyline layer has the placement `OverlayPlacement.top()`
 - **THEN** the polylines are drawn above all style layers, including the labels
 
 ### Requirement: Order of several polyline layers

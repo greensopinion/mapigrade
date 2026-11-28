@@ -3,7 +3,7 @@
 import Foundation
 import PackageDescription
 
-// Sources/flutter_mapigrade/core is a symlink to the shared C++ core in
+// Sources/mapigrade/core is a symlink to the shared C++ core in
 // ../../src/core.
 //
 // MaplibreNativeC is the xcframework zip of the MapLibre Native FFI release in
@@ -30,13 +30,13 @@ let maplibreNativeC: Target =
     : .binaryTarget(name: "MaplibreNativeC", url: release.url, checksum: release.checksum)
 
 let package = Package(
-    name: "flutter_mapigrade",
+    name: "mapigrade",
     platforms: [
         .macOS("14.3"),
         .iOS("15.0"),
     ],
     products: [
-        .library(name: "flutter-mapigrade", targets: ["flutter_mapigrade"])
+        .library(name: "mapigrade", targets: ["mapigrade"])
     ],
     dependencies: [
         .package(name: "FlutterFramework", path: "../FlutterFramework")
@@ -44,7 +44,7 @@ let package = Package(
     targets: [
         maplibreNativeC,
         .target(
-            name: "flutter_mapigrade",
+            name: "mapigrade",
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework"),
                 "MaplibreNativeC",

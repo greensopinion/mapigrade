@@ -9,12 +9,12 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_mapigrade/src/notices/third_party_notices.dart';
+import 'package:mapigrade/src/notices/third_party_notices.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
-const keyPrefix = 'packages/flutter_mapigrade/';
+const keyPrefix = 'packages/mapigrade/';
 
 /// Serves the files of the package directory under the keys that an
 /// application's asset bundle uses for the package's assets, and records the

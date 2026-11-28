@@ -1,9 +1,9 @@
 /// A failure of a `MapigradeLayer`'s map, passed to its `onError`, or for a
-/// [LayerQueryException], to the `Future` of the failed query. Later versions
+/// [MapigradeQueryException], to the `Future` of the failed query. Later versions
 /// may add subclasses.
-abstract final class LayerException implements Exception {
+abstract final class MapigradeException implements Exception {
   /// A failure with [message].
-  const LayerException(this.message);
+  const MapigradeException(this.message);
 
   /// The cause of the failure.
   final String message;
@@ -11,7 +11,7 @@ abstract final class LayerException implements Exception {
   @override
   bool operator ==(Object other) =>
       other.runtimeType == runtimeType &&
-      other is LayerException &&
+      other is MapigradeException &&
       other.message == message;
 
   @override
@@ -24,38 +24,38 @@ abstract final class LayerException implements Exception {
 }
 
 /// Loading the style, or a resource that the style needs, failed.
-final class LayerLoadException extends LayerException {
+final class MapigradeLoadException extends MapigradeException {
   /// A load failure with [message].
-  const LayerLoadException(super.message);
+  const MapigradeLoadException(super.message);
 
   @override
-  String get _typeName => 'LayerLoadException';
+  String get _typeName => 'MapigradeLoadException';
 }
 
 /// Rendering the map failed.
-final class LayerRenderException extends LayerException {
+final class MapigradeRenderException extends MapigradeException {
   /// A render failure with [message].
-  const LayerRenderException(super.message);
+  const MapigradeRenderException(super.message);
 
   @override
-  String get _typeName => 'LayerRenderException';
+  String get _typeName => 'MapigradeRenderException';
 }
 
 /// The layer couldn't create its map.
-final class LayerCreateException extends LayerException {
+final class MapigradeCreateException extends MapigradeException {
   /// A creation failure with [message].
-  const LayerCreateException(super.message);
+  const MapigradeCreateException(super.message);
 
   @override
-  String get _typeName => 'LayerCreateException';
+  String get _typeName => 'MapigradeCreateException';
 }
 
-/// A query of a `LayerController` failed, for example because MapLibre
+/// A query of a `MapigradeController` failed, for example because MapLibre
 /// rejected its filter.
-final class LayerQueryException extends LayerException {
+final class MapigradeQueryException extends MapigradeException {
   /// A query failure with [message].
-  const LayerQueryException(super.message);
+  const MapigradeQueryException(super.message);
 
   @override
-  String get _typeName => 'LayerQueryException';
+  String get _typeName => 'MapigradeQueryException';
 }

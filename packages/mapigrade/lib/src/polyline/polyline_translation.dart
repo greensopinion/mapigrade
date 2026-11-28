@@ -4,7 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-import '../layer/overlay_host.dart';
+import '../overlay_host.dart';
 import 'mapigrade_polyline.dart';
 
 /// The GeoJSON sources of a polyline layer's overlay. Polylines with a

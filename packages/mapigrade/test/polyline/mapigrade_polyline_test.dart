@@ -1,8 +1,7 @@
 // Task 2.2 of the add-mapigrade-polyline-layer change.
 import 'dart:ui';
 
-import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_mapigrade/src/polyline/mapigrade_polyline.dart';
+import 'package:mapigrade/src/polyline/mapigrade_polyline.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -17,23 +16,6 @@ Matcher _assertionNaming(String name) => throwsA(
 );
 
 void main() {
-  group('defaults', () {
-    test('equal those of flutter_map Polyline', () {
-      final p = MapigradePolyline(points: _points);
-      final f = Polyline(points: _points);
-      expect(p.strokeWidth, f.strokeWidth);
-      expect(p.color, f.color);
-      expect(p.useStrokeWidthInMeter, f.useStrokeWidthInMeter);
-      expect(p.borderStrokeWidth, f.borderStrokeWidth);
-      expect(p.borderColor, f.borderColor);
-      expect(p.strokeCap, f.strokeCap);
-      expect(p.strokeJoin, f.strokeJoin);
-      expect(p.dashes, isNull);
-      expect(p.gradientColors, isNull);
-      expect(p.gradientStops, isNull);
-    });
-  });
-
   group('equality', () {
     test('equal properties and equal points are equal with one hash code', () {
       final a = MapigradePolyline(points: [..._points], dashes: [1, 2]);

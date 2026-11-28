@@ -2,7 +2,7 @@
 /// doesn't export them.
 library;
 
-import '../texture/map_texture_controller.dart';
+import 'texture/map_texture_controller.dart';
 
 typedef _Values = ({
   int displayedFrames,
@@ -31,20 +31,20 @@ final _clock = Stopwatch()..start();
 /// tree, the object keeps the values it read just before the layer disposed
 /// its map; they can lack a frame that the map rendered after that read.
 ///
-/// A new `key` gives the layer a new map. Create a new [LayerMetrics] with the
+/// A new `key` gives the layer a new map. Create a new [MapigradeMetrics] with the
 /// new key: an object given to the new layer reports the new map, starting
 /// from 0, even when it is the object of the previous layer.
-final class LayerMetrics {
+final class MapigradeMetrics {
   /// An object that no layer has been given yet; its snapshots report 0.
-  LayerMetrics();
+  MapigradeMetrics();
 
   MapTextureController? _controller;
   _Values _kept = _zero;
 
   /// The current values. Doesn't throw.
-  LayerMetricsSnapshot snapshot() {
+  MapigradeMetricsSnapshot snapshot() {
     final values = _read();
-    return LayerMetricsSnapshot._(
+    return MapigradeMetricsSnapshot._(
       time: _clock.elapsed,
       displayedFrames: values.displayedFrames,
       renderedFrames: values.renderedFrames,
@@ -70,17 +70,17 @@ final class LayerMetrics {
   }
 }
 
-/// The values of a [LayerMetrics] at one time. The counts and [renderTime]
+/// The values of a [MapigradeMetrics] at one time. The counts and [renderTime]
 /// are cumulative from the creation of the layer's map.
-final class LayerMetricsSnapshot {
-  const LayerMetricsSnapshot._({
+final class MapigradeMetricsSnapshot {
+  const MapigradeMetricsSnapshot._({
     required this.time,
     required this.displayedFrames,
     required this.renderedFrames,
     required this.renderTime,
   });
 
-  /// The time of the snapshot on a monotonic clock that all [LayerMetrics]
+  /// The time of the snapshot on a monotonic clock that all [MapigradeMetrics]
   /// objects in the process share. Only the difference between two snapshots
   /// has a meaning.
   final Duration time;
@@ -100,7 +100,7 @@ final class LayerMetricsSnapshot {
 
   @override
   bool operator ==(Object other) =>
-      other is LayerMetricsSnapshot &&
+      other is MapigradeMetricsSnapshot &&
       other.time == time &&
       other.displayedFrames == displayedFrames &&
       other.renderedFrames == renderedFrames &&
@@ -112,13 +112,13 @@ final class LayerMetricsSnapshot {
 
   @override
   String toString() =>
-      'LayerMetricsSnapshot(time: $time, displayedFrames: $displayedFrames, '
+      'MapigradeMetricsSnapshot(time: $time, displayedFrames: $displayedFrames, '
       'renderedFrames: $renderedFrames, renderTime: $renderTime)';
 }
 
 /// Makes [metrics] report the map of [controller], starting from that map's
 /// current values.
-void bindMetrics(LayerMetrics metrics, MapTextureController controller) {
+void bindMetrics(MapigradeMetrics metrics, MapTextureController controller) {
   metrics._controller = controller;
   metrics._kept = _zero;
 }
@@ -126,7 +126,7 @@ void bindMetrics(LayerMetrics metrics, MapTextureController controller) {
 /// Keeps the current values of [controller] in [metrics] and stops reading
 /// it. Does nothing unless [metrics] reports [controller], so that a later
 /// [bindMetrics] to another map isn't undone.
-void releaseMetrics(LayerMetrics metrics, MapTextureController controller) {
+void releaseMetrics(MapigradeMetrics metrics, MapTextureController controller) {
   if (!identical(metrics._controller, controller)) return;
   metrics._kept = metrics._read();
   metrics._controller = null;

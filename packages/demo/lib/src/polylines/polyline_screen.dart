@@ -24,11 +24,11 @@ class PolylineScreen extends StatefulWidget {
 
 class _PolylineScreenState extends State<PolylineScreen> {
   DemoStyle _style = demoStyles.first;
-  LayerPlacement _placement = const LayerPlacement.belowLabels();
+  OverlayPlacement _placement = const OverlayPlacement.belowLabels();
 
   /// Shows [exception] after the frame, because the layer can report a
   /// failure while it builds.
-  void _showError(LayerException exception) {
+  void _showError(MapigradeException exception) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -70,15 +70,15 @@ class _PolylineScreenState extends State<PolylineScreen> {
                 onChanged: (style) => setState(() => _style = style),
               ),
               const SizedBox(height: 8),
-              SegmentedButton<LayerPlacement>(
+              SegmentedButton<OverlayPlacement>(
                 showSelectedIcon: false,
                 segments: const [
                   ButtonSegment(
-                    value: LayerPlacement.belowLabels(),
+                    value: OverlayPlacement.belowLabels(),
                     label: Text('Below buildings and labels'),
                   ),
                   ButtonSegment(
-                    value: LayerPlacement.top(),
+                    value: OverlayPlacement.top(),
                     label: Text('On top'),
                   ),
                 ],
