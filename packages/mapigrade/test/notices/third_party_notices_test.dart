@@ -151,7 +151,17 @@ void main() {
     const dartFileName = 'src/notices/third_party_notices.dart';
 
     expect(File(p.join('lib', dartFileName)).existsSync(), isTrue);
-    for (final platform in ['android', 'ios', 'macos']) {
+    // A prerelease without an FFI release declares no Android plugin (design
+    // D253 of the apple-only-beta-release change).
+    final ffiRelease = RegExp(
+      r'^MAPLIBRE_FFI_VERSION=(\S+)',
+      multiLine: true,
+    ).hasMatch(File('maplibre_ffi.lock').readAsStringSync());
+    for (final platform in [
+      if (ffiRelease || platforms.containsKey('android')) 'android',
+      'ios',
+      'macos',
+    ]) {
       final entry = platforms[platform] as YamlMap;
       expect(entry['dartPluginClass'], 'MapigradeNotices', reason: platform);
       expect(entry['dartFileName'], dartFileName, reason: platform);
