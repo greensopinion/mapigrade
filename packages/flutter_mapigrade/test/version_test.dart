@@ -1,7 +1,8 @@
 // Both packages have the same version, and flutter_mapigrade depends on
 // mapigrade with the range from that version to the next patch version (design
-// D231 of the split-mapigrade-package change). scripts/set_version.sh sets the
-// three values.
+// D231 of the split-mapigrade-package change), or on exactly that version for a
+// prerelease (design D254 of the apple-only-beta-release change).
+// scripts/set_version.sh sets the three values.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,11 +16,9 @@ void main() {
   test('the versions and the constraint on mapigrade agree', () {
     final pubspec = _pubspec('pubspec.yaml');
     final version = Version.parse('${pubspec['version']}');
-    final expectedConstraint = VersionRange(
-      min: version,
-      includeMin: true,
-      max: version.nextPatch,
-    );
+    final VersionConstraint expectedConstraint = version.isPreRelease
+        ? version
+        : VersionRange(min: version, includeMin: true, max: version.nextPatch);
     final mapigradeVersion =
         '${_pubspec('../mapigrade/pubspec.yaml')['version']}';
     final constraint = '${(pubspec['dependencies'] as YamlMap)['mapigrade']}';

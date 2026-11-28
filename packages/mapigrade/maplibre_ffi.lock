@@ -4,14 +4,18 @@
 #
 # The upstream release whose artifacts the package uses. Empty while the pin is
 # a commit that no release contains (design D219 of the
-# port-ffi-gesture-recognizer change): builds then need
-# scripts/build_maplibre_ffi.sh, and neither package can be released.
+# port-ffi-gesture-recognizer change): Android builds then need
+# scripts/build_maplibre_ffi.sh, and only a prerelease without Android can be
+# released (design D252 of the apple-only-beta-release change).
 MAPLIBRE_FFI_VERSION=
-# The xcframework zip of that release and its `swift package compute-checksum`
-# value. scripts/update_ffi_pins.sh writes both into
-# darwin/mapigrade/Package.swift. Empty without a release.
-MAPLIBRE_FFI_XCFRAMEWORK_URL=
-MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=
+# The xcframework zip of that release, or without a release, the zip of a
+# local build at MAPLIBRE_FFI_COMMIT that we host as a release asset of
+# greensopinion/mapigrade (scripts/package_xcframework.sh --local), and its
+# `swift package compute-checksum` value. scripts/update_ffi_pins.sh writes
+# both into darwin/mapigrade/Package.swift. Never replace a hosted asset: a
+# new build gets a new release tag.
+MAPLIBRE_FFI_XCFRAMEWORK_URL=https://github.com/greensopinion/mapigrade/releases/download/maplibre-native-ffi-4371ff6/MaplibreNativeC.xcframework.zip
+MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=ef00de824a5b3d162efbe9fd887a55a07172d9d5e1ea23df52cccaa83dedaef4
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
 # The commit that scripts/build_maplibre_ffi.sh builds locally. With a release,
 # it is the commit of the release's tag, which artifact.json in the release's

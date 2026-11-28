@@ -4,7 +4,8 @@
 # packages/mapigrade/darwin/mapigrade/Package.swift (design D99
 # and D102 of the publish-readiness change). Run it after changing either value
 # in the lock file; packages/mapigrade/test/ffi_pins_test.dart fails
-# while the two files disagree. While the lock names no release, both values
+# while the two files disagree. While the lock names neither a release nor a
+# hosted build (design D252 of the apple-only-beta-release change), both values
 # are empty, and Package.swift then fails without a local FFI build, with a
 # message that names scripts/build_maplibre_ffi.sh.
 #

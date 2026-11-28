@@ -6,17 +6,18 @@ import PackageDescription
 // Sources/mapigrade/core is a symlink to the shared C++ core in
 // ../../src/core.
 //
-// MaplibreNativeC is the xcframework zip of the MapLibre Native FFI release in
-// ../../maplibre_ffi.lock. scripts/update_ffi_pins.sh writes its URL and
-// checksum below from the lock file; don't edit them by hand. Both are empty
-// while the lock names no release. In this repository,
+// MaplibreNativeC is the xcframework zip that ../../maplibre_ffi.lock names: of
+// the MapLibre Native FFI release, or of a build of the pinned commit that we
+// host. scripts/update_ffi_pins.sh writes its URL and checksum below from the
+// lock file; don't edit them by hand. Both are empty while the lock names
+// neither. In this repository,
 // Frameworks/MaplibreNativeC.xcframework is a symlink to the output of
 // scripts/build_maplibre_ffi.sh, and the package uses that local build when the
 // symlink resolves. A published archive has no Frameworks/ directory.
 let localFramework = "Frameworks/MaplibreNativeC.xcframework"
 let release = (
-    url: "",
-    checksum: ""
+    url: "https://github.com/greensopinion/mapigrade/releases/download/maplibre-native-ffi-4371ff6/MaplibreNativeC.xcframework.zip",
+    checksum: "ef00de824a5b3d162efbe9fd887a55a07172d9d5e1ea23df52cccaa83dedaef4"
 )
 let hasLocalFramework = FileManager.default.fileExists(
     atPath: Context.packageDirectory + "/" + localFramework)

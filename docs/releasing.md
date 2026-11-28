@@ -8,7 +8,7 @@ Both packages always have the same version, and `flutter_mapigrade` depends on `
 
 Check that `main` can be released:
 
-- `packages/mapigrade/maplibre_ffi.lock` pins a MapLibre Native FFI release, not `unstable-native-snapshot` or a commit without a release; `packages/mapigrade/test/ffi_pins_test.dart` fails while it names no release. To update the pin, follow "Update the FFI" in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- `packages/mapigrade/maplibre_ffi.lock` pins a MapLibre Native FFI release, not `unstable-native-snapshot` or a commit without a release; `packages/mapigrade/test/ffi_pins_test.dart` fails while it names no release. Without an FFI release, only a prerelease can be published; see "Prerelease without an FFI release". To update the pin, follow "Update the FFI" in [CONTRIBUTING.md](../CONTRIBUTING.md).
 - Neither `packages/mapigrade/pubspec.yaml` nor `packages/flutter_mapigrade/pubspec.yaml` has `publish_to: none`.
 - The last pull request that changed `mapigrade`'s native code passed the `consumer-build` workflow. That workflow builds an application from the published archives of both packages.
 
@@ -57,3 +57,29 @@ flutter pub publish
 Each dry run must report no warnings. After publishing, check each package's page on pub.dev: the version, the changelog and, after pub.dev finishes its analysis, the score and the platforms. Both packages must list Android, iOS and macOS.
 
 Add a `## Unreleased` section at the top of each `CHANGELOG.md` with the first change after the release.
+
+## Prerelease without an FFI release
+
+While the lock pins an FFI commit that no FFI release contains, we can publish a prerelease, such as `0.2.0-beta.1`, for iOS and macOS only (designs D250 to D255 of the apple-only-beta-release change). Its iOS and macOS builds download an xcframework that we build from the pinned commit and host. Android needs the FFI's runtime from Maven Central, which only an FFI release provides, so the prerelease doesn't declare Android: an Android app that depends on it builds, and `Mapigrade.isSupported` is false.
+
+On `main`:
+
+1. Build the Apple presets at the pinned commit, and zip the xcframework:
+
+   ```sh
+   scripts/build_maplibre_ffi.sh macos-arm64 ios-arm64 ios-simulator-arm64
+   scripts/package_xcframework.sh --local
+   ```
+
+   The second script checks that each preset was built at `MAPLIBRE_FFI_COMMIT`, writes `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework.zip` and prints its checksum.
+2. Create a GitHub prerelease of `greensopinion/mapigrade` with the tag `maplibre-native-ffi-<first 7 characters of the commit>`, and attach the zip as `MaplibreNativeC.xcframework.zip`. In its notes, name the FFI commit and repository, and state that it isn't an official MapLibre release. Never replace the asset: Swift Package Manager rejects a zip whose checksum changed, so a new build gets a new tag.
+3. Set `MAPLIBRE_FFI_XCFRAMEWORK_URL` to the asset's download URL and `MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM` to the checksum in the lock, run `scripts/update_ffi_pins.sh`, and commit.
+
+Then, on a branch `release/<version>` from `main`:
+
+1. Run `scripts/set_version.sh <version>`. For a prerelease it sets `flutter_mapigrade`'s constraint on `mapigrade` to the exact version.
+2. Remove the `android` entry under `flutter.plugin.platforms` in `packages/mapigrade/pubspec.yaml`. `main` keeps it, so that the repository's Android builds keep working with a local FFI build.
+3. Under "Supported platforms" in both READMEs, and at the top of both CHANGELOG entries, state that the prerelease supports iOS and macOS only because its FFI has no release yet, and which release supports Android.
+4. Check that `ffi_pins_test.dart` and `version_test.dart` pass, commit, and push the branch.
+
+Check and publish the packages as above, from a clean clone of the branch (`git clone --branch release/<version> …`), and tag the published commit `v<version>`. `scripts/consumer_build.sh` expects an APK without the FFI and plugin libraries when the lock names no FFI release. On pub.dev, `mapigrade` lists iOS and macOS, not Android. Don't merge the branch into `main`: when an FFI release contains the pinned commit, pin it on `main` and release from `main` as above.

@@ -23,8 +23,9 @@
 #    device build without code signing; macos, a release build; web, a build
 #    compiled to JavaScript and a build compiled to WebAssembly.
 # 4. Checks that the APK's lib/ has libmaplibre-native-c.so and
-#    libmapigrade.so for arm64-v8a, armeabi-v7a and x86_64, and that the iOS
-#    and macOS applications contain MaplibreNativeC.framework.
+#    libmapigrade.so for arm64-v8a, armeabi-v7a and x86_64, or neither when
+#    the lock names no FFI release, and that the iOS and macOS applications
+#    contain MaplibreNativeC.framework.
 #
 # <work-dir> must be outside the checkout, so that a build that reads a file
 # through a path outside the package fails. The script deletes and recreates
@@ -199,12 +200,22 @@ for platform in "${platforms[@]}"; do
       (cd "$app_dir" && flutter build apk --release)
       apk="$app_dir/build/app/outputs/flutter-apk/app-release.apk"
       apk_files=$(unzip -Z1 "$apk")
-      for abi in arm64-v8a armeabi-v7a x86_64; do
+      # A prerelease without an FFI release declares no Android plugin, so
+      # the APK has neither library (design D253 of the apple-only-beta-release
+      # change).
+      if grep -qx 'MAPLIBRE_FFI_VERSION=' "$work_dir/mapigrade/maplibre_ffi.lock"; then
         for library in libmaplibre-native-c.so libmapigrade.so; do
-          grep -qx "lib/$abi/$library" <<< "$apk_files" \
-            || fail "the APK has no lib/$abi/$library"
+          ! grep -q "/$library\$" <<< "$apk_files" \
+            || fail "the APK of a prerelease without an FFI release has $library"
         done
-      done
+      else
+        for abi in arm64-v8a armeabi-v7a x86_64; do
+          for library in libmaplibre-native-c.so libmapigrade.so; do
+            grep -qx "lib/$abi/$library" <<< "$apk_files" \
+              || fail "the APK has no lib/$abi/$library"
+          done
+        done
+      fi
       ;;
     ios)
       echo "== iOS"
