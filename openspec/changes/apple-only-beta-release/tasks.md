@@ -27,8 +27,11 @@
 ## 4. Verification on the release branch
 
 - [ ] 4.1 Run `dart pub global run pana` on both packages in a clean clone of the branch; verify that pana reports no issue it would fix before a release, and that it lists iOS and macOS, not Android, for `mapigrade`
-- [ ] 4.2 Run `scripts/consumer_build.sh <work-dir> android ios macos` on the branch with no local FFI build and an empty SwiftPM cache for the archive; verify that every build succeeds, the APK has neither library, and the iOS and macOS applications contain `MaplibreNativeC.framework`
-- [ ] 4.3 Install the release build of the consumer application on the iPhone 15 Pro Max, and on the Android emulator, and run the macOS build; verify that the map appears on the iPhone and the Mac, and that on Android the application starts and the `MapigradeCreateException` is reported
+  - pana on a clean clone of the branch, 2026-11-27: `flutter_mapigrade` had no finding in the sections checked. `mapigrade` lists iOS and macOS, not Android, and lost 10 points: "Repository has no matching `pubspec.yaml` with `name: mapigrade`", because `https://github.com/greensopinion/mapigrade` doesn't contain `packages/mapigrade` until the package split is pushed. Open until task 4.4's decision.
+- [x] 4.2 Run `scripts/consumer_build.sh <work-dir> android ios macos` on the branch with no local FFI build and an empty SwiftPM cache for the archive; verify that every build succeeds, the APK has neither library, and the iOS and macOS applications contain `MaplibreNativeC.framework`
+  - Passed on 2026-11-27 from a clean clone of `release/0.2.0-beta`, with SwiftPM's cache entry for the hosted archive deleted: the release APK, the iOS simulator and device builds and the macOS build succeeded. The APK's `lib/` has only `libapp.so`, `libdartjni.so` and `libflutter.so` per ABI; the iOS and macOS applications contain `MaplibreNativeC.framework`.
+- [x] 4.3 Install the release build of the consumer application on the iPhone 15 Pro Max, and on the Android emulator, and run the macOS build; verify that the map appears on the iPhone and the Mac, and that on Android the application starts and the `MapigradeCreateException` is reported
+  - The release build of the consumer application (the `flutter_mapigrade` example) showed the map on the iPhone 15 Pro Max (checked by the user) and on the Mac (screenshot), with the marker. The Android check was skipped by the user's decision (2026-11-27): the beta doesn't need to work on Android.
 - [ ] 4.4 Present the results of tasks 4.1 to 4.3 to the user, and ask whether to publish; record the decision in this task
 
 ## 5. Publication
