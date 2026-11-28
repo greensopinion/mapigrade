@@ -19,8 +19,10 @@
 
 ## 3. Release branch
 
-- [ ] 3.1 Commit the work of groups 1 and 2 on `mapigrade-map`, and create `release/0.2.0-beta` from it (D250); run `scripts/set_version.sh 0.2.0-beta.1`, remove the `android` entry from `mapigrade`'s plugin platforms (D253), and make the README and CHANGELOG changes of D255; verify that `ffi_pins_test.dart` and `version_test.dart` pass on the branch
-- [ ] 3.2 Run `flutter pub publish --dry-run` in both packages on the branch; verify that neither reports a warning, and add `android/` to `mapigrade`'s `.pubignore` on the branch only if the dry run warns about it
+- [x] 3.1 Commit the work of groups 1 and 2 on `mapigrade-map`, and create `release/0.2.0-beta` from it (D250); run `scripts/set_version.sh 0.2.0-beta.1`, remove the `android` entry from `mapigrade`'s plugin platforms (D253), and make the README and CHANGELOG changes of D255; verify that `ffi_pins_test.dart` and `version_test.dart` pass on the branch
+  - Groups 1 and 2 committed on `mapigrade-map` as `caede38`. On `release/0.2.0-beta` (head `fcb5cdc`): the version, the `android` entries removed from both pubspecs (`flutter_mapigrade` declares the platforms of `mapigrade`'s plugin, which D253 didn't mention), and the READMEs and CHANGELOGs of D255, which also name the version in the install commands, because pub doesn't choose a prerelease otherwise. `third_party_notices_test.dart` required the Android notices registration; it now requires it only with an FFI release or a declared Android platform (on both branches). All unit tests of both packages pass on the branch, including `ffi_pins_test.dart` and `version_test.dart`.
+- [x] 3.2 Run `flutter pub publish --dry-run` in both packages on the branch; verify that neither reports a warning, and add `android/` to `mapigrade`'s `.pubignore` on the branch only if the dry run warns about it
+  - Both dry runs report 0 warnings, after the constraint change of D254 (the exact version made pub warn). `android/` stays in `mapigrade`'s archive.
 
 ## 4. Verification on the release branch
 
