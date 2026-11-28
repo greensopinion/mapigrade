@@ -1,6 +1,6 @@
 name: flutter_mapigrade
 description: "Displays a MapLibre Native map as the base layer of a flutter_map map, rendered on the GPU through MapLibre Native FFI."
-version: 0.1.0
+version: 0.2.0-beta.1
 repository: https://github.com/greensopinion/mapigrade
 issue_tracker: https://github.com/greensopinion/mapigrade/issues
 topics:
@@ -12,7 +12,6 @@ topics:
 resolution: workspace
 
 platforms:
-  android:
   ios:
   macos:
 
@@ -25,7 +24,7 @@ dependencies:
     sdk: flutter
   flutter_map: ^8.3.2
   latlong2: ^0.10.1
-  mapigrade: '>=0.1.0 <0.1.1'
+  mapigrade: 0.2.0-beta.1
 
 dev_dependencies:
   analyzer: ^14.5.0

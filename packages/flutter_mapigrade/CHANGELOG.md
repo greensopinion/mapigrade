@@ -1,5 +1,6 @@
-## Unreleased
+## 0.2.0-beta.1
 
+- This beta supports iOS and macOS only: it uses a version of MapLibre Native FFI that has no release yet, and Android builds need the FFI's release from Maven Central. On Android, apps build and run, and `MapigradeLayer.isSupported` is false. For Android, use 0.1.0.
 - **BREAKING**: these types are renamed, without aliases for the old names:
 
   | 0.1.0 | Now |
@@ -15,7 +16,7 @@
   | `LayerPlacement` | `OverlayPlacement` |
 
 - `flutter_mapigrade` depends on the new package [`mapigrade`](https://pub.dev/packages/mapigrade), which contains the types above, and exports them: `package:flutter_mapigrade/flutter_mapigrade.dart` is still the only import you need.
-- The map is drawn by mln-rs, the Rust port of MapLibre Native, through MapLibre Native FFI <release>. Rendering details such as anti-aliasing can differ from 0.1.0.
+- The map is drawn by mln-rs, the Rust port of MapLibre Native, through MapLibre Native FFI at commit `4371ff6`, which no FFI release contains yet. The iOS and macOS builds download a build of that commit from this repository's GitHub release [`maplibre-native-ffi-4371ff6`](https://github.com/greensopinion/mapigrade/releases/tag/maplibre-native-ffi-4371ff6). Rendering details such as anti-aliasing can differ from 0.1.0.
 - Your app's license page lists `mapigrade`, mln-rs, the Rust standard library and the Rust crates of the app's platform, in place of MapLibre Native, ICU, FastPFOR, nunicode, PMTiles and the Android NDK C++ runtime.
 - `MapigradeLayer.isSupported` and `MapigradeLayer.maximumCacheSizeBytes` are the same settings as `Mapigrade.isSupported` and `Mapigrade.maximumCacheSizeBytes` in `mapigrade`: setting the cache size through either class sets it for both.
 

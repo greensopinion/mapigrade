@@ -21,8 +21,10 @@ The package is pre-1.0: the API can change between 0.x releases. We tested it on
 ## Installation
 
 ```sh
-flutter pub add flutter_mapigrade
+flutter pub add flutter_mapigrade:0.2.0-beta.1
 ```
+
+This beta supports iOS and macOS only; see "Supported platforms". Without the version, pub chooses 0.1.0.
 
 The package depends on [`mapigrade`](https://pub.dev/packages/mapigrade), which contains the native code and the types that the layer shares with it, such as `MapigradeController` and `MapigradePolyline`. `flutter_mapigrade` exports these types, so an application imports only `package:flutter_mapigrade/flutter_mapigrade.dart`. Both packages always have the same version.
 
@@ -165,9 +167,10 @@ Feature state changes how the style draws a feature, but only where a paint prop
 
 ## Supported platforms
 
+Version 0.2.0-beta.1 supports iOS and macOS only. It uses a version of MapLibre Native FFI that has no release yet, and Android builds need the FFI's release from Maven Central. On Android, apps build and run, `MapigradeLayer.isSupported` is false, and a placed layer reports a `MapigradeCreateException`. For Android, use version 0.1.0. Android support returns with the first version that uses an FFI release.
+
 | Platform | Minimum version | Architecture |
 | --- | --- | --- |
-| Android | API level 29 (apps build from API level 24) | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
 | iOS | 15.0 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 

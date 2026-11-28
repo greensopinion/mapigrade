@@ -1,6 +1,6 @@
 name: mapigrade
 description: "Renders a MapLibre Native map into a Flutter Texture on the GPU, through MapLibre Native FFI, with a map widget whose camera MapLibre owns."
-version: 0.1.0
+version: 0.2.0-beta.1
 repository: https://github.com/greensopinion/mapigrade
 issue_tracker: https://github.com/greensopinion/mapigrade/issues
 topics:
@@ -35,11 +35,6 @@ flutter:
     platforms:
       # The dartPluginClass entries register the third-party notices with the
       # license registry (design D94 of the third-party-notices change).
-      android:
-        package: com.greensopinion.mapigrade
-        pluginClass: MapigradePlugin
-        dartPluginClass: MapigradeNotices
-        dartFileName: src/notices/third_party_notices.dart
       ios:
         pluginClass: MapigradePlugin
         sharedDarwinSource: true

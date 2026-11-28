@@ -97,17 +97,19 @@ The map takes part in Flutter's gesture arena, so a marker's own `GestureDetecto
 
 ## Supported platforms
 
+Version 0.2.0-beta.1 supports iOS and macOS only. It uses a version of MapLibre Native FFI that has no release yet, and Android builds need the FFI's release from Maven Central. On Android, apps build and run, `Mapigrade.isSupported` is false, and a `MapigradeMap` reports a `MapigradeCreateException`. Android support returns with the first version that uses an FFI release.
+
+To try the beta, add it with its version, because pub doesn't choose a prerelease otherwise:
+
+```sh
+flutter pub add mapigrade:0.2.0-beta.1
+```
+
 | Platform | Minimum version | Architecture |
 | --- | --- | --- |
-| Android | API level 29 (apps build from API level 24) | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
 | iOS | 15.0 | arm64 (devices, and the simulator on Apple silicon Macs) |
 | macOS | 14.3 | arm64 |
 
 On iOS and macOS the plugin supports Swift Package Manager only; it has no podspec. Apps built for web build with the package, but it draws no map there.
 
-The package contains no native libraries of MapLibre Native FFI. The first build on a machine downloads them from the FFI release that the package pins, so it needs network access:
-
-- Android: the runtime AAR `org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android` from Maven Central, 29 MB. The `android/build.gradle.kts` that `flutter create` writes includes `mavenCentral()` in the repositories of every project.
-- iOS and macOS: `MaplibreNativeC.xcframework.zip` from the FFI's GitHub release, 38 MB. Swift Package Manager checks it against the checksum that the package states.
-
-Gradle and Swift Package Manager cache the downloads for later builds.
+The package contains no native libraries of MapLibre Native FFI. The first build on a machine downloads `MaplibreNativeC.xcframework.zip`, 17 MB, so it needs network access. It is a build of FFI commit `4371ff6` that we host as an asset of the GitHub release [`maplibre-native-ffi-4371ff6`](https://github.com/greensopinion/mapigrade/releases/tag/maplibre-native-ffi-4371ff6), not an official MapLibre release. Swift Package Manager checks it against the checksum that the package states, and caches it for later builds.
