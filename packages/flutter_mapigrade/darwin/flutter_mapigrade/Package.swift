@@ -8,20 +8,26 @@ import PackageDescription
 //
 // MaplibreNativeC is the xcframework zip of the MapLibre Native FFI release in
 // ../../maplibre_ffi.lock. scripts/update_ffi_pins.sh writes its URL and
-// checksum below from the lock file; don't edit them by hand. In this
-// repository, Frameworks/MaplibreNativeC.xcframework is a symlink to the output
-// of scripts/build_maplibre_ffi.sh, and the package uses that local build when
-// the symlink resolves. A published archive has no Frameworks/ directory.
+// checksum below from the lock file; don't edit them by hand. Both are empty
+// while the lock names no release. In this repository,
+// Frameworks/MaplibreNativeC.xcframework is a symlink to the output of
+// scripts/build_maplibre_ffi.sh, and the package uses that local build when the
+// symlink resolves. A published archive has no Frameworks/ directory.
 let localFramework = "Frameworks/MaplibreNativeC.xcframework"
+let release = (
+    url: "",
+    checksum: ""
+)
+let hasLocalFramework = FileManager.default.fileExists(
+    atPath: Context.packageDirectory + "/" + localFramework)
+if !hasLocalFramework && release.url.isEmpty {
+    fatalError(
+        "maplibre_ffi.lock names no MapLibre Native FFI release; build the FFI with scripts/build_maplibre_ffi.sh")
+}
 let maplibreNativeC: Target =
-    FileManager.default.fileExists(
-        atPath: Context.packageDirectory + "/" + localFramework)
+    hasLocalFramework
     ? .binaryTarget(name: "MaplibreNativeC", path: localFramework)
-    : .binaryTarget(
-        name: "MaplibreNativeC",
-        url: "https://github.com/maplibre/maplibre-native-ffi/releases/download/v0.202610.3/MaplibreNativeC.xcframework.zip",
-        checksum: "985d9005e34adc3823a61fe56629d056337432303f3e65d539f8284522c31a7d"
-    )
+    : .binaryTarget(name: "MaplibreNativeC", url: release.url, checksum: release.checksum)
 
 let package = Package(
     name: "flutter_mapigrade",

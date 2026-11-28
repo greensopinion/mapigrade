@@ -1,9 +1,9 @@
 // Task 2.1 of the adopt-ffi-core-executor change (design D187): whether the
 // native tests can run against the real MapLibre Native FFI with a headless
 // target. On the map thread's model of design D180, it creates a runtime and a
-// map, loads an inline style, attaches a session-owned Metal texture ring with
-// the caller-graphics-thread driver, renders one frame demand, and disposes
-// everything, waiting for each completion.
+// map, loads an inline style, attaches a borrowed ring of one Metal texture
+// with the caller-graphics-thread driver, renders one frame demand, and
+// disposes everything, waiting for each completion.
 #import <Metal/Metal.h>
 
 #include <chrono>
@@ -111,6 +111,10 @@ constexpr const char* kStyle = R"({
 int main() {
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    // The ring's texture and its device, which the session uses until the
+    // detach completes.
+    id<MTLTexture> texture = nil;
+    mln_gpu_device gpu_device = MLN_HANDLE_NULL;
     if (!Check(device != nil, "MTLCreateSystemDefaultDevice")) return 1;
 
     mln_diagnostic diagnostic = NewDiagnostic();
@@ -153,22 +157,40 @@ int main() {
                 styled.status == MLN_STATUS_OK,
             "mln_map_set_style_json", status, diagnostic);
 
-      mln_metal_owned_texture_descriptor descriptor{};
-      descriptor.size = sizeof(descriptor);
-      descriptor.extent.width = 256;
-      descriptor.extent.height = 256;
-      descriptor.extent.scale_factor = 1;
-      descriptor.context.device = (__bridge void*)device;
-      descriptor.pixel_format = MTLPixelFormatRGBA8Unorm;
+      MTLTextureDescriptor* texture_descriptor = [MTLTextureDescriptor
+          texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                       width:256
+                                      height:256
+                                   mipmapped:NO];
+      texture_descriptor.usage =
+          MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+      texture_descriptor.storageMode = MTLStorageModePrivate;
+      texture = [device newTextureWithDescriptor:texture_descriptor];
+      mln_metal_borrowed_texture ring[1] = {{(__bridge void*)texture}};
+      mln_render_target target{};
+      target.size = sizeof(target);
+      target.kind = MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES;
+      target.data.metal_borrowed_textures.logical_size = {256, 256};
+      target.data.metal_borrowed_textures.physical_width = 256;
+      target.data.metal_borrowed_textures.physical_height = 256;
+      target.data.metal_borrowed_textures.textures = ring;
+      target.data.metal_borrowed_textures.texture_count = 1;
       mln_render_session_attach_options options{};
       options.size = sizeof(options);
       options.driver = MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
       Waiter attached;
       mln_completion attach_done = attached.Completion();
-      status = mln_map_attach_metal_owned_texture(
-          map, &descriptor, &options, &session, &attach_done, &diagnostic);
-      if (!Check(status == MLN_STATUS_OK, "mln_map_attach_metal_owned_texture",
-                 status, diagnostic) ||
+      mln_metal_device_descriptor device_descriptor{};
+      device_descriptor.size = sizeof(device_descriptor);
+      device_descriptor.device = (__bridge void*)device;
+      status = mln_gpu_device_wrap_metal(&device_descriptor, &gpu_device,
+                                         &diagnostic);
+      Check(status == MLN_STATUS_OK, "mln_gpu_device_wrap_metal", status,
+            diagnostic);
+      status = mln_map_attach(map, &target, gpu_device, &options, &session,
+                              &attach_done, &diagnostic);
+      if (!Check(status == MLN_STATUS_OK, "mln_map_attach", status,
+                 diagnostic) ||
           !Check(ServiceUntil(session, attached) &&
                      attached.status == MLN_STATUS_OK,
                  "the attachment completes")) {
@@ -181,8 +203,8 @@ int main() {
       demand.size = sizeof(demand);
       demand.flags = MLN_FRAME_DEMAND_FORCE;
       demand.token = 1;
-      status = mln_render_session_request_frame(session, &demand, &diagnostic);
-      Check(status == MLN_STATUS_OK, "mln_render_session_request_frame",
+      status = mln_render_session_demand_frame(session, &demand, &diagnostic);
+      Check(status == MLN_STATUS_OK, "mln_render_session_demand_frame",
             status, diagnostic);
       bool rendered = false;
       auto deadline =
@@ -193,7 +215,8 @@ int main() {
         mln_render_frame_batch_view view{};
         view.size = sizeof(view);
         if (mln_render_session_drain_frame_results(session, &batch, &view,
-                                                   nullptr) != MLN_STATUS_OK) {
+                                                   nullptr) != MLN_STATUS_OK ||
+            batch == MLN_HANDLE_NULL) {
           continue;
         }
         const auto* base = reinterpret_cast<const char*>(view.results);
@@ -217,8 +240,9 @@ int main() {
       status = mln_render_session_detach(session, &detach_done, &diagnostic);
       Check(status == MLN_STATUS_OK && ServiceUntil(session, detached),
             "mln_render_session_detach", status, diagnostic);
-      mln_render_session_dispose(session, nullptr, nullptr);
+      mln_render_session_dispose(session, nullptr);
     }
+    if (gpu_device != MLN_HANDLE_NULL) mln_gpu_device_release(gpu_device);
 
     if (map != MLN_HANDLE_NULL) {
       Waiter released;

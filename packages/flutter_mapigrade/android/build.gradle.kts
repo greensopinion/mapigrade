@@ -8,15 +8,15 @@
 //
 // - Release mode: the runtime AAR of the FFI release in ../maplibre_ffi.lock,
 //   from Maven Central. The AAR gives the APK the library for arm64-v8a,
-//   armeabi-v7a and x86_64, the rustls-platform-verifier classes and their keep
-//   rules. CMake finds the library and its headers through the AAR's Prefab
-//   module maplibre-native-c.
+//   armeabi-v7a and x86_64. CMake finds the library and its headers through
+//   the AAR's Prefab module maplibre-native-c. While the lock names no release
+//   (design D219 of the port-ffi-gesture-recognizer change), release mode
+//   fails.
 // - Local mode, when the Gradle property mapigrade.ffiDir names an existing
 //   directory: the output of scripts/build_maplibre_ffi.sh in that directory,
 //   for the ABIs of the Android presets it installed. The plugin packages the
-//   library itself and depends on the verifier from the local Maven repository
-//   that the script installs. The example and the test harness set the property
-//   in their android/gradle.properties.
+//   library itself. The example and the test harness set the property in their
+//   android/gradle.properties.
 group = "com.greensopinion.flutter_mapigrade"
 version = "1.0-SNAPSHOT"
 
@@ -42,9 +42,9 @@ val ffiRuntime =
 
 // The FFI's Android presets and the ABI each one builds.
 val ffiPresetAbis = mapOf(
-    "android-arm64-egl" to "arm64-v8a",
-    "android-arm-egl" to "armeabi-v7a",
-    "android-x64-egl" to "x86_64",
+    "android-arm64" to "arm64-v8a",
+    "android-arm" to "armeabi-v7a",
+    "android-x64" to "x86_64",
 )
 val releaseAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 
@@ -66,11 +66,14 @@ val localPresets: Map<String, File> =
     }
 if (localFfiDir != null) {
     check(localPresets.isNotEmpty()) {
-        "mapigrade.ffiDir ($localFfiDir) has no Android preset; run scripts/build_maplibre_ffi.sh android-arm64-egl"
+        "mapigrade.ffiDir ($localFfiDir) has no Android preset; run scripts/build_maplibre_ffi.sh android-arm64"
     }
     logger.lifecycle(
         "flutter_mapigrade: MapLibre Native FFI local build in $localFfiDir, ABIs ${localPresets.keys.joinToString()}")
 } else {
+    check(ffiVersion.isNotEmpty()) {
+        "maplibre_ffi.lock names no MapLibre Native FFI release; build the FFI with scripts/build_maplibre_ffi.sh and set the Gradle property mapigrade.ffiDir"
+    }
     logger.lifecycle("flutter_mapigrade: MapLibre Native FFI $ffiVersion from Maven Central")
 }
 val abis = if (localFfiDir != null) localPresets.keys.toList() else releaseAbis
@@ -78,17 +81,6 @@ val abis = if (localFfiDir != null) localPresets.keys.toList() else releaseAbis
 repositories {
     google()
     mavenCentral()
-}
-
-// The application resolves the plugin's dependencies with its own
-// repositories, so in local mode the FFI's Maven repository is added to every
-// project of the build.
-if (localFfiDir != null) {
-    rootProject.allprojects {
-        repositories {
-            maven { url = uri(localFfiDir.resolve("android-maven")) }
-        }
-    }
 }
 
 plugins {
@@ -200,12 +192,7 @@ if (localFfiDir != null) {
 }
 
 dependencies {
-    if (localFfiDir != null) {
-        // The verifier's version in the local Maven repository is the first 12
-        // characters of the FFI commit (see scripts/build_maplibre_ffi.sh).
-        val verifierVersion = ffiLockValue("MAPLIBRE_FFI_COMMIT").take(12)
-        implementation("org.maplibre.nativeffi:rustls-platform-verifier-android:$verifierVersion")
-    } else {
+    if (localFfiDir == null) {
         implementation(ffiRuntime)
     }
 }

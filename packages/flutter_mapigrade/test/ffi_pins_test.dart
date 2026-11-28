@@ -21,6 +21,17 @@ List<String> packageValues(String package, String label) => [
 ];
 
 void main() {
+  // A lock without a release can't reach a published package (design D219 of
+  // the port-ffi-gesture-recognizer change).
+  test('the lock file names an FFI release', () {
+    final lock = File('maplibre_ffi.lock').readAsStringSync();
+    expect(
+      lockValue(lock, 'MAPLIBRE_FFI_VERSION'),
+      isNotEmpty,
+      reason: 'maplibre_ffi.lock names no MapLibre Native FFI release',
+    );
+  });
+
   test(
     'Package.swift has the xcframework URL and checksum of the lock file',
     () {

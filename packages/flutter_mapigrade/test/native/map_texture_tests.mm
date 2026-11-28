@@ -7,9 +7,10 @@
 //
 // The tests run MapTexture on the real MapLibre Native FFI with headless Metal
 // targets (design D187 of the adopt-ffi-core-executor change): the surface
-// target attaches a session-owned texture, and the buffer target a borrowed
-// ring of four textures. ffi_redirect.h directs the few calls whose arguments
-// or failures the tests check to ffi_wrappers.mm.
+// target attaches a borrowed ring of one texture, whose frames the map thread
+// never acquires, and the buffer target a borrowed ring of four textures.
+// ffi_redirect.h directs the few calls whose arguments or failures the tests
+// check to ffi_wrappers.mm.
 #import <Metal/Metal.h>
 
 #include <algorithm>
@@ -59,6 +60,47 @@ id<MTLDevice> Device() {
   return device;
 }
 
+// The GPU device of the test's targets, which wraps Device(), for the life of
+// the process.
+mln_gpu_device GpuDevice() {
+  static mln_gpu_device device = [] {
+    mln_metal_device_descriptor descriptor{};
+    descriptor.size = sizeof(descriptor);
+    descriptor.device = (__bridge void*)Device();
+    mln_gpu_device wrapped = MLN_HANDLE_NULL;
+    mln_gpu_device_wrap_metal(&descriptor, &wrapped, nullptr);
+    return wrapped;
+  }();
+  return device;
+}
+
+id<MTLTexture> NewRenderTexture(const TargetSize& size) {
+  MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                   width:size.physical_width
+                                  height:size.physical_height
+                               mipmapped:NO];
+  descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  descriptor.storageMode = MTLStorageModePrivate;
+  return [Device() newTextureWithDescriptor:descriptor];
+}
+
+// A borrowed ring of `textures`, which `ring` stores; the call copies them.
+mln_render_target RingTarget(const TargetSize& size, id<MTLTexture> const* textures,
+                             size_t count, mln_metal_borrowed_texture* ring) {
+  mln_render_target target{};
+  target.size = sizeof(target);
+  target.kind = MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES;
+  auto& borrowed = target.data.metal_borrowed_textures;
+  borrowed.logical_size = size.logical_size();
+  borrowed.physical_width = size.physical_width;
+  borrowed.physical_height = size.physical_height;
+  for (size_t i = 0; i < count; ++i) ring[i].texture = (__bridge void*)textures[i];
+  borrowed.textures = ring;
+  borrowed.texture_count = count;
+  return target;
+}
+
 // A style without sources, so that the map renders without network access.
 // Each call gives a different background color, so that loading it publishes
 // a render update without a camera change.
@@ -76,8 +118,8 @@ std::string NextStyle() {
          color + R"("}}]})";
 }
 
-// A surface target with six slots that share one texture, on a session-owned
-// Metal texture. The test plays the image listener: it passes the frame ids
+// A surface target with six slots that share one texture, on a borrowed ring
+// of one Metal texture. The test plays the image listener: it passes the frame ids
 // that WillRender recorded to MapTexture::OnFrameImage, and the target keeps
 // the frame id as the slot's image.
 class FakeSurfaceTarget : public SurfaceRenderTarget {
@@ -107,22 +149,22 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
                     mln_render_session* out_session,
                     const AsyncCall& call) override {
     attached_size = size;
-    mln_metal_owned_texture_descriptor descriptor{};
-    descriptor.size = sizeof(descriptor);
-    descriptor.extent = size.extent;
-    descriptor.context.device = (__bridge void*)Device();
-    descriptor.pixel_format = MTLPixelFormatRGBA8Unorm;
-    return mln_map_attach_metal_owned_texture(map, &descriptor, &options,
-                                              out_session, call.completion,
-                                              call.diagnostic);
+    texture_ = NewRenderTexture(size);
+    mln_metal_borrowed_texture ring[1];
+    mln_render_target target = RingTarget(size, &texture_, 1, ring);
+    return mln_map_attach(map, &target, GpuDevice(), &options, out_session,
+                          call.completion, call.diagnostic);
   }
 
   mln_status SetTarget(mln_render_session session, const TargetSize& size,
                        const AsyncCall& call) override {
     ++set_targets;
     attached_size = size;
-    return mln_render_session_resize(session, size.extent, call.completion,
-                                     call.diagnostic);
+    texture_ = NewRenderTexture(size);
+    mln_metal_borrowed_texture ring[1];
+    mln_render_target target = RingTarget(size, &texture_, 1, ring);
+    return mln_render_session_set_target(session, &target, call.completion,
+                                         call.diagnostic);
   }
 
   void WillResize(const TargetSize& size) override {
@@ -167,6 +209,9 @@ class FakeSurfaceTarget : public SurfaceRenderTarget {
   // The frame ids of the images given to Flutter, and of those released.
   std::vector<uint64_t> pushed;
   std::vector<uint64_t> closed;
+
+ private:
+  id<MTLTexture> texture_ = nil;
 };
 
 // A copy-free buffer target with four slots, on a borrowed ring of four Metal
@@ -182,30 +227,24 @@ class FakeBufferTarget : public BufferRenderTarget {
                     mln_render_session* out_session,
                     const AsyncCall& call) override {
     Ring ring{};
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
-    return mln_map_attach_metal_borrowed_texture(
-        map, &descriptor, &options, out_session, call.completion,
-        call.diagnostic);
+    mln_render_target target =
+        RingTarget(size, current_.data(), current_.size(), ring.data());
+    return mln_map_attach(map, &target, GpuDevice(), &options, out_session,
+                          call.completion, call.diagnostic);
   }
   mln_status SetTarget(mln_render_session session, const TargetSize& size,
                        const AsyncCall& call) override {
     Ring ring{};
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
-    return mln_render_session_set_metal_borrowed_texture_target(
-        session, &descriptor, call.completion, call.diagnostic);
+    mln_render_target target =
+        RingTarget(size, current_.data(), current_.size(), ring.data());
+    return mln_render_session_set_target(session, &target, call.completion,
+                                         call.diagnostic);
   }
   void Unregister() override {}
 
   bool PrepareBuffers(const TargetSize& size) override {
-    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                     width:size.physical_width
-                                    height:size.physical_height
-                                 mipmapped:NO];
-    descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-    descriptor.storageMode = MTLStorageModePrivate;
     for (auto& texture : prepared_) {
-      texture = [Device() newTextureWithDescriptor:descriptor];
+      texture = NewRenderTexture(size);
       if (texture == nil) return false;
     }
     return true;
@@ -236,6 +275,7 @@ class FakeBufferTarget : public BufferRenderTarget {
     *out_current = metal.texture == (__bridge void*)current_[metal.slot];
     std::lock_guard lock(mutex);
     if (held.count(static_cast<int>(metal.slot)) > 0) ++renders_into_held;
+    frame_slots[frame] = static_cast<int>(metal.slot);
     return static_cast<int>(metal.slot);
   }
 
@@ -252,27 +292,14 @@ class FakeBufferTarget : public BufferRenderTarget {
   // The slots the test has chosen and not seen freed.
   std::set<int> held;
   int renders_into_held = 0;
+  // The slot of each frame that the map thread acquired.
+  std::map<mln_acquired_frame, int> frame_slots;
   // The slots marked available by Select, in order.
   std::vector<int> available;
   bool has_fallback = false;
 
  private:
   using Ring = std::array<mln_metal_borrowed_texture, map_texture::kBufferCount>;
-
-  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
-                                                   Ring* ring) {
-    mln_metal_borrowed_texture_descriptor descriptor{};
-    descriptor.size = sizeof(descriptor);
-    descriptor.extent = size.extent;
-    descriptor.physical_width = size.physical_width;
-    descriptor.physical_height = size.physical_height;
-    for (size_t i = 0; i < ring->size(); ++i) {
-      (*ring)[i].texture = (__bridge void*)current_[i];
-    }
-    descriptor.textures = ring->data();
-    descriptor.texture_count = ring->size();
-    return descriptor;
-  }
 
   std::array<id<MTLTexture>, map_texture::kBufferCount> current_{};
   std::array<id<MTLTexture>, map_texture::kBufferCount> prepared_{};
@@ -309,6 +336,9 @@ std::mutex events_mutex;
 std::vector<Event> events;
 
 void OnEvent(map_texture_event* event) {
+  if (event->type == MAP_TEXTURE_EVENT_FRAME_READY) {
+    ffi_wrappers::Note("ready " + std::to_string(event->slot));
+  }
   {
     std::lock_guard lock(events_mutex);
     events.push_back({event->type, event->frame_id, event->zoom,
@@ -1234,6 +1264,31 @@ void FeatureStateIsReturnedByQuery() {
   map_texture_dispose(handle);
 }
 
+std::vector<std::string> RenderErrors();
+
+// The FFI removes every feature's state when a style loads, and the map sets
+// the kept state again (design D249 of the port-ffi-gesture-recognizer change).
+void FeatureStateIsKeptAcrossStyleLoads() {
+  int64_t handle = CreateLineMap();
+  SurfaceDart dart(handle);
+  CHECK(WaitForStyleLoaded());
+  CHECK(Settled(handle, 1));
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                R"({"selected":true,"rank":2})");
+  map_texture_set_feature_state(handle, kLineSource, nullptr, "1",
+                                R"({"rank":3})");
+  map_texture_remove_feature_state(handle, kLineSource, nullptr, "1", "rank");
+  CHECK(HasState(Query(handle, QuerySquare(2)), R"({"selected":true})"));
+
+  map_texture_load_style_json(handle, kLineStyle);
+  CHECK(WaitFor(
+      [] { return EventsOfType(MAP_TEXTURE_EVENT_STYLE_LOADED).size() >= 2; }));
+  CHECK(Settled(handle, 1));
+  CHECK(HasState(Query(handle, QuerySquare(2)), R"({"selected":true})"));
+  CHECK(RenderErrors().empty());
+  map_texture_dispose(handle);
+}
+
 // The map thread takes the queued commands before it runs the queued queries,
 // so a set and a query can both be queued while it applies an earlier
 // command. The map thread is held in the set of feature 2, which then fails,
@@ -1525,6 +1580,115 @@ void MapDoesNotRenderIntoHeldSlot() {
   CHECK(stats.skipped_renders == 0);
   CHECK(stats.max_slots_in_use <= 4);
   CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+// The map thread publishes a frame only after it has read the frame's producer
+// sync, and releases a frame only when its slot is free (design D223 of the
+// port-ffi-gesture-recognizer change).
+void FrameIsPublishedAfterProducerSyncAndReleasedWhenSlotIsFree() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  FakeBufferTarget* target = last_buffer_target;
+  std::atomic<int> releases{0};
+  std::atomic<int> held_releases{0};
+  ffi_wrappers::SetReleaseHook([&, target](mln_acquired_frame frame) {
+    std::lock_guard lock(target->mutex);
+    auto slot = target->frame_slots.find(frame);
+    if (slot == target->frame_slots.end()) return;
+    ++releases;
+    if (target->held.count(slot->second) > 0) ++held_releases;
+  });
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
+  std::vector<int> chosen_order;
+  int previous = -1;
+  for (int i = 0; i < 20; ++i) {
+    size_t ready = ReadyEvents().size();
+    if (i > 0) {
+      CHECK(WaitFor([ready] { return ReadyEvents().size() > ready; }));
+    }
+    auto newest = ReadyEvents().back();
+    Choose(handle, newest);
+    chosen_order.push_back(newest.slot);
+    QueueRenderUpdate(handle);
+    if (previous >= 0) PresentSlot(*owner, previous, chosen_order);
+    previous = newest.slot;
+  }
+  // The dispose releases the frames of held slots too.
+  ffi_wrappers::SetReleaseHook(nullptr);
+  CHECK(releases > 0);
+  CHECK(held_releases == 0);
+  int syncs_since_ready = 0;
+  int ready_events = 0;
+  for (const std::string& step : ffi_wrappers::FrameLog()) {
+    if (step == "producer_sync") {
+      ++syncs_since_ready;
+    } else if (step.starts_with("ready ")) {
+      ++ready_events;
+      CHECK(syncs_since_ready > 0);
+      syncs_since_ready = 0;
+    }
+  }
+  CHECK(ready_events >= 20);
+  CHECK(EventsOfType(MAP_TEXTURE_EVENT_RENDER_ERROR).empty());
+  owner.reset();
+  map_texture_dispose(handle);
+}
+
+// A frame whose producer sync the target can't wait for isn't published.
+void FrameWithUnwaitableProducerSyncIsNotPublished() {
+  int64_t handle = CreateBufferMap();
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
+  size_t ready = ReadyEvents().size();
+  // The next frame renders once Dart has chosen this one.
+  Choose(handle, ReadyEvents().back());
+  ffi_wrappers::SetProducerSyncKind(MLN_GPU_SYNC_OPEN_GL_FENCE);
+  QueueRenderUpdate(handle);
+  CHECK(WaitFor([] {
+    for (const std::string& message : RenderErrors()) {
+      if (message.find("producer sync") != std::string::npos) return true;
+    }
+    return false;
+  }));
+  Sleep(200);
+  CHECK(ReadyEvents().size() == ready);
+  map_texture_dispose(handle);
+}
+
+// Each published frame keeps the projection of its frame result (design D226
+// of the port-ffi-gesture-recognizer change).
+void PublishedFrameKeepsItsProjection() {
+  int64_t handle = CreateBufferMap();
+  auto owner = last_owner.lock();
+  map_texture_set_camera(handle, 10, 20, 4, 30, 1);
+  map_texture_resize(handle, 100, 100, 2.0);
+  CHECK(ReadySettled(1));
+  auto projections = ffi_wrappers::RenderedProjections();
+  CHECK(!projections.empty());
+  if (!projections.empty()) {
+    const mln_frame_projection& expected = projections.back();
+    map_texture::FrameProjection published =
+        owner->SlotFrameForTesting(ReadyEvents().back().slot).projection;
+    const mln_vec4* columns[] = {&expected.matrix.x, &expected.matrix.y,
+                                 &expected.matrix.z, &expected.matrix.w};
+    for (int c = 0; c < 4; ++c) {
+      CHECK(published.matrix[c * 4 + 0] == columns[c]->x);
+      CHECK(published.matrix[c * 4 + 1] == columns[c]->y);
+      CHECK(published.matrix[c * 4 + 2] == columns[c]->z);
+      CHECK(published.matrix[c * 4 + 3] == columns[c]->w);
+    }
+    CHECK(published.clip_depth_range ==
+          static_cast<uint32_t>(expected.clip_depth_range));
+    CHECK(published.near_distance == expected.near_distance);
+    CHECK(published.far_distance == expected.far_distance);
+    CHECK(published.far_depth == expected.far_depth);
+    CHECK(published.globe == expected.globe);
+    // A rendered frame has a projection.
+    CHECK(published.far_distance > published.near_distance);
+  }
   owner.reset();
   map_texture_dispose(handle);
 }
@@ -2077,15 +2241,17 @@ void OverlayAppearsInStyleBelowLabels() {
                        "mapigrade-overlay-1-1", "road_label", "poi"})));
   CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == "mapigrade-overlay-1-source-0");
   auto calls = ffi_wrappers::Calls();
-  CHECK(calls.size() == 3);
-  if (calls.size() == 3) {
-    CHECK(calls[0].name == "mln_map_add_geo_json_source_data");
+  CHECK(calls.size() == 4);
+  if (calls.size() == 4) {
+    CHECK(calls[0].name == "mln_map_add_geo_json_source");
     CHECK(calls[0].id == "mapigrade-overlay-1-source-0");
-    CHECK(calls[1].name == "mln_map_add_style_layer_json");
-    CHECK(calls[1].id == "mapigrade-overlay-1-0");
-    CHECK(calls[1].before == "road_label");
-    CHECK(calls[2].id == "mapigrade-overlay-1-1");
+    CHECK(calls[1].name == "mln_map_set_geo_json_source_data");
+    CHECK(calls[1].id == "mapigrade-overlay-1-source-0");
+    CHECK(calls[2].name == "mln_map_add_style_layer_json");
+    CHECK(calls[2].id == "mapigrade-overlay-1-0");
     CHECK(calls[2].before == "road_label");
+    CHECK(calls[3].id == "mapigrade-overlay-1-1");
+    CHECK(calls[3].before == "road_label");
   }
   // The map draws it: a rendered query at the line finds the feature.
   {
@@ -2162,12 +2328,9 @@ void OverlayRemoveDeletesLayersThenSource() {
   map_texture_dispose(handle);
 }
 
-void InvalidGeoJsonFailsSetData() {
+void InvalidOverlaySourceArgumentsAreRejected() {
   int64_t handle = CreateOverlayMap();
   std::string error;
-  CHECK(SetOverlaySource(handle, 1, "not geojson", &error) ==
-        MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
-  CHECK(!error.empty());
   CHECK(SetOverlaySource(handle, 1, "", &error) == MAP_TEXTURE_ERROR_INVALID_ARGUMENT);
   CHECK(!error.empty());
   CHECK(map_texture_overlay_set_source(handle, 1, 0, 0, nullptr, 0, nullptr) ==
@@ -2185,6 +2348,24 @@ void InvalidGeoJsonFailsSetData() {
   CHECK(error.empty());
   map_texture_dispose(handle);
   CHECK(SetOverlaySource(handle, 1, LineGeoJson(1)) == MAP_TEXTURE_ERROR_DISPOSED);
+}
+
+// MapLibre prepares the GeoJSON in the background (design D224), so GeoJSON
+// that it can't use is reported once the source is installed.
+void InvalidGeoJsonIsReportedAsRenderError() {
+  int64_t handle = CreateOverlayMap();
+  CHECK(WaitForLayers(kStyleIds));
+  CHECK(SetOverlaySource(handle, 1, "not geojson") == MAP_TEXTURE_OK);
+  CHECK(SetOverlayLayers(handle, 1, LineLayersJson(1, 1)) == MAP_TEXTURE_OK);
+  CHECK(WaitFor([] {
+    for (const std::string& message : RenderErrors()) {
+      if (message.find("mln_map_set_geo_json_source_data") != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }));
+  map_texture_dispose(handle);
 }
 
 void InvalidOverlayLayersAreRejected() {
@@ -2244,7 +2425,7 @@ void OverlaysAtSameAnchorFollowOrderKeyInStyle() {
                        "mapigrade-overlay-1-0", "road_label", "poi"})));
   CHECK(!ffi_wrappers::CallNames("mln_map_move_style_layer").empty());
   CHECK(ffi_wrappers::CallNames("mln_map_add_style_layer_json").empty());
-  CHECK(ffi_wrappers::CallNames("mln_map_add_geo_json_source_data").empty());
+  CHECK(ffi_wrappers::CallNames("mln_map_add_geo_json_source").empty());
   // A placement change moves them too.
   ffi_wrappers::Reset();
   SetOverlayLayers(handle, 2, LineLayersJson(2, 2), 1, "water", 2, 2);
@@ -2377,7 +2558,8 @@ void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
                        "mapigrade-overlay-1-1", "road_label", "poi"})));
   CHECK((ffi_wrappers::CallNames() ==
          std::vector<std::string>{
-             "mln_map_add_geo_json_source_data", "mln_map_add_geo_json_source_data",
+             "mln_map_add_geo_json_source", "mln_map_set_geo_json_source_data",
+             "mln_map_add_geo_json_source", "mln_map_set_geo_json_source_data",
              "mln_map_add_style_layer_json", "mln_map_add_style_layer_json"}));
   CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-0") == source0);
   CHECK(OverlaySourceOfLayer("mapigrade-overlay-1-1") == source1);
@@ -2433,7 +2615,8 @@ void OverlayWithTwoSourcesIsDrawnOnceBothExist() {
   CHECK((ffi_wrappers::CallNames() ==
          std::vector<std::string>{
              "mln_map_remove_style_layer", "mln_map_remove_style_source",
-             "mln_map_add_geo_json_source_data", "mln_map_add_style_layer_json"}));
+             "mln_map_add_geo_json_source", "mln_map_set_geo_json_source_data",
+             "mln_map_add_style_layer_json"}));
   CHECK((WaitForLayers({"background", "water", "road", "mapigrade-overlay-1-0",
                        "road_label", "poi"})));
   {
@@ -2552,6 +2735,7 @@ int main(int argc, char** argv) {
       {"InvalidFilterFailsQuery", InvalidFilterFailsQuery},
       {"QueryResultsArriveInRequestOrder", QueryResultsArriveInRequestOrder},
       {"FeatureStateIsReturnedByQuery", FeatureStateIsReturnedByQuery},
+      {"FeatureStateIsKeptAcrossStyleLoads", FeatureStateIsKeptAcrossStyleLoads},
       {"QueryWaitsForFeatureStateQueuedBeforeIt",
        QueryWaitsForFeatureStateQueuedBeforeIt},
       {"FeatureStateFailureIsReported", FeatureStateFailureIsReported},
@@ -2562,6 +2746,11 @@ int main(int argc, char** argv) {
       {"RenderWaitingForChoiceStartsAfterChoice",
        RenderWaitingForChoiceStartsAfterChoice},
       {"MapDoesNotRenderIntoHeldSlot", MapDoesNotRenderIntoHeldSlot},
+      {"FrameIsPublishedAfterProducerSyncAndReleasedWhenSlotIsFree",
+       FrameIsPublishedAfterProducerSyncAndReleasedWhenSlotIsFree},
+      {"FrameWithUnwaitableProducerSyncIsNotPublished",
+       FrameWithUnwaitableProducerSyncIsNotPublished},
+      {"PublishedFrameKeepsItsProjection", PublishedFrameKeepsItsProjection},
       {"IdleBufferMapRendersNothing", IdleBufferMapRendersNothing},
       {"AllSlotsHeldWithoutPresent", AllSlotsHeldWithoutPresent},
       {"SelectAfterDisposeReportsDisposed", SelectAfterDisposeReportsDisposed},
@@ -2602,7 +2791,10 @@ int main(int argc, char** argv) {
       {"OverlayDataChangeSendsOnlyData", OverlayDataChangeSendsOnlyData},
       {"OverlayRemoveDeletesLayersThenSource",
        OverlayRemoveDeletesLayersThenSource},
-      {"InvalidGeoJsonFailsSetData", InvalidGeoJsonFailsSetData},
+      {"InvalidOverlaySourceArgumentsAreRejected",
+       InvalidOverlaySourceArgumentsAreRejected},
+      {"InvalidGeoJsonIsReportedAsRenderError",
+       InvalidGeoJsonIsReportedAsRenderError},
       {"InvalidOverlayLayersAreRejected", InvalidOverlayLayersAreRejected},
       {"OverlaysAtSameAnchorFollowOrderKeyInStyle",
        OverlaysAtSameAnchorFollowOrderKeyInStyle},

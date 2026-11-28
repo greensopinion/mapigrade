@@ -1,3 +1,8 @@
+## Unreleased
+
+- The map is drawn by mln-rs, the Rust port of MapLibre Native, through MapLibre Native FFI <release>. Rendering details such as anti-aliasing can differ from earlier versions.
+- The license page lists mln-rs, the Rust standard library and the Rust crates of the app's platform in place of MapLibre Native, ICU, FastPFOR, nunicode, PMTiles and the Android NDK C++ runtime.
+
 ## 0.1.0
 
 - Updated MapLibre Native FFI to 0.202610.3.

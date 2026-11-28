@@ -1,10 +1,11 @@
-// macOS and iOS render target. MapLibre renders through a borrowed-texture
-// session into one private MTLTexture. Each rendered frame is copied on the GPU
-// into one of four IOSurface-backed CVPixelBuffers, one per display slot, each
-// wrapped as an MTLTexture made from its IOSurface. Each slot has its own
-// registered FlutterTexture, and Flutter samples the IOSurface of the slot Dart
-// displays. A copy-free map has no private texture: MapLibre renders directly
-// into the buffers' textures. No pixels pass through CPU memory.
+// macOS and iOS render target. MapLibre renders on a GPU device that wraps the
+// plugin's MTLDevice and command queue, into a borrowed ring of one private
+// MTLTexture. Each rendered frame is copied on the GPU into one of four
+// IOSurface-backed CVPixelBuffers, one per display slot, each wrapped as an
+// MTLTexture made from its IOSurface. Each slot has its own registered
+// FlutterTexture, and Flutter samples the IOSurface of the slot Dart displays.
+// A copy-free map has no private texture: the ring is the buffers' textures,
+// in slot order. No pixels pass through CPU memory.
 //
 // The textures are made directly from the IOSurfaces rather than through a
 // CVMetalTextureCache: a cache keeps the IOSurfaces of released buffers alive
@@ -133,6 +134,7 @@ class MetalRenderTarget : public BufferRenderTarget {
     current_.Release();
     prepared_.Release();
     if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
+    if (gpu_device_ != MLN_HANDLE_NULL) mln_gpu_device_release(gpu_device_);
   }
 
   int slot_count() const override { return kBufferCount; }
@@ -223,19 +225,30 @@ class MetalRenderTarget : public BufferRenderTarget {
                     const mln_render_session_attach_options& options,
                     mln_render_session* out_session,
                     const AsyncCall& call) override {
+    if (gpu_device_ == MLN_HANDLE_NULL) {
+      mln_metal_device_descriptor device{};
+      device.size = sizeof(device);
+      device.device = (__bridge void*)device_;
+      device.command_queue = (__bridge void*)queue_;
+      mln_status status =
+          mln_gpu_device_wrap_metal(&device, &gpu_device_, call.diagnostic);
+      if (status != MLN_STATUS_OK) return status;
+    }
     Ring ring{};
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
-    return mln_map_attach_metal_borrowed_texture(
-        map, &descriptor, &options, out_session, call.completion,
-        call.diagnostic);
+    mln_render_target target = Target(size, &ring);
+    return mln_map_attach(map, &target, gpu_device_, &options, out_session,
+                          call.completion, call.diagnostic);
   }
 
+  // The replacement completes with the sync to wait for before the textures
+  // that the new ring doesn't have are reused. The textures aren't reused,
+  // and each frame's producer sync is MLN_GPU_SYNC_CPU_COMPLETE.
   mln_status SetTarget(mln_render_session session, const TargetSize& size,
                        const AsyncCall& call) override {
     Ring ring{};
-    mln_metal_borrowed_texture_descriptor descriptor = Descriptor(size, &ring);
-    return mln_render_session_set_metal_borrowed_texture_target(
-        session, &descriptor, call.completion, call.diagnostic);
+    mln_render_target target = Target(size, &ring);
+    return mln_render_session_set_target(session, &target, call.completion,
+                                         call.diagnostic);
   }
 
   bool RendersIntoBuffers() const override { return renders_into_buffers_; }
@@ -260,8 +273,8 @@ class MetalRenderTarget : public BufferRenderTarget {
                 toTexture:current_.textures[index]];
     [blit endEncoding];
     [commands commit];
-    // MapLibre's render_update has already waited for its own command
-    // buffer, so this wait covers the copy only.
+    // The frame's producer sync has been waited for, so this wait covers the
+    // copy only.
     [commands waitUntilCompleted];
     return commands.status == MTLCommandBufferStatusCompleted;
   }
@@ -302,6 +315,8 @@ class MetalRenderTarget : public BufferRenderTarget {
     prepared_.Release();
     if (fallback_ != nullptr) CVPixelBufferRelease(fallback_);
     fallback_ = nullptr;
+    if (gpu_device_ != MLN_HANDLE_NULL) mln_gpu_device_release(gpu_device_);
+    gpu_device_ = MLN_HANDLE_NULL;
   }
 
   void Unregister() override {
@@ -317,31 +332,35 @@ class MetalRenderTarget : public BufferRenderTarget {
  private:
   using Ring = std::array<mln_metal_borrowed_texture, kBufferCount>;
 
-  // The descriptor of the current set's ring. `ring` holds its entries, which
-  // the descriptor points to; the call copies them.
-  mln_metal_borrowed_texture_descriptor Descriptor(const TargetSize& size,
-                                                   Ring* ring) {
-    mln_metal_borrowed_texture_descriptor descriptor{};
-    descriptor.size = sizeof(descriptor);
-    descriptor.extent = size.extent;
-    descriptor.physical_width = size.physical_width;
-    descriptor.physical_height = size.physical_height;
+  // The target of the current set's ring. `ring` stores its entries, which
+  // the target points to; the call copies them.
+  mln_render_target Target(const TargetSize& size, Ring* ring) {
+    mln_render_target target{};
+    target.size = sizeof(target);
+    target.kind = MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES;
+    mln_metal_borrowed_textures_target& textures =
+        target.data.metal_borrowed_textures;
+    textures.logical_size = size.logical_size();
+    textures.physical_width = size.physical_width;
+    textures.physical_height = size.physical_height;
     if (renders_into_buffers_) {
       for (int i = 0; i < kBufferCount; ++i) {
         (*ring)[i].texture = (__bridge void*)current_.textures[i];
       }
-      descriptor.texture_count = kBufferCount;
+      textures.texture_count = kBufferCount;
     } else {
       (*ring)[0].texture = (__bridge void*)current_.render_texture;
-      descriptor.texture_count = 1;
+      textures.texture_count = 1;
     }
-    descriptor.textures = ring->data();
-    return descriptor;
+    textures.textures = ring->data();
+    return target;
   }
 
   const bool renders_into_buffers_;
   id<MTLDevice> device_;
   id<MTLCommandQueue> queue_;
+  // Wraps device_ and queue_; made at the first attachment.
+  mln_gpu_device gpu_device_ = MLN_HANDLE_NULL;
   NSObject<FlutterTextureRegistry>* registry_;
   const SlotTextures slots_;
   std::atomic<bool> logged_select_off_main_{false};

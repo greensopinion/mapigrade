@@ -1,7 +1,7 @@
 // Integration test for the third-party notices (third-party-notices spec,
 // requirement "Native notices in the license registry"; design D96 of the
-// third-party-notices change, third item, and D217 of the update-ffi-0-202610-3
-// change). It reads the license registry as showLicensePage does, with the
+// third-party-notices change, third item, D217 of the update-ffi-0-202610-3
+// change, and D227 and D248 of the port-ffi-gesture-recognizer change). It reads the license registry as showLicensePage does, with the
 // assets and the plugin registration of a real build, and checks it against
 // the notice files that the build contains. Run it on macOS, on the iPhone
 // simulator and on the Android emulator:
@@ -42,12 +42,9 @@ void main() {
         if (key.startsWith(noticePrefix)) key,
     ];
     final androidKeys = keys.where((key) => key.contains('/notices/android/'));
+    final darwinKeys = keys.where((key) => key.contains('/notices/darwin/'));
     expect(keys.where((key) => key.contains('/notices/common/')), isNotEmpty);
-    if (Platform.isAndroid) {
-      expect(androidKeys, isNotEmpty);
-    } else {
-      expect(androidKeys, isEmpty);
-    }
+    expect(Platform.isAndroid ? darwinKeys : androidKeys, isEmpty);
 
     final entries = await LicenseRegistry.licenses.toList();
     for (final key in keys) {
@@ -57,6 +54,14 @@ void main() {
       expect(
         entries.where((entry) => textOf(entry) == text),
         hasLength(1),
+        reason: key,
+      );
+      // An HTML notice is shown as its text (design D248).
+      expect(
+        RegExp(
+          r'</?(html|body|p|pre|div|h[1-6]|code|details|summary)(\s[^>]*)?>',
+        ).hasMatch(text),
+        isFalse,
         reason: key,
       );
     }

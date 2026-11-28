@@ -76,11 +76,31 @@ The core maps `MLN_STATUS_INVALID_ARGUMENT` from a style JSON parse to the same 
 
 The map thread copies `frame_projection` from each frame result into the published frame of its slot, beside the camera and the camera sequence number. The C ABI to Dart doesn't change in this change.
 
+### D227. Notices per platform family
+
+The notice files of the mln-rs build differ between targets: Cargo builds another set of crates for each target, so the Apple presets' `licenses/rust.md` differs from the Android preset's. The pinned commit's notices are `LICENSE`, `mln-rs.md`, `rust-std.html` and `rust.md`. The notices of the C++ MapLibre Native and its libraries (ICU, FastPFOR, nunicode, PMTiles) and of the Android NDK's C++ runtime are gone, because the libraries no longer contain that code.
+
+`scripts/copy_ffi_notices.sh` collects each notice for the Apple presets and for the Android presets, and fails when two presets of one family disagree. A notice that both families have with the same content goes to `notices/common/`. Otherwise the Apple presets' copy goes to `notices/darwin/`, which `pubspec.yaml` puts only in the macOS and iOS builds, and the Android presets' copy to `notices/android/`. While the lock names no release, the script and `ffi_notices_test.dart` read the installs of the pinned commit that `scripts/build_maplibre_ffi.sh` makes (D219).
+
+Alternative: one merged `rust.md` in `common/`. The script would have to rewrite cargo-about's output, so the committed file would equal neither preset's notice, and each platform's applications would list crates that they don't contain.
+
+### D248. HTML notices are copied as their text
+
+The FFI's notice of the Rust standard library, `rust-std.html`, is an HTML document of 1.5 MB, and Flutter's license page shows a notice's text as is, markup included. `scripts/copy_ffi_notices.sh` copies an HTML notice as its text, in a `.txt` file of the same base name, which `scripts/html_notice_to_text.py` writes: no markup, each heading, paragraph and list item on lines of its own, the text of `<pre>` elements unchanged, and character references decoded. `ffi_notices_test.dart` runs the same converter on the FFI's file and compares the result with the package's copy.
+
+Alternative: keep the HTML file and convert it when the license page reads it. Every application would contain the 1.5 MB HTML, and the package would parse HTML on the device each time the page opens.
+
+### D249. The map keeps feature state across style loads
+
+mln-rs removes the state of every feature when a style loads, where the C++ MapLibre Native kept it. The feature-query spec requires that feature state belongs to the map and is kept when the application gives the layer another style, and the integration test "state is kept when switching from a dark to a light style" failed on every platform. The map thread keeps the net state of the feature-state commands that the FFI accepted (`FeatureStateStore` in `src/core/feature_state.h`): a set merges the members of its JSON object, and a removal removes a key, a feature, a source layer or a source. When it sees a style load, it sets the kept state of each feature again before it renders, as it installs the overlays again (D201). These commands count like the application's, so a query waits for them. A source that the new style doesn't have is not reported.
+
+Alternatives: change the spec so that feature state belongs to the style, which would make applications set it again after each style load; or wait for mln-rs to keep it, with no date.
+
 ## Risks / Trade-offs
 
 - [The reshaped C API differs in ways the header diff doesn't show, as the 0.202610.3 port found for cleartext HTTP on Android] → The port runs every integration test on the Mac, the iPhone and the Pixel. A behavior change becomes a delta spec in this change.
 - [mln-rs renders differently from the C++ MapLibre Native, such as different anti-aliasing or a missing style feature] → The color check and the static alignment tests compare pixels; a difference that isn't a defect of ours goes in `docs/limitations.md` or `docs/upstream-fixes/`.
-- [Performance changes with mln-rs] → The frame-rate and alignment benchmarks on the Mac compare with `main`. A regression is reported to you before the change continues.
+- [Performance changes with mln-rs] → The frame-rate and alignment benchmarks compare `MapigradeLayer` with `main`, at the end of `add-mapigrade-map` (its tasks 8.4 and 8.5), so that one device session runs every benchmark. A regression is then found after the split and `MapigradeMap` are built. Neither change touches the layer's render path, so the comparison still attributes a regression to the FFI. A regression is reported to you before `add-mapigrade-map` is archived.
 - [The branch can't be released until the FFI releases] → Accepted; the release of both packages waits for it.
 - [Building the FFI locally now needs mise and its Rust toolchain] → Only contributors build the FFI; application developers get it from the release once there is one.
 - [The pinned commit can be force-pushed away or the FFI's `main` changes the C API again before a release] → The pin is a full commit hash on `main`, and the next pin is a port of its own.

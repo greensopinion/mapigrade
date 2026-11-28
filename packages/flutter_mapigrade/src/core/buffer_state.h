@@ -60,8 +60,22 @@ inline int64_t DisplayClockUs() {
 #endif
 }
 
+// Where a frame drew the map: the FFI's mln_frame_projection, which the C API
+// documents. `matrix` contains its columns x, y, z and w in order.
+struct FrameProjection {
+  std::array<double, 16> matrix{};
+  uint32_t clip_depth_range = 0;
+  double near_distance = 0;
+  double far_distance = 0;
+  double far_depth = 0;
+  bool globe = false;
+
+  bool operator==(const FrameProjection&) const = default;
+};
+
 // What a buffer holds: the frame id and the camera and size it was rendered
-// with, and the sequence number of the camera update it was rendered with.
+// with, the sequence number of the camera update it was rendered with, and
+// the projection it was drawn with (design D226).
 struct FrameInfo {
   uint64_t frame_id = 0;
   Camera camera;
@@ -71,6 +85,7 @@ struct FrameInfo {
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
   double scale_factor = 1;
+  FrameProjection projection;
 };
 
 class BufferState {
@@ -316,6 +331,12 @@ class BufferState {
   Slot slot(int index) {
     std::lock_guard lock(mutex_);
     return slots_[index];
+  }
+
+  // The frame in slot `index`, or the last frame that was in it.
+  FrameInfo info(int index) {
+    std::lock_guard lock(mutex_);
+    return info_[index];
   }
 
   // The most slots in use (rendering, queued, ready or held) at once.

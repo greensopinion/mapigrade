@@ -34,7 +34,8 @@ else()
 endif()
 if(NOT EXISTS ${FFI_XCFRAMEWORK_DEFAULT})
   message(FATAL_ERROR "No MapLibre Native FFI framework at ${FFI_XCFRAMEWORK_DEFAULT}; "
-                      "run scripts/fetch_ffi_release.sh")
+                      "run scripts/build_maplibre_ffi.sh, or scripts/fetch_ffi_release.sh "
+                      "when maplibre_ffi.lock names a release")
 endif()
 set(FFI_XCFRAMEWORK ${FFI_XCFRAMEWORK_DEFAULT} CACHE PATH
     "MaplibreNativeC.xcframework that the tests link against")

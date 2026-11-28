@@ -21,6 +21,10 @@ std::optional<mln_log_handler> log_handler;
 std::function<mln_status(const std::string&)> feature_state_hook;
 std::vector<uint32_t> event_types;
 std::vector<uint32_t> demand_flags;
+std::vector<std::string> frame_log;
+std::optional<mln_gpu_sync_kind> producer_sync_kind;
+std::function<void(mln_acquired_frame)> release_hook;
+std::vector<mln_frame_projection> rendered_projections;
 
 // The core's event handler, which RecordEvents forwards each batch to.
 struct EventHandler {
@@ -89,6 +93,35 @@ void Reset() {
   feature_state_hook = nullptr;
   event_types.clear();
   demand_flags.clear();
+  frame_log.clear();
+  producer_sync_kind.reset();
+  release_hook = nullptr;
+  rendered_projections.clear();
+}
+
+std::vector<std::string> FrameLog() {
+  std::lock_guard lock(mutex);
+  return frame_log;
+}
+
+void Note(std::string step) {
+  std::lock_guard lock(mutex);
+  frame_log.push_back(std::move(step));
+}
+
+void SetProducerSyncKind(mln_gpu_sync_kind kind) {
+  std::lock_guard lock(mutex);
+  producer_sync_kind = kind;
+}
+
+void SetReleaseHook(std::function<void(mln_acquired_frame)> hook) {
+  std::lock_guard lock(mutex);
+  release_hook = std::move(hook);
+}
+
+std::vector<mln_frame_projection> RenderedProjections() {
+  std::lock_guard lock(mutex);
+  return rendered_projections;
 }
 
 std::vector<uint32_t> DemandFlags() {
@@ -247,14 +280,59 @@ mln_status test_mln_runtime_set_event_handler(
   return status;
 }
 
-mln_status test_mln_render_session_request_frame(
+mln_status test_mln_render_session_demand_frame(
     mln_render_session session, const mln_frame_demand* demand,
     mln_diagnostic* out_diagnostic) {
   if (demand != nullptr) {
     std::lock_guard lock(mutex);
     demand_flags.push_back(demand->flags);
   }
-  return mln_render_session_request_frame(session, demand, out_diagnostic);
+  return mln_render_session_demand_frame(session, demand, out_diagnostic);
+}
+
+mln_status test_mln_render_session_drain_frame_results(
+    mln_render_session session, mln_render_frame_batch* out_batch,
+    mln_render_frame_batch_view* out_view, mln_diagnostic* out_diagnostic) {
+  mln_status status = mln_render_session_drain_frame_results(
+      session, out_batch, out_view, out_diagnostic);
+  if (status == MLN_STATUS_OK && out_view != nullptr) {
+    std::lock_guard lock(mutex);
+    const auto* base = reinterpret_cast<const char*>(out_view->results);
+    for (size_t i = 0; i < out_view->result_count; ++i) {
+      const auto& result = *reinterpret_cast<const mln_render_frame_result*>(
+          base + i * out_view->result_size);
+      if (result.disposition == MLN_RENDER_RESULT_RENDERED) {
+        rendered_projections.push_back(result.frame_projection);
+      }
+    }
+  }
+  return status;
+}
+
+mln_status test_mln_acquired_frame_get_producer_sync(
+    mln_acquired_frame frame, mln_gpu_sync* out_sync,
+    mln_diagnostic* out_diagnostic) {
+  mln_status status =
+      mln_acquired_frame_get_producer_sync(frame, out_sync, out_diagnostic);
+  std::lock_guard lock(mutex);
+  frame_log.push_back("producer_sync");
+  if (status == MLN_STATUS_OK && producer_sync_kind) {
+    out_sync->kind = *producer_sync_kind;
+  }
+  return status;
+}
+
+mln_status test_mln_acquired_frame_release(
+    mln_acquired_frame frame, const mln_gpu_sync* consumer_completion,
+    mln_diagnostic* out_diagnostic) {
+  std::function<void(mln_acquired_frame)> hook;
+  {
+    std::lock_guard lock(mutex);
+    frame_log.push_back("release");
+    hook = release_hook;
+  }
+  if (hook) hook(frame);
+  return mln_acquired_frame_release(frame, consumer_completion, out_diagnostic);
 }
 
 mln_status test_mln_runtime_create_map(mln_runtime runtime,
@@ -291,16 +369,17 @@ mln_status test_mln_log_set_callback(const mln_log_handler* handler,
   return mln_log_set_callback(handler, out_diagnostic);
 }
 
-mln_status test_mln_map_add_geo_json_source_data(
-    mln_map map, mln_buffer_view source_id, mln_geo_json_source_data data,
+mln_status test_mln_map_add_geo_json_source(
+    mln_map map, mln_buffer_view source_id,
+    const mln_geo_json_source_options* options, mln_buffer_view attribution,
     const mln_completion* completion, mln_diagnostic* out_diagnostic) {
-  RecordStyleCall("mln_map_add_geo_json_source_data", source_id);
-  return mln_map_add_geo_json_source_data(map, source_id, data, completion,
-                                         out_diagnostic);
+  RecordStyleCall("mln_map_add_geo_json_source", source_id);
+  return mln_map_add_geo_json_source(map, source_id, options, attribution,
+                                     completion, out_diagnostic);
 }
 
 mln_status test_mln_map_set_geo_json_source_data(
-    mln_map map, mln_buffer_view source_id, mln_geo_json_source_data data,
+    mln_map map, mln_buffer_view source_id, mln_buffer_view data,
     const mln_completion* completion, mln_diagnostic* out_diagnostic) {
   RecordStyleCall("mln_map_set_geo_json_source_data", source_id);
   return mln_map_set_geo_json_source_data(map, source_id, data, completion,
@@ -356,7 +435,8 @@ mln_status test_mln_map_set_feature_state(
   if (hook) {
     bool has_id =
         (selector->fields & MLN_FEATURE_STATE_SELECTOR_FEATURE_ID) != 0;
-    mln_status status = hook(has_id ? Text(selector->feature_id) : "");
+    mln_status status =
+        hook(has_id ? Text(selector->feature_id.data.string_value) : "");
     if (status != MLN_STATUS_OK) {
       SetDiagnostic(out_diagnostic, "set by the test");
       return status;

@@ -8,7 +8,7 @@ MapLibre Native FFI moved to mln-rs: commits `d62ed4c` and `79dee41` of maplibre
 - Rewrite `scripts/build_maplibre_ffi.sh` for the FFI's new build, which compiles mln-rs with Cargo and has new preset names, so that the example, the test harness and the demo build with a local FFI build on macOS, iOS and Android.
 - Port the native code to the C API of the pinned commit: the shared C++ core, the Metal glue, the Android glue and the native tests. The port keeps the package's behavior.
 - Carry `frame_projection` from each frame result to the frame that the map thread publishes, so that a later change can give it to Dart. Dart doesn't read it in this change.
-- Compare the change with `main` on the Mac in the frame-rate benchmark and the alignment benchmark, and record the results in `docs/benchmarks.md`.
+- The comparison with `main` in the frame-rate and alignment benchmarks runs at the end of `add-mapigrade-map`, with that change's benchmarks.
 
 Not in this change: the gesture recognizer's use, the frame projection in Dart, and terrain. `add-mapigrade-map` uses the first two. Terrain waits until the FFI renders terrain.
 
@@ -18,7 +18,7 @@ Not in this change: the gesture recognizer's use, the frame projection in Dart, 
 
 ### Modified Capabilities
 
-None expected: the port keeps the package's behavior. If the port finds a behavior that the new C API changes, as the 0.202610.3 port found for cleartext HTTP on Android, the change adds a delta spec for it.
+`third-party-notices`: the notices differ per platform family and come from the local FFI build while no release contains the pinned commit (D227). Otherwise none expected: the port keeps the package's behavior. If the port finds a behavior that the new C API changes, as the 0.202610.3 port found for cleartext HTTP on Android, the change adds a delta spec for it.
 
 ## Impact
 
@@ -26,5 +26,5 @@ None expected: the port keeps the package's behavior. If the port finds a behavi
 - `scripts/build_maplibre_ffi.sh` and the scripts it sources.
 - Native code: `packages/flutter_mapigrade/src/core/`, `android/src/main/cpp/map_texture_android.cpp`, `darwin/.../MapTextureMetal.mm`, and `test/native/`.
 - `packages/flutter_mapigrade/notices/`, if the pinned commit's notice files differ from those of 0.202610.3.
-- Documentation: `CONTRIBUTING.md` (building with a local FFI build, the pinned commit), `docs/benchmarks.md`, and `docs/packaging.md` where it names the FFI release.
+- Documentation: `CONTRIBUTING.md` (building with a local FFI build, the pinned commit), and `docs/packaging.md` where it names the FFI release.
 - Release: the `package-distribution` requirements that an application's build gets the FFI from the stated release can't be met while the pin names a commit. They are met again when the pin names an FFI release, before either package is released.

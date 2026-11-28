@@ -23,9 +23,9 @@
 
 namespace map_texture {
 
-// GeoJSON that map_texture_overlay_set_source() prepared; defined and
-// released in map_texture.h.
-struct PreparedGeoJson;
+// The GeoJSON text of an overlay source, which the map stores as long as the
+// source exists, to install it again after each style load (design D224).
+using GeoJsonText = std::shared_ptr<const std::string>;
 
 struct Camera {
   double latitude = 0;
@@ -64,13 +64,13 @@ struct FeatureStateTarget {
 
 // An overlay command (design D198): the overlay; for kOverlaySetSource and
 // kOverlayRemoveSource the source's index, and for the former its options and
-// prepared data; for kOverlaySetLayers its style layers as JSON objects, the
+// GeoJSON text; for kOverlaySetLayers its style layers as JSON objects, the
 // indexes of the sources they name, placement and order key.
 struct OverlayCommand {
   int64_t id = 0;
   int32_t source_index = 0;
   int32_t source_options = 0;
-  std::shared_ptr<PreparedGeoJson> data;
+  GeoJsonText data;
   std::vector<std::string> layers;
   std::vector<int32_t> layer_sources;
   Placement placement;
@@ -132,7 +132,7 @@ struct Command {
   }
   static Command OverlaySetSource(int64_t id, int32_t source_index,
                                   int32_t source_options,
-                                  std::shared_ptr<PreparedGeoJson> data) {
+                                  GeoJsonText data) {
     return {Kind::kOverlaySetSource, {}, {}, {}, {},
             {id, source_index, source_options, std::move(data), {}, {}, {}, {}}};
   }

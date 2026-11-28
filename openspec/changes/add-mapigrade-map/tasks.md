@@ -45,7 +45,9 @@
 - [ ] 8.1 Add an alignment benchmark for `MapigradeMap` that measures markers against the displayed frame during commanded camera motion, and run it on the Mac, the iPhone and the Pixel; verify that the drawn error is within 1 logical pixel, and add the results to `docs/benchmarks.md`
 - [ ] 8.2 Measure the latency from a pointer event to the first displayed frame that includes its camera movement, on the iPhone and the Pixel; add the results to `docs/benchmarks.md`
 - [ ] 8.3 Measure the frame rate of a pan with 100 and 1,000 markers, against the same pan with no markers, on the Mac, the iPhone and the Pixel; add the results to `docs/benchmarks.md`
-- [ ] 8.4 Present the results of tasks 8.1 to 8.3 to the user; record the decisions in this task
+- [ ] 8.4 Run the frame-rate and alignment benchmarks of `MapigradeLayer` on the Mac, `main` against this branch, 3 alternating runs of each, and add a section to `docs/benchmarks.md`, for the move to the mln-rs-based FFI (moved from task 6.1 of `port-ffi-gesture-recognizer`); verify that the section states the builds, the conditions and the ranges over 3 runs
+- [ ] 8.5 Present the Mac results of task 8.4 to the user, and ask whether the iPhones and the Pixel run those benchmarks; record the decision in this task (moved from task 6.2 of `port-ffi-gesture-recognizer`)
+- [ ] 8.6 Present the results of tasks 8.1 to 8.3 to the user; record the decisions in this task
 
 ## 9. Manual checks on devices
 

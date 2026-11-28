@@ -6,7 +6,7 @@ This guide is for developers who build, test and measure Mapigrade. The [README]
 
 ```
 packages/flutter_mapigrade/              Flutter plugin (macOS, iOS, Android)
-  maplibre_ffi.lock                      the pinned FFI release, commit and presets
+  maplibre_ffi.lock                      the pinned FFI commit, its release if any, and presets
 packages/demo/                           demo app: a gallery of showcases on your devices (Android,
                                          iOS, macOS): a Tour de France Femmes flyover with styles
                                          and frame rates, and a feature inspector
@@ -14,7 +14,7 @@ packages/test_harness/                   test harness app: integration tests, be
 docs/                                    architecture, packaging, measurements, limitations, concept
                                          and follow-up documents
 pubspec.yaml                             pub workspace of the Dart packages
-scripts/build_maplibre_ffi.sh            builds MapLibre Native FFI locally (optional), and on Android its verifier AAR
+scripts/build_maplibre_ffi.sh            builds MapLibre Native FFI locally (required while no release contains the pinned commit)
 third_party/                             fetched FFI release, and the local FFI checkout and build output (gitignored)
 ```
 
@@ -24,16 +24,16 @@ third_party/                             fetched FFI release, and the local FFI 
 - Xcode 26.6 with the macOS and iOS SDKs, and an iOS simulator runtime
 - Flutter 3.47.5 with macOS desktop support
 - For an iPhone: iOS 15.0 or later, an Apple account added in Xcode (Settings > Accounts) for automatic signing, and the device paired with Xcode. The test harness's iOS project uses development team `2J9XYBV642`; change it in Xcode (Runner > Signing & Capabilities) for another team
-- For a local FFI build only (optional, see Build MapLibre Native FFI): git and [mise](https://mise.jdx.dev) (`brew install mise`); the build script installs CMake, Ninja, Rust and cargo-about through mise
+- For a local FFI build (see Build MapLibre Native FFI): git and [mise](https://mise.jdx.dev) (`brew install mise`). The build script installs the tools that the FFI's mise configuration pins, including Rust, CMake and Ninja; you don't need them on your path
 - CMake for the C++ unit tests (`brew install cmake`)
-- For Android: the Android SDK with NDK 30.0.16248370 (Android Studio's SDK Manager, or `sdkmanager "ndk;30.0.16248370"`). The FFI build and Gradle find the SDK through `ANDROID_HOME`; the FFI build uses `~/Library/Android/sdk` when it isn't set. The FFI build installs the Rust target `aarch64-linux-android` and the JDK for its Gradle build through mise
+- For Android: the Android SDK with NDK 30.0.16248370 (Android Studio's SDK Manager, or `sdkmanager "ndk;30.0.16248370"`). The FFI build and Gradle find the SDK through `ANDROID_HOME`; the FFI build uses `~/Library/Android/sdk` when it isn't set, and installs the NDK and CMake versions that the FFI pins into it
 - For an Android device: `arm64-v8a`, `armeabi-v7a` or `x86_64`, Android 10 (API 29) or later, with USB debugging turned on and this Mac authorized on the device. For the emulator: an arm64 system image of API 29 or later; we used `sdk_gphone16k_arm64` (API 37, 16 KB pages)
 
 ## Pinned versions
 
 | Component | Version |
 | --- | --- |
-| MapLibre Native FFI | release 0.202610.3, commit `6c065d9613438bea56ad67d706c4893df14a2b32`: its `MaplibreNativeC.xcframework.zip` and runtime AAR; a local build uses the presets `macos-arm64-metal`, `ios-arm64-metal`, `ios-simulator-arm64-metal` and `android-arm64-egl` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
+| MapLibre Native FFI | commit `4371ff607e0bd22115d390de27d72a54987cc6c7` on `main`, which no release contains, so every build needs a local FFI build of the presets `macos-arm64`, `ios-arm64`, `ios-simulator-arm64` and `android-arm64` (`packages/flutter_mapigrade/maplibre_ffi.lock`) |
 | Flutter | 3.47.5 stable (framework `6a19cca564`, engine `ab598368592d`), Dart 3.13.4 |
 | Xcode | 26.6 (17F113), macOS and iOS SDKs; deployment targets macOS 14.3 and iOS 15.0 |
 | Android NDK | 30.0.16248370, the version that the FFI's `mise.toml` pins; `minSdk` 24 (the map needs API level 29), ABIs `arm64-v8a`, `armeabi-v7a` and `x86_64` |
@@ -59,9 +59,10 @@ flutter run --release -d <Android id>     # Android device or emulator, API leve
 
 ```sh
 # C++ unit tests for the core, on the real FFI with headless Metal targets.
-# They link the pinned release's framework, which scripts/fetch_ffi_release.sh
-# unpacks, or a local FFI build if there is one.
-scripts/fetch_ffi_release.sh
+# They link a local FFI build if there is one, or else the pinned release's
+# framework, which scripts/fetch_ffi_release.sh unpacks when the lock names a
+# release.
+scripts/build_maplibre_ffi.sh macos-arm64
 cd packages/flutter_mapigrade
 cmake -S test/native -B build/native-tests
 cmake --build build/native-tests
@@ -75,9 +76,11 @@ flutter test
 cd ../test_harness
 flutter test integration_test -d macos
 flutter test integration_test -d <simulator id>
-# On an iPhone, flutter test can't start the app over a wireless connection; use flutter drive.
+# On an iPhone, use flutter drive in profile mode, one test file per run: flutter test can't
+# start the app over a wireless connection, and since Xcode 27.2 a debug build doesn't start on
+# the iPhone. Profile builds have no asserts, so "Polyline layer outside a map layer" fails.
 # Keep the iPhone unlocked with the screen on during the run.
-flutter drive -d <iPhone id> --driver=test_driver/integration_test.dart \
+flutter drive --profile -d <iPhone id> --driver=test_driver/integration_test.dart \
   --target=integration_test/map_texture_test.dart
 # Android device or emulator. Keep the device unlocked with the screen on during the run.
 flutter test integration_test -d <Android id>
@@ -112,47 +115,32 @@ To publish the video, edit `README.md` on github.com, drag `packages/demo/build/
 
 ## Build MapLibre Native FFI
 
-The package and the repository's apps use the FFI release in `packages/flutter_mapigrade/maplibre_ffi.lock`, so you don't need a local build. Build one to test an FFI commit that has no release, after setting `MAPLIBRE_FFI_COMMIT` in the lock file. While it exists, the apps of the repository use it in place of the release on every platform; delete `third_party/maplibre-native-ffi/` and the manifest cache (below) to use the release again.
+`packages/flutter_mapigrade/maplibre_ffi.lock` pins an FFI commit that no release contains, so the package and the repository's apps build only with a local FFI build. Release-mode builds, which take the FFI from a release through Swift Package Manager or Maven Central, fail with a message that names `scripts/build_maplibre_ffi.sh`. Once the lock names a release, a local build is optional: build one to test an FFI commit that has no release, after setting `MAPLIBRE_FFI_COMMIT` in the lock file. While it exists, the apps of the repository use it in place of the release on every platform; delete `third_party/maplibre-native-ffi/` and the manifest cache (below) to use the release again.
 
-`scripts/build_maplibre_ffi.sh` builds the FFI at the commit and presets pinned in `packages/flutter_mapigrade/maplibre_ffi.lock`: the Apple presets in `MAPLIBRE_FFI_PRESETS` and the Android presets in `MAPLIBRE_FFI_ANDROID_PRESETS`. A preset name as argument builds only that preset.
+```sh
+scripts/build_maplibre_ffi.sh                  # all presets, about 10 minutes
+scripts/build_maplibre_ffi.sh ios-arm64        # one preset
+```
+
+`scripts/build_maplibre_ffi.sh` builds the FFI at the commit and presets pinned in `packages/flutter_mapigrade/maplibre_ffi.lock`: the Apple presets in `MAPLIBRE_FFI_PRESETS` and the Android presets in `MAPLIBRE_FFI_ANDROID_PRESETS`. A preset name as argument builds only that preset; an unknown name fails with the list of known ones.
 
 The script:
 
 1. clones `https://github.com/maplibre/maplibre-native-ffi.git` into `third_party/maplibre-native-ffi-src/` and checks out the pinned commit;
-2. applies the local patches in `scripts/patches/maplibre-native-ffi-*.patch`, if any (currently none; the last one, needed by copy-free maps, was merged upstream as [maplibre-native-ffi#807](https://github.com/maplibre/maplibre-native-ffi/pull/807) and is in the pinned commit);
-3. runs the FFI repository's `.mise/bin/sync-submodules`, which fetches MapLibre Native and the vendor submodules the build needs and applies the FFI's patches;
-4. for Android presets, checks that the pinned NDK is installed under `ANDROID_HOME`, adds the Rust target, and runs the FFI's `.mise/bin/sync-rustls-platform-verifier`, which provides the patched `rustls-platform-verifier` source;
-5. for each preset, runs `cmake --preset <preset>` and `cmake --build … --target install`, with CMake, Ninja, Rust and cargo-about installed by `mise exec` at the versions the FFI repository's `mise.toml` pins, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
-6. for Android presets, builds the FFI's patched `rustls-platform-verifier` Android component with the FFI's Gradle build, and installs its AAR with a POM into a file-based Maven repository;
-7. combines the `Frameworks/MaplibreNativeC.framework` that the install of each Apple preset creates into `MaplibreNativeC.xcframework` for the Flutter plugin; Android presets are not part of it;
-8. deletes Swift Package Manager's manifest cache, `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*`.
+2. trusts the checkout's mise configuration and runs `mise bootstrap --yes --only tools`, which installs the tools that the FFI pins, including Rust and its targets, CMake and Ninja. It leaves out the rest of the FFI's bootstrap, which installs Homebrew packages for bindings that this build doesn't use;
+3. for each preset, runs the FFI's `mise run build <preset>` (`mise -E android run build <preset>` for an Android preset), which syncs the FFI's submodules, compiles mln-rs with Cargo and installs the library, and copies the install tree into `third_party/maplibre-native-ffi/<preset>/`;
+4. combines the `Frameworks/MaplibreNativeC.framework` that the install of each Apple preset creates into `MaplibreNativeC.xcframework` for the Flutter plugin; Android presets are not part of it;
+5. deletes Swift Package Manager's manifest cache, `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*`.
 
 `darwin/flutter_mapigrade/Package.swift` uses `MaplibreNativeC.xcframework` when the symlink `Frameworks/MaplibreNativeC.xcframework` resolves, and otherwise downloads the xcframework zip that `packages/flutter_mapigrade/maplibre_ffi.lock` names. Swift Package Manager caches its choice by the manifest's contents, so after you remove or rename `third_party/maplibre-native-ffi/MaplibreNativeC.xcframework`, delete `~/Library/Caches/org.swift.swiftpm/manifests/manifest.db*` before the next build. Otherwise the build fails with "does not contain a binary artifact". After you change the zip's URL or checksum in the lock file, run `scripts/update_ffi_pins.sh`, which writes them into `Package.swift`.
 
 Output in `third_party/maplibre-native-ffi/` (gitignored):
 
 - `<preset>/lib/libmaplibre-native-c.dylib`, `<preset>/include/maplibre_native_c.h` and `<preset>/share/maplibre-native-c/` (the FFI license and third-party notices)
-- `android-arm64-egl/lib/libmaplibre-native-c.so` (16 KB segment alignment), with the same `include/` and `share/maplibre-native-c/` as the Apple presets; the plugin's Gradle build links it and packages it in the APK
-- `android-maven/org/maplibre/nativeffi/rustls-platform-verifier-android/<version>/`, the verifier's AAR and POM, where `<version>` is the first 12 characters of the FFI commit; the AAR's classes are in `org.maplibre.nativeffi.internal.rustlsplatformverifier`, where the FFI's patch moves them. The plugin's Gradle build adds the repository and depends on the AAR, and `mln_android_init` needs it at run time
-- `MaplibreNativeC.xcframework` with three slices: `macos-arm64` (a versioned framework, install name `@rpath/MaplibreNativeC.framework/Versions/A/MaplibreNativeC`, minimum macOS 14.3), `ios-arm64` and `ios-arm64-simulator` (flat frameworks, install name `@rpath/MaplibreNativeC.framework/MaplibreNativeC`, minimum iOS 15.0); each has the headers, a module map with the submodule `Plugin`, `PrivacyInfo.xcprivacy` and the FFI's license notices, as the FFI's CMake install creates them
+- `android-arm64/lib/libmaplibre-native-c.so`, with the same `include/` and `share/maplibre-native-c/` as the Apple presets; the plugin's Gradle build links it and packages it in the APK
+- `MaplibreNativeC.xcframework` with three slices: `macos-arm64`, `ios-arm64` and `ios-arm64-simulator`
 
-Measured on an Apple M2 Max, macOS 26.6.2, Xcode 26.6, from a clean checkout:
-
-- `macos-arm64-metal` (2026-10-09): total wall time 239 s (clone, submodules, mise tool install, configure and build); configure and build alone 123 s
-- `ios-arm64-metal` (2026-10-09): configure and build 88 s; `ios-simulator-arm64-metal`: 96 s
-- `libmaplibre-native-c.dylib`: about 13 MB per preset (macOS 13,242,488 bytes, iOS 13,153,664 bytes, simulator 13,242,264 bytes), arm64 only
-
-### Check the build with the upstream example
-
-```sh
-cd third_party/maplibre-native-ffi-src/examples/swift-map
-export PKG_CONFIG_PATH="$PWD/../../build/macos-arm64-metal/install/share/pkgconfig"
-swift build --product swift-map --scratch-path .build/macos-arm64-metal \
-  -Xlinker -rpath -Xlinker "$PWD/../../build/macos-arm64-metal/install/lib"
-.build/macos-arm64-metal/debug/swift-map borrowed-texture
-```
-
-The window shows a map of San Francisco.
+Measured on an Apple M2 Max, macOS 26.6.2, Xcode 26.6, from an empty `third_party/` (2026-11-27): the four presets took about 10 minutes, including the clone and the tool installation. Configure and build: `macos-arm64` 159 s, `ios-arm64` 131 s, `ios-simulator-arm64` 137 s, `android-arm64` 160 s. `libmaplibre-native-c.dylib` is about 13 MB per Apple preset, and `libmaplibre-native-c.so` 15 MB.
 
 ## Update the FFI
 
@@ -164,4 +152,4 @@ To update MapLibre Native FFI to a new upstream release:
 4. Run `scripts/copy_ffi_notices.sh`, which copies the notices of the tarballs into `packages/flutter_mapigrade/notices/`.
 5. Run the tests. If you keep a local build (below), run `scripts/build_maplibre_ffi.sh` to rebuild it at the new commit.
 
-`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of the fetched release. The script copies every notice file of the tarballs, and the package lists the notice files that an app's build contains, so a release that adds or removes a notice file needs no change to the code or the tests. Review such a change in the diff of `notices/`: check that a removed notice's component is gone from the release's libraries, and what an added notice covers. To give a new notice's entry a name other than its file name, add the file to `noticeNames` in `lib/src/notices/third_party_notices.dart`.
+`packages/flutter_mapigrade/notices/` is committed. Commit it with every change to `packages/flutter_mapigrade/maplibre_ffi.lock`, so that the review of an FFI update shows its changes to the notices. The package's test `test/notices/ffi_notices_test.dart` fails when the committed notices differ from those of the fetched release, or, while the lock names no release, of the local build. A notice that the Apple and the Android presets have with the same content is in `notices/common/`; otherwise the Apple presets' copy is in `notices/darwin/`, which only macOS and iOS builds contain, and the Android presets' copy in `notices/android/`, which only Android builds contain. The script copies an HTML notice, such as `rust-std.html`, as its text in a `.txt` file, which `scripts/html_notice_to_text.py` writes, so that the license page shows no markup. The script copies every notice file of the tarballs, and the package lists the notice files that an app's build contains, so a release that adds or removes a notice file needs no change to the code or the tests. Review such a change in the diff of `notices/`: check that a removed notice's component is gone from the release's libraries, and what an added notice covers. To give a new notice's entry a name other than its file name, add the file to `noticeNames` in `lib/src/notices/third_party_notices.dart`.

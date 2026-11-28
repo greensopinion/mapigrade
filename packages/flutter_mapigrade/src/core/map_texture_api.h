@@ -257,12 +257,12 @@ MAP_TEXTURE_EXPORT int32_t map_texture_remove_feature_state(
 // added, so an option change on an index removes the source and adds it
 // again, with the overlay's layers.
 #define MAP_TEXTURE_SOURCE_LINE_METRICS 1
-// Prepares the UTF-8 GeoJSON `geojson` of `length` bytes on the calling
-// thread, with the options `source_options`, and gives it to the overlay's
-// source `source_index`. Returns MAP_TEXTURE_ERROR_INVALID_ARGUMENT for
-// GeoJSON the map can't use, a negative index or unknown options; then
-// `*out_error`, if non-null, is the message, to free with
-// map_texture_string_free().
+// Copies the UTF-8 GeoJSON `geojson` of `length` bytes and gives it, with the
+// options `source_options`, to the overlay's source `source_index`. MapLibre
+// prepares it in the background, and reports GeoJSON it can't use as
+// MAP_TEXTURE_EVENT_RENDER_ERROR. Returns MAP_TEXTURE_ERROR_INVALID_ARGUMENT
+// for empty GeoJSON, a negative index or unknown options; then `*out_error`,
+// if non-null, is the message, to free with map_texture_string_free().
 MAP_TEXTURE_EXPORT int32_t map_texture_overlay_set_source(
     int64_t handle, int64_t overlay_id, int32_t source_index,
     int32_t source_options, const uint8_t* geojson, int64_t length,

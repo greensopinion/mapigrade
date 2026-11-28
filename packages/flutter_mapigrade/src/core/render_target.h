@@ -6,15 +6,19 @@
 //   display slot, and registers one Flutter texture per slot.
 //   Dart chooses the slot to display, and Flutter's raster thread takes its
 //   buffer through MapTexture::Present(slot).
-//   A copy-free map, the default, renders directly into the free buffer, made
-//   the session's target with set_target before each render.
-//   Otherwise the session renders into one render texture, and each frame is
-//   copied on the GPU into a free buffer.
+//   A copy-free map, the default, renders into a borrowed ring of the buffers'
+//   textures, and the session chooses a free buffer for each frame.
+//   Otherwise the session renders into a borrowed ring of one render texture,
+//   and each frame is copied on the GPU into a free buffer.
 // - A surface target (Android) renders into a surface whose buffers the
 //   plugin receives as images, one per frame. The session presents each frame
 //   itself, so there is no copy and no Present(). Display slots refer to the
 //   images, and all slots share one Flutter texture: when Dart chooses a
 //   frame, the target gives its image to Flutter.
+//
+// Each target renders through a GPU device that wraps the platform's own: the
+// plugin's Metal device and command queue, or the map thread's EGL context
+// (designs D221 and D222 of the port-ffi-gesture-recognizer change).
 //
 // The core in this directory has no platform dependencies. Each platform
 // implements one kind of target and the five functions at the end of this
@@ -40,6 +44,8 @@ struct TargetSize {
   uint32_t physical_width = 0;
   uint32_t physical_height = 0;
   mln_logical_extent extent{};
+
+  mln_logical_size logical_size() const { return {extent.width, extent.height}; }
 };
 
 // The arguments that every asynchronous FFI call of a target takes: the
@@ -68,15 +74,18 @@ class RenderTarget {
   virtual void WillResize(const TargetSize& size) {}
 
   // Map thread. Starts the attachment of a render session to `map` with
-  // `options`; the map thread services the session until `call.completion`
-  // runs.
+  // `options`, on the target's GPU device, which the target makes at the
+  // first attachment; the map thread services the session until
+  // `call.completion` runs. The map's scale factor must equal
+  // `size.extent.scale_factor`.
   virtual mln_status Attach(mln_map map, const TargetSize& size,
                             const mln_render_session_attach_options& options,
                             mln_render_session* out_session,
                             const AsyncCall& call) = 0;
 
   // Map thread. Starts the replacement of the session's target after a
-  // resize, ordered with the session's other driver work.
+  // resize that keeps the scale factor, ordered with the session's other
+  // driver work.
   virtual mln_status SetTarget(mln_render_session session,
                                const TargetSize& size,
                                const AsyncCall& call) = 0;
@@ -121,6 +130,19 @@ class BufferRenderTarget : public RenderTarget {
   // into the buffers.
   virtual bool CopyToBuffer(int index) = 0;
 
+  // The kinds of producer sync that the target can wait for, as
+  // mln_render_session_attach_options.producer_sync_kinds.
+  virtual mln_gpu_sync_kind_flags ProducerSyncKinds() const {
+    return MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE;
+  }
+
+  // Map thread. Waits until the GPU work of `sync`, an acquired frame's
+  // producer sync, has finished, so that Flutter never reads a texture that
+  // the GPU is still writing. Returns false if it can't.
+  virtual bool WaitForProducerSync(const mln_gpu_sync& sync) {
+    return sync.kind == MLN_GPU_SYNC_CPU_COMPLETE;
+  }
+
   // Whether the session renders directly into the display buffers (a
   // copy-free map), and no copy is needed. The session's target is then a
   // borrowed ring of the current set's buffers in slot order, and the session
@@ -145,7 +167,8 @@ class BufferRenderTarget : public RenderTarget {
   // after a resize (see MapTexture::MaybeNotifyAfterResize).
   virtual void FrameAvailable() = 0;
 
-  // Map thread, after the session is destroyed. Releases all buffers.
+  // Map thread, after the session is destroyed. Releases all buffers and the
+  // GPU device.
   virtual void ReleaseBuffersLocked() = 0;
 };
 
@@ -180,7 +203,8 @@ class SurfaceRenderTarget : public RenderTarget {
   // under memory pressure.
   virtual bool CanPresent() const = 0;
 
-  // Map thread, after the session is destroyed. Releases the surfaces.
+  // Map thread, after the session is destroyed. Releases the surfaces, the
+  // EGL context and the GPU device.
   virtual void ReleaseSurfaces() = 0;
 };
 

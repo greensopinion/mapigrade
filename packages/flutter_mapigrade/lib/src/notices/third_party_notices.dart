@@ -5,8 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// The asset key prefix of the package's notice files, which
-/// `scripts/copy_ffi_notices.sh` copies from the FFI release. `pubspec.yaml`
-/// leaves the files in `notices/android/` out of the other platforms' builds.
+/// `scripts/copy_ffi_notices.sh` copies from the FFI. `pubspec.yaml` puts the
+/// files in `notices/darwin/` only in the macOS and iOS builds, and the files in
+/// `notices/android/` only in the Android build.
 const noticeKeyPrefix = 'packages/flutter_mapigrade/notices/';
 
 /// The package names of the license entries of known notice files, by file
@@ -14,13 +15,9 @@ const noticeKeyPrefix = 'packages/flutter_mapigrade/notices/';
 /// gets its file name without the extension, after the known ones.
 const noticeNames = {
   'maplibre-native-ffi.txt': 'MapLibre Native FFI',
-  'maplibre-native.md': 'MapLibre Native',
-  'icu.txt': 'ICU',
-  'fastpfor.txt': 'FastPFOR',
-  'nunicode.txt': 'nunicode',
-  'pmtiles.txt': 'PMTiles',
+  'mln-rs.md': 'mln-rs',
   'rust.md': 'MapLibre Native FFI Rust crates',
-  'cxx-runtime.txt': 'Android NDK C++ runtime',
+  'rust-std.txt': 'Rust standard library',
 };
 
 /// The package name of the license entry of the notice file at [key].

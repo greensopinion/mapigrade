@@ -2,19 +2,23 @@
 # publish-readiness change). Shell syntax: scripts/build_maplibre_ffi.sh and
 # the other scripts source it, and android/build.gradle.kts reads it.
 #
-# The upstream release whose artifacts the package uses.
-MAPLIBRE_FFI_VERSION=0.202610.3
+# The upstream release whose artifacts the package uses. Empty while the pin is
+# a commit that no release contains (design D219 of the
+# port-ffi-gesture-recognizer change): builds then need
+# scripts/build_maplibre_ffi.sh, and neither package can be released.
+MAPLIBRE_FFI_VERSION=
 # The xcframework zip of that release and its `swift package compute-checksum`
 # value. scripts/update_ffi_pins.sh writes both into
-# darwin/flutter_mapigrade/Package.swift.
-MAPLIBRE_FFI_XCFRAMEWORK_URL=https://github.com/maplibre/maplibre-native-ffi/releases/download/v0.202610.3/MaplibreNativeC.xcframework.zip
-MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=985d9005e34adc3823a61fe56629d056337432303f3e65d539f8284522c31a7d
+# darwin/flutter_mapigrade/Package.swift. Empty without a release.
+MAPLIBRE_FFI_XCFRAMEWORK_URL=
+MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM=
 MAPLIBRE_FFI_REPO=https://github.com/maplibre/maplibre-native-ffi.git
-# The commit of the release's tag, which artifact.json in the release's
-# tarballs states as gitSha. scripts/build_maplibre_ffi.sh builds it locally.
-MAPLIBRE_FFI_COMMIT=6c065d9613438bea56ad67d706c4893df14a2b32
+# The commit that scripts/build_maplibre_ffi.sh builds locally. With a release,
+# it is the commit of the release's tag, which artifact.json in the release's
+# tarballs states as gitSha.
+MAPLIBRE_FFI_COMMIT=4371ff607e0bd22115d390de27d72a54987cc6c7
 # The presets that make up MaplibreNativeC.xcframework, one slice each.
-MAPLIBRE_FFI_PRESETS="macos-arm64-metal ios-arm64-metal ios-simulator-arm64-metal"
+MAPLIBRE_FFI_PRESETS="macos-arm64 ios-arm64 ios-simulator-arm64"
 # The Android presets. Each is installed on its own and is not part of the
 # xcframework.
-MAPLIBRE_FFI_ANDROID_PRESETS="android-arm64-egl"
+MAPLIBRE_FFI_ANDROID_PRESETS="android-arm64"

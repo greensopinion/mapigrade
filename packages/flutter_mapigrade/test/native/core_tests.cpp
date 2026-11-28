@@ -11,6 +11,7 @@
 
 #include "buffer_state.h"
 #include "command_queue.h"
+#include "feature_state.h"
 #include "overlay.h"
 #include "projection.h"
 #include "render_gate.h"
@@ -1000,6 +1001,63 @@ void OverlayWithoutLayersGetsNoStep() {
   CHECK(PlanLayers(kStyle, overlays).steps.empty());
 }
 
+// The feature state that the map sets again after a style load (design D249
+// of the port-ffi-gesture-recognizer change).
+
+std::vector<std::pair<std::string, std::string>> StateEntries(
+    const map_texture::FeatureStateStore& store) {
+  std::vector<std::pair<std::string, std::string>> entries;
+  for (const auto& [feature, state] : store.Entries()) {
+    entries.emplace_back(feature.source_id + "/" + feature.source_layer_id +
+                             "/" + feature.feature_id,
+                         state);
+  }
+  return entries;
+}
+
+void FeatureStateMergesKeys() {
+  map_texture::FeatureStateStore store;
+  CHECK(store.Set({"s", "", "1"}, R"({"selected": true, "n": 1})"));
+  CHECK(store.Set({"s", "", "1"}, R"({"n": {"a": [1, 2]}})"));
+  CHECK(store.Set({"s", "roads", "1"}, R"({"x": "y"})"));
+  using Entries = std::vector<std::pair<std::string, std::string>>;
+  CHECK((StateEntries(store) ==
+         Entries{{"s//1", R"({"n":{"a": [1, 2]},"selected":true})"},
+                 {"s/roads/1", R"({"x":"y"})"}}));
+  // Not an object: nothing changes.
+  CHECK(!store.Set({"s", "", "1"}, "[1]"));
+  CHECK(!store.Set({"s", "", "1"}, R"({"a": })"));
+  CHECK(StateEntries(store).size() == 2);
+  // An empty object adds no feature.
+  CHECK(store.Set({"t", "", "2"}, "{}"));
+  CHECK(StateEntries(store).size() == 2);
+}
+
+void FeatureStateRemovals() {
+  map_texture::FeatureStateStore store;
+  store.Set({"s", "", "1"}, R"({"a": 1, "b": 2})");
+  store.Set({"s", "", "2"}, R"({"a": 1})");
+  store.Set({"s", "l1", "3"}, R"({"a": 1})");
+  store.Set({"s", "l2", "4"}, R"({"a": 1})");
+  store.Set({"t", "", "5"}, R"({"a": 1})");
+  using Entries = std::vector<std::pair<std::string, std::string>>;
+  // One key, and the last key removes the feature.
+  store.Remove("s", std::nullopt, "1", "a");
+  store.Remove("s", std::nullopt, "2", "a");
+  CHECK((StateEntries(store) == Entries{{"s//1", R"({"b":2})"},
+                                        {"s/l1/3", R"({"a":1})"},
+                                        {"s/l2/4", R"({"a":1})"},
+                                        {"t//5", R"({"a":1})"}}));
+  // A source layer, then a whole source.
+  store.Remove("s", "l1", std::nullopt, std::nullopt);
+  CHECK(StateEntries(store).size() == 3);
+  store.Remove("s", std::nullopt, std::nullopt, std::nullopt);
+  CHECK((StateEntries(store) == Entries{{"t//5", R"({"a":1})"}}));
+  // A whole feature.
+  store.Remove("t", std::nullopt, "5", std::nullopt);
+  CHECK(StateEntries(store).empty());
+}
+
 // The layer JSON array of map_texture_overlay_set_layers().
 
 void JsonObjectArrayIsSplitIntoObjects() {
@@ -1109,6 +1167,8 @@ int main() {
        MissingBelowLayerIsPlacedOnTopAndReported},
       {"OverlayWithoutLayersGetsNoStep", OverlayWithoutLayersGetsNoStep},
       {"JsonObjectArrayIsSplitIntoObjects", JsonObjectArrayIsSplitIntoObjects},
+      {"FeatureStateMergesKeys", FeatureStateMergesKeys},
+      {"FeatureStateRemovals", FeatureStateRemovals},
       {"JsonStringMemberIsFound", JsonStringMemberIsFound},
   };
   for (const auto& [name, test] : tests) {

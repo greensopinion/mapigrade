@@ -20,6 +20,7 @@
 
 #include "buffer_state.h"
 #include "command_queue.h"
+#include "feature_state.h"
 #include "map_texture_api.h"
 #include "mln.h"
 #include "overlay.h"
@@ -28,17 +29,6 @@
 #include "render_target.h"
 
 namespace map_texture {
-
-// Owns a prepared GeoJSON handle. The map keeps it as long as its overlay
-// exists, so the source can be added again after each style load.
-struct PreparedGeoJson {
-  explicit PreparedGeoJson(mln_geo_json_source_data handle) : handle(handle) {}
-  PreparedGeoJson(const PreparedGeoJson&) = delete;
-  PreparedGeoJson& operator=(const PreparedGeoJson&) = delete;
-  ~PreparedGeoJson() { mln_geo_json_source_data_release(handle); }
-
-  const mln_geo_json_source_data handle;
-};
 
 // One entry of mln_map_list_style_layers(), for tests.
 struct StyleLayerInfo {
@@ -107,7 +97,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // layers, placement and order key, and installs it in the loaded style and
   // again in every style loaded later (D201).
   void OverlaySetSource(int64_t id, int32_t source_index, int32_t source_options,
-                        std::shared_ptr<PreparedGeoJson> data);
+                        GeoJsonText data);
   void OverlayRemoveSource(int64_t id, int32_t source_index);
   // `layers` are JSON objects with the IDs OverlayLayerId(id, n), in order;
   // `layer_sources` are the indexes of the overlay's sources they name.
@@ -186,6 +176,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // For tests: the view of the last frame the session rendered, or nothing
   // before the first.
   std::optional<RenderedView> LastRenderedViewForTesting();
+  // For tests: the frame in `slot`, or the last frame that was in it.
+  FrameInfo SlotFrameForTesting(int slot) { return buffers_.info(slot); }
   // For tests, any thread: the style's layers in style order, as
   // mln_map_list_style_layers() reports them after every command accepted so
   // far, or nothing if the query doesn't complete within five seconds.
@@ -222,8 +214,18 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void ServiceUntil(const std::function<bool()>& done);
   void ApplyReduceMemoryUse();
   // Map thread: submits the set or remove of a kSetFeatureState or
-  // kRemoveFeatureState command, and reports a failure as a render error.
+  // kRemoveFeatureState command, reports a failure as a render error, and
+  // stores the net state of the accepted commands in feature_states_.
   void ApplyFeatureState(const Command& command);
+  // Map thread: submits the set of `state`, or without it the removal, of the
+  // state of `feature`, counted for the queries that wait for feature state.
+  // With `restore`, a source that the style doesn't have isn't reported.
+  // Returns whether the FFI accepted the call.
+  bool SubmitFeatureState(const FeatureStateTarget& feature,
+                          const std::string* state, bool restore);
+  // Map thread, after a style load: sets the stored state of every feature
+  // again (design D249).
+  void RestoreFeatureStates();
   // Map thread: updates the overlay state from a kOverlay* command.
   void ApplyOverlayCommand(Command& command);
   // Map thread: notes a style load, reconciles the overlays with a layer list
@@ -245,9 +247,12 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void RemoveOverlaySource(const std::string& id);
   struct Overlay;
   struct OverlaySource;
-  // Map thread: adds the source `index` of the overlay `id` from its data,
-  // after removing it when it is submitted.
+  // Map thread: adds the source `index` of the overlay `id` with its options
+  // and sends its GeoJSON text, after removing it when it is submitted.
   void AddOverlaySource(int64_t id, int32_t index, OverlaySource& source);
+  // Map thread: sends the source's GeoJSON text to its source in the style.
+  void SendOverlaySourceData(const std::string& source_id,
+                             OverlaySource& source);
   // Map thread: adds every source of the overlay that isn't submitted, and
   // with `readd_changed_options`, which needs the overlay's layers removed
   // from the style, every source whose options changed since it was submitted.
@@ -257,6 +262,13 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Map thread: attaches a render session to the map at size_; returns
   // whether the attachment completed.
   bool AttachSession();
+  // Map thread: detaches the session without releasing the target's buffers
+  // or surfaces, so that a new session can be attached.
+  void DetachSession();
+  // Map thread: a session renders at the scale factor of its map at the
+  // attachment, so a new scale factor detaches the session, resizes the map
+  // and attaches a new session at size_.
+  void ReattachAtNewScale();
   // Map thread: if the session lost its target, replaces it with a new one;
   // returns whether it did.
   bool RecoverLostTarget();
@@ -300,13 +312,16 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   void RunQueries();
   void EmitQueryResult(int64_t request_id, int32_t status,
                        const std::string& message);
-  // Map thread: acquires and releases the rendered frames, so that their GPU
-  // writes have completed.
-  void AcquireAndReleaseFrame();
+  // Map thread, for a buffer target: acquires the newest rendered frame (the
+  // session drops older ones) and waits for its producer sync (design D223).
+  // Returns the null handle if there is none, or if the wait failed, after
+  // releasing it.
+  mln_acquired_frame AcquireNewestFrame(BufferRenderTarget& target);
+  // Map thread: gives an acquired frame back to the session, if not null.
+  void ReleaseFrame(mln_acquired_frame frame);
   // Map thread, for a target that renders into the buffers: acquires the
-  // newest rendered frame and holds it while its display slot isn't free, and
-  // releases older ones. Returns the slot, marked rendering, or -1 if no
-  // frame could be held.
+  // newest rendered frame and holds it while its display slot isn't free.
+  // Returns the slot, marked rendering, or -1 if no frame could be held.
   int HoldRenderedFrame(BufferRenderTarget& target);
   // Map thread: releases the held frames of the slots that are free, so that
   // the session may render into them again, or with `all`, every held frame,
@@ -340,10 +355,9 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   bool RenderAhead();
   void MaybeNotifyAfterResize();
 
-  // The process-global MapLibre log callback. MapLibre reports a failed glyph
-  // load only as an error record, not as a map event; the record is passed to
-  // the map whose thread logged it, as a load failure.
-  static bool OnLogRecord(void* user_data, mln_log_severity severity,
+  // The process-global MapLibre log callback. The map passes a failed glyph
+  // load's error record to the map whose thread logged it, as a load failure.
+  static void OnLogRecord(void* user_data, mln_log_severity severity,
                           mln_log_event event, int64_t code,
                           mln_buffer_view message);
 
@@ -409,6 +423,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   mln_map map_ = MLN_HANDLE_NULL;
   mln_render_session session_ = MLN_HANDLE_NULL;
   TargetSize size_{};
+  // The map's scale factor, at which its sessions render.
+  double map_scale_factor_ = 1;
   Viewport viewport_{};
   uint64_t next_frame_id_ = 1;
   // The view of the last frame the session rendered, published or not: the
@@ -436,6 +452,8 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   std::atomic<int64_t> feature_state_completed_{0};
   std::atomic<uint64_t> feature_state_generation_{0};
   uint64_t rendered_update_generation_ = 0;
+  // The net feature state of the commands that the FFI accepted, map thread.
+  FeatureStateStore feature_states_;
 
   // The overlays (design D198), map thread. Each is what Dart asked for, and
   // what the map thread last submitted for it: the versions count the
@@ -443,7 +461,7 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // being installed. `submitted` is cleared by a style load, which removes
   // every runtime source.
   struct OverlaySource {
-    std::shared_ptr<PreparedGeoJson> data;
+    GeoJsonText data;
     int32_t options = 0;
     uint64_t data_version = 0;
     uint64_t data_submitted = 0;
@@ -505,9 +523,6 @@ class MapTexture : public std::enable_shared_from_this<MapTexture> {
   // Whether the last frame asked for another without a map update, as during
   // a paint transition, so the next demand renders unconditionally.
   bool repaint_wanted_ = false;
-  // Whether the Metal ring's frames are acquired to wait for the producer's
-  // GPU writes; false after acquisition reported UNSUPPORTED.
-  bool acquire_frames_ = true;
 
   // The map snapshot generation that each camera command published, with the
   // camera's sequence number and when Dart set it. Written by the command's

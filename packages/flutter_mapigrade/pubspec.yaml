@@ -55,9 +55,13 @@ flutter:
 
   # Third-party notices of MapLibre Native FFI, copied by
   # scripts/copy_ffi_notices.sh (design D91 and D93, and D217 of the
-  # update-ffi-0-202610-3 change). The Android notices are for libraries that
-  # only the Android build links.
+  # update-ffi-0-202610-3 change, D227 of the port-ffi-gesture-recognizer
+  # change). The darwin and android notices differ between the macOS and iOS
+  # builds and the Android build, or are for libraries that only one of them
+  # links.
   assets:
     - path: notices/common/
+    - path: notices/darwin/
+      platforms: [ios, macos]
     - path: notices/android/
       platforms: [android]

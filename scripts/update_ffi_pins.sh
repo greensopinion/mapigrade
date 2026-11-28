@@ -4,7 +4,9 @@
 # packages/flutter_mapigrade/darwin/flutter_mapigrade/Package.swift (design D99
 # and D102 of the publish-readiness change). Run it after changing either value
 # in the lock file; packages/flutter_mapigrade/test/ffi_pins_test.dart fails
-# while the two files disagree.
+# while the two files disagree. While the lock names no release, both values
+# are empty, and Package.swift then fails without a local FFI build, with a
+# message that names scripts/build_maplibre_ffi.sh.
 #
 #   scripts/update_ffi_pins.sh
 #
@@ -16,17 +18,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo_root/packages/flutter_mapigrade/maplibre_ffi.lock"
 package_swift="$repo_root/packages/flutter_mapigrade/darwin/flutter_mapigrade/Package.swift"
 
-if [[ ! "$MAPLIBRE_FFI_XCFRAMEWORK_URL" =~ ^https://[^\"\|]+$ ]]; then
+if [[ -z "$MAPLIBRE_FFI_XCFRAMEWORK_URL" && -z "$MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM" ]]; then
+  echo "The lock file names no FFI release; writing an empty URL and checksum"
+elif [[ ! "$MAPLIBRE_FFI_XCFRAMEWORK_URL" =~ ^https://[^\"\|]+$ ]]; then
   echo "MAPLIBRE_FFI_XCFRAMEWORK_URL in the lock file isn't an https URL: '$MAPLIBRE_FFI_XCFRAMEWORK_URL'" >&2
   exit 1
-fi
-if [[ ! "$MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]; then
+elif [[ ! "$MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]; then
   echo "MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM in the lock file isn't 64 hex digits: '$MAPLIBRE_FFI_XCFRAMEWORK_CHECKSUM'" >&2
   exit 1
 fi
 
-# Package.swift has one `url:` and one `checksum:` argument, those of the remote
-# binary target.
+# Package.swift has one `url:` and one `checksum:` argument, those of the
+# release.
 for key in url checksum; do
   count=$(grep -cE "^ *$key: \"[^\"]*\"" "$package_swift" || true)
   if [[ "$count" != 1 ]]; then

@@ -36,7 +36,7 @@ Not in this change: terrain, the globe, the free camera, axonometric projection,
 
 - `packages/mapigrade/lib/`: the widget, controller, frame projection, markers, input adapter and events.
 - Native code: the C ABI gains functions for gesture input and ticks, camera commands with completions, constraints and the frame projection; the map thread publishes the frame projection.
-- `packages/test_harness/`: integration tests and benchmarks for `MapigradeMap`.
+- `packages/test_harness/`: integration tests and benchmarks for `MapigradeMap`, and the comparison of `MapigradeLayer` with `main` that `port-ffi-gesture-recognizer` deferred to this change.
 - `packages/demo/`: the new showcase and one sentence in its README.
 - Documentation: the `mapigrade` README, `docs/architecture.md` (camera owned by MapLibre, input path), `docs/limitations.md` (no terrain occlusion of markers, no web), `docs/benchmarks.md`.
 - Dependencies: none new; `mapigrade` already depends on `latlong2`.

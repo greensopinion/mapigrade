@@ -68,6 +68,24 @@ std::vector<uint32_t> EventTypes();
 // Reset(), in order.
 std::vector<uint32_t> DemandFlags();
 
+// The steps of the frame path since the last Reset(), in order:
+// "producer_sync" for each producer sync that the core read, "release" for
+// each frame that it released, and the steps that the test adds with Note().
+std::vector<std::string> FrameLog();
+void Note(std::string step);
+
+// Makes mln_acquired_frame_get_producer_sync report a sync of `kind` in place
+// of the session's, until Reset().
+void SetProducerSyncKind(mln_gpu_sync_kind kind);
+
+// Calls `hook` with each frame that the core releases, before the release,
+// until Reset().
+void SetReleaseHook(std::function<void(mln_acquired_frame)> hook);
+
+// The frame projections of the rendered frame results that the core drained
+// since the last Reset(), in order.
+std::vector<mln_frame_projection> RenderedProjections();
+
 // The asset path of the last runtime created, or "<null>" for none.
 std::string LastAssetPath();
 

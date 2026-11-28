@@ -1,6 +1,6 @@
 // Tests the license entries of the third-party notices (design D96 of the
-// third-party-notices change, first item, and D217 of the update-ffi-0-202610-3
-// change): one entry with the file's text for each file in notices/, and the
+// third-party-notices change, first item, D217 of the update-ffi-0-202610-3
+// change, and D227 of the port-ffi-gesture-recognizer change): one entry with the file's text for each file in notices/, and the
 // plugin and asset entries in pubspec.yaml. The entries are read through a test
 // AssetBundle, because `flutter test` bundles every asset and doesn't apply the
 // platform filter. The tests name no notice file, so an FFI update that adds or
@@ -40,24 +40,29 @@ class PackageFilesBundle extends AssetBundle {
 }
 
 /// The files in `notices/<directory>/`, as paths relative to the package
-/// directory.
+/// directory; none when the directory doesn't exist.
 List<String> noticeFiles(String directory) =>
-    Directory(p.join('notices', directory))
-        .listSync()
-        .whereType<File>()
-        .map((file) => p.posix.joinAll(p.split(file.path)))
-        .toList()
+    !Directory(p.join('notices', directory)).existsSync()
+          ? []
+          : Directory(p.join('notices', directory))
+                .listSync()
+                .whereType<File>()
+                .map((file) => p.posix.joinAll(p.split(file.path)))
+                .toList()
       ..sort();
 
-/// The asset keys of an Android build ([android]) or a macOS or iOS build,
-/// which `pubspec.yaml` leaves the files in `notices/android/` out of.
+/// The notice files of an Android build ([android]) or a macOS or iOS build:
+/// `pubspec.yaml` puts the files in `notices/android/` only in the former, and
+/// those in `notices/darwin/` only in the latter.
+List<String> buildFiles({required bool android}) => [
+  ...noticeFiles('common'),
+  ...noticeFiles(android ? 'android' : 'darwin'),
+];
+
+/// The asset keys of an Android build ([android]) or a macOS or iOS build.
 Future<List<String>> Function(AssetBundle) buildKeys({required bool android}) =>
     (_) async => [
-      for (final file in [
-        ...noticeFiles('common'),
-        if (android) ...noticeFiles('android'),
-      ])
-        '$keyPrefix$file',
+      for (final file in buildFiles(android: android)) '$keyPrefix$file',
     ];
 
 Future<Map<String, String>> entryTexts({required bool android}) async {
@@ -79,12 +84,12 @@ void main() {
     );
   });
 
-  test('notices/ has common and Android notice files', () {
+  test('notices/ has common notice files, and only per-platform directories '
+      'beside them', () {
     expect(noticeFiles('common'), isNotEmpty);
-    expect(noticeFiles('android'), isNotEmpty);
     expect(
       Directory('notices').listSync().map((entry) => p.basename(entry.path)),
-      unorderedEquals(['common', 'android']),
+      everyElement(isIn(['common', 'darwin', 'android'])),
     );
   });
 
@@ -92,10 +97,7 @@ void main() {
     final platform = android ? 'Android' : 'macOS and iOS';
     test('applications on $platform list each notice file of their build '
         'once, with its text', () async {
-      final files = [
-        ...noticeFiles('common'),
-        if (android) ...noticeFiles('android'),
-      ];
+      final files = buildFiles(android: android);
       final texts = await entryTexts(android: android);
 
       expect(texts, hasLength(files.length));
@@ -159,6 +161,10 @@ void main() {
       for (final asset in flutter['assets'] as YamlList)
         '${(asset as YamlMap)['path']} ${asset['platforms'] ?? 'all'}',
     ];
-    expect(assets, ['notices/common/ all', 'notices/android/ [android]']);
+    expect(assets, [
+      'notices/common/ all',
+      'notices/darwin/ [ios, macos]',
+      'notices/android/ [android]',
+    ]);
   });
 }

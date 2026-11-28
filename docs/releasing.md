@@ -6,7 +6,7 @@ This runbook publishes a new version of `flutter_mapigrade` to pub.dev. We publi
 
 Check that `main` can be released:
 
-- `packages/flutter_mapigrade/maplibre_ffi.lock` pins a MapLibre Native FFI release, not `unstable-native-snapshot`. To update the pin, follow "Update the FFI" in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- `packages/flutter_mapigrade/maplibre_ffi.lock` pins a MapLibre Native FFI release, not `unstable-native-snapshot` or a commit without a release; `test/ffi_pins_test.dart` fails while it names no release. To update the pin, follow "Update the FFI" in [CONTRIBUTING.md](../CONTRIBUTING.md).
 - `packages/flutter_mapigrade/pubspec.yaml` has no `publish_to: none`.
 - The last pull request that changed the plugin's native code passed the `consumer-build` workflow. That workflow builds an application from the published archive of the package.
 
@@ -16,7 +16,7 @@ On `main`:
 
 1. Choose the version. While the version is below 1.0.0, increase the minor version for a change that breaks the API and the patch version for everything else.
 2. Set `version` in `packages/flutter_mapigrade/pubspec.yaml`.
-3. In `packages/flutter_mapigrade/CHANGELOG.md`, rename `## Unreleased` to the version. Keep only what a user of the package needs to know: changes to the API, to its behavior, to supported platforms and versions, and to the FFI version. Leave out internal changes.
+3. In `packages/flutter_mapigrade/CHANGELOG.md`, rename `## Unreleased` to the version, and replace `<release>` with the FFI release that the lock pins. Keep only what a user of the package needs to know: changes to the API, to its behavior, to supported platforms and versions, and to the FFI version. Leave out internal changes.
 4. Commit and push.
 
 ## Check the package
