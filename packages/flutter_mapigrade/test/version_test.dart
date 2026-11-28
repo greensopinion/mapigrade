@@ -1,6 +1,6 @@
 // Both packages have the same version, and flutter_mapigrade depends on
 // mapigrade with the range from that version to the next patch version (design
-// D231 of the split-mapigrade-package change), or on exactly that version for a
+// D231 of the split-mapigrade-package change), or to the next prerelease for a
 // prerelease (design D254 of the apple-only-beta-release change).
 // scripts/set_version.sh sets the three values.
 import 'dart:io';
@@ -12,13 +12,28 @@ import 'package:yaml/yaml.dart';
 YamlMap _pubspec(String path) =>
     loadYaml(File(path).readAsStringSync()) as YamlMap;
 
+/// [version] with the last part of its prerelease increased, such as
+/// 0.2.0-beta.2 for 0.2.0-beta.1.
+Version _nextPreRelease(Version version) {
+  final parts = [...version.preRelease];
+  parts.last = (parts.last as int) + 1;
+  return Version(
+    version.major,
+    version.minor,
+    version.patch,
+    pre: parts.join('.'),
+  );
+}
+
 void main() {
   test('the versions and the constraint on mapigrade agree', () {
     final pubspec = _pubspec('pubspec.yaml');
     final version = Version.parse('${pubspec['version']}');
-    final VersionConstraint expectedConstraint = version.isPreRelease
-        ? version
-        : VersionRange(min: version, includeMin: true, max: version.nextPatch);
+    final expectedConstraint = VersionRange(
+      min: version,
+      includeMin: true,
+      max: version.isPreRelease ? _nextPreRelease(version) : version.nextPatch,
+    );
     final mapigradeVersion =
         '${_pubspec('../mapigrade/pubspec.yaml')['version']}';
     final constraint = '${(pubspec['dependencies'] as YamlMap)['mapigrade']}';
